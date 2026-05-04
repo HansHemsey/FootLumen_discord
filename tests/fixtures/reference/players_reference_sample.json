@@ -1,0 +1,53 @@
+{
+  "meta": {
+    "source": "sample extracted from docs/api_football_players_reference.json"
+  },
+  "competitions": [
+    {
+      "target": {
+        "key": "ligue_1",
+        "display_name": "Ligue 1",
+        "country": "France",
+        "category": "club",
+        "season": 2025,
+        "expected_league_id": 61
+      },
+      "teams": [
+        {
+          "team": {
+            "competition_key": "ligue_1",
+            "competition": "Ligue 1",
+            "competition_category": "club",
+            "league_id": 61,
+            "league_name": "Ligue 1",
+            "season": 2025,
+            "team_id": 77,
+            "team": "Angers",
+            "country": "France",
+            "national": false,
+            "logo": "https://media.api-sports.io/football/teams/77.png"
+          },
+          "players": [
+            {
+              "player_id": 455243,
+              "name": "A. Moussaoui",
+              "age": 19,
+              "number": 17,
+              "position": "Attacker",
+              "photo": "https://media.api-sports.io/football/players/455243.png"
+            },
+            {
+              "player_id": 191289,
+              "name": "A. Sbai",
+              "age": 25,
+              "number": 7,
+              "position": "Attacker",
+              "photo": "https://media.api-sports.io/football/players/191289.png"
+            }
+          ],
+          "fetched_at": "2026-05-02T09:08:48.809310+00:00"
+        }
+      ]
+    }
+  ]
+}

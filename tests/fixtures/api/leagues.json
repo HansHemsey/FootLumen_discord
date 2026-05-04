@@ -1,0 +1,34 @@
+{
+  "response": [
+    {
+      "league": {
+        "id": 61,
+        "name": "Ligue 1",
+        "type": "League",
+        "logo": "https://media.api-sports.io/football/leagues/61.png"
+      },
+      "country": {
+        "name": "France",
+        "code": "FR",
+        "flag": "https://media.api-sports.io/flags/fr.svg"
+      },
+      "seasons": [
+        {
+          "year": 2025,
+          "start": "2025-08-17",
+          "end": "2026-05-16",
+          "current": true,
+          "coverage": {
+            "standings": true,
+            "players": true,
+            "odds": true
+          }
+        }
+      ]
+    }
+  ],
+  "paging": {
+    "current": 1,
+    "total": 1
+  }
+}

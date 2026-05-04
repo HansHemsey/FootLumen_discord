@@ -1,0 +1,33 @@
+{
+  "response": [
+    {
+      "team": {
+        "id": 77,
+        "name": "Angers",
+        "logo": "https://media.api-sports.io/football/teams/77.png"
+      },
+      "players": [
+        {
+          "id": 455243,
+          "name": "A. Moussaoui",
+          "age": 19,
+          "number": 17,
+          "position": "Attacker",
+          "photo": "https://media.api-sports.io/football/players/455243.png"
+        },
+        {
+          "id": 191289,
+          "name": "A. Sbai",
+          "age": 25,
+          "number": 7,
+          "position": "Attacker",
+          "photo": "https://media.api-sports.io/football/players/191289.png"
+        }
+      ]
+    }
+  ],
+  "paging": {
+    "current": 1,
+    "total": 1
+  }
+}

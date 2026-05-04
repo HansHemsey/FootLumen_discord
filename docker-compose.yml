@@ -1,0 +1,20 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: football-predictor:local
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: sqlite:////app/data/football_predictor.db
+      API_FOOTBALL_REFERENCE_PATH: docs/api_football_reference.json
+      API_FOOTBALL_PLAYERS_REFERENCE_PATH: docs/api_football_players_reference.json
+      API_FOOTBALL_PLAYERS_CACHE_PATH: docs/api_football_players_cache.json
+      API_FOOTBALL_RAW_SNAPSHOT_DIR: data/raw/api_football
+      COMPETITIONS_CONFIG_PATH: config/competitions.example.yaml
+    volumes:
+      - ./data:/app/data
+      - ./docs:/app/docs:ro
+      - ./config:/app/config:ro
+    command: ["doctor"]

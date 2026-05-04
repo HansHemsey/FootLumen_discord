@@ -1,0 +1,49 @@
+{
+  "response": [
+    {
+      "fixture": {
+        "id": 1387977,
+        "timezone": "UTC",
+        "date": "2026-05-03T15:15:00+00:00",
+        "timestamp": 1777821300,
+        "venue": {
+          "id": 636,
+          "name": "Stade de l'Abbe Deschamps",
+          "city": "Auxerre"
+        },
+        "status": {
+          "long": "Not Started",
+          "short": "NS",
+          "elapsed": null
+        }
+      },
+      "league": {
+        "id": 61,
+        "name": "Ligue 1",
+        "country": "France",
+        "season": 2025,
+        "round": "Regular Season - 32"
+      },
+      "teams": {
+        "home": {
+          "id": 108,
+          "name": "Auxerre",
+          "winner": null
+        },
+        "away": {
+          "id": 77,
+          "name": "Angers",
+          "winner": null
+        }
+      },
+      "goals": {
+        "home": null,
+        "away": null
+      }
+    }
+  ],
+  "paging": {
+    "current": 1,
+    "total": 1
+  }
+}

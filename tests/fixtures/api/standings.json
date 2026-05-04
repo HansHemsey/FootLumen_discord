@@ -1,0 +1,92 @@
+{
+  "response": [
+    {
+      "league": {
+        "id": 61,
+        "name": "Ligue 1",
+        "country": "France",
+        "season": 2025,
+        "standings": [
+          [
+            {
+              "rank": 1,
+              "team": {
+                "id": 85,
+                "name": "Paris Saint Germain"
+              },
+              "points": 69,
+              "goalsDiff": 43,
+              "group": "Ligue 1 ",
+              "form": "WWLWW",
+              "status": "same",
+              "description": "Champions League",
+              "all": {
+                "played": 30,
+                "win": 22,
+                "draw": 3,
+                "lose": 5,
+                "goals": {
+                  "for": 68,
+                  "against": 25
+                }
+              },
+              "home": {
+                "played": 15,
+                "win": 12,
+                "draw": 1,
+                "lose": 2
+              },
+              "away": {
+                "played": 15,
+                "win": 10,
+                "draw": 2,
+                "lose": 3
+              },
+              "update": "2026-05-02T00:00:00+00:00"
+            },
+            {
+              "rank": 13,
+              "team": {
+                "id": 77,
+                "name": "Angers"
+              },
+              "points": 34,
+              "goalsDiff": -17,
+              "group": "Ligue 1 ",
+              "form": "LDLDL",
+              "status": "same",
+              "description": null,
+              "all": {
+                "played": 31,
+                "win": 9,
+                "draw": 7,
+                "lose": 15,
+                "goals": {
+                  "for": 29,
+                  "against": 46
+                }
+              },
+              "home": {
+                "played": 16,
+                "win": 6,
+                "draw": 4,
+                "lose": 6
+              },
+              "away": {
+                "played": 15,
+                "win": 3,
+                "draw": 3,
+                "lose": 9
+              },
+              "update": "2026-05-02T00:00:00+00:00"
+            }
+          ]
+        ]
+      }
+    }
+  ],
+  "paging": {
+    "current": 1,
+    "total": 1
+  }
+}

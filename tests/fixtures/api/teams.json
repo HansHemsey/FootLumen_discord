@@ -1,0 +1,48 @@
+{
+  "response": [
+    {
+      "team": {
+        "id": 77,
+        "name": "Angers",
+        "code": "ANG",
+        "country": "France",
+        "founded": 1919,
+        "national": false,
+        "logo": "https://media.api-sports.io/football/teams/77.png"
+      },
+      "venue": {
+        "id": 634,
+        "name": "Stade Raymond-Kopa",
+        "address": "73, boulevard Pierre de Coubertin",
+        "city": "Angers",
+        "capacity": 19000,
+        "surface": "grass",
+        "image": "https://media.api-sports.io/football/venues/634.png"
+      }
+    },
+    {
+      "team": {
+        "id": 108,
+        "name": "Auxerre",
+        "code": "AUX",
+        "country": "France",
+        "founded": 1905,
+        "national": false,
+        "logo": "https://media.api-sports.io/football/teams/108.png"
+      },
+      "venue": {
+        "id": 636,
+        "name": "Stade de l'Abbe Deschamps",
+        "address": "Route de Vaux",
+        "city": "Auxerre",
+        "capacity": 23467,
+        "surface": "grass",
+        "image": "https://media.api-sports.io/football/venues/636.png"
+      }
+    }
+  ],
+  "paging": {
+    "current": 1,
+    "total": 1
+  }
+}

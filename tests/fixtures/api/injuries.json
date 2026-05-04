@@ -1,0 +1,67 @@
+{
+  "get": "injuries",
+  "parameters": {
+    "fixture": "1378969"
+  },
+  "errors": [],
+  "results": 2,
+  "paging": {
+    "current": 1,
+    "total": 1
+  },
+  "response": [
+    {
+      "player": {
+        "id": 792,
+        "name": "J. Kluivert",
+        "photo": "https://media.api-sports.io/football/players/792.png",
+        "type": "Missing Fixture",
+        "reason": "Knock"
+      },
+      "team": {
+        "id": 35,
+        "name": "Bournemouth",
+        "logo": "https://media.api-sports.io/football/teams/35.png"
+      },
+      "fixture": {
+        "id": 1378969,
+        "timezone": "UTC",
+        "date": "2025-08-15T19:00:00+00:00",
+        "timestamp": 1755284400
+      },
+      "league": {
+        "id": 39,
+        "season": 2025,
+        "name": "Premier League",
+        "country": "England"
+      }
+    },
+    {
+      "player": {
+        "id": -700001,
+        "name": "Synthetic Unknown Player",
+        "photo": null,
+        "type": "Questionable",
+        "reason": "Synthetic test-only absence"
+      },
+      "team": {
+        "id": 40,
+        "name": "Liverpool",
+        "logo": "https://media.api-sports.io/football/teams/40.png"
+      },
+      "fixture": {
+        "id": 1378969,
+        "timezone": "UTC",
+        "date": "2025-08-15T19:00:00+00:00",
+        "timestamp": 1755284400
+      },
+      "league": {
+        "id": 39,
+        "season": 2025,
+        "name": "Premier League",
+        "country": "England"
+      },
+      "synthetic_test_data": true
+    }
+  ]
+}

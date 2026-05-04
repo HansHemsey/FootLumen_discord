@@ -1,0 +1,84 @@
+{
+  "get": "fixtures/lineups",
+  "parameters": {
+    "fixture": "1378969"
+  },
+  "errors": [],
+  "results": 2,
+  "paging": {
+    "current": 1,
+    "total": 1
+  },
+  "response": [
+    {
+      "team": {
+        "id": 40,
+        "name": "Liverpool",
+        "logo": "https://media.api-sports.io/football/teams/40.png"
+      },
+      "coach": {
+        "id": null,
+        "name": "A. Slot",
+        "photo": null
+      },
+      "formation": "4-2-3-1",
+      "startXI": [
+        {
+          "player": {
+            "id": 2864,
+            "name": "A. Isak",
+            "number": 9,
+            "pos": "F",
+            "grid": "4:2"
+          }
+        }
+      ],
+      "substitutes": [
+        {
+          "player": {
+            "id": 30410,
+            "name": "F. Chiesa",
+            "number": 14,
+            "pos": "F",
+            "grid": null
+          }
+        }
+      ]
+    },
+    {
+      "team": {
+        "id": 35,
+        "name": "Bournemouth",
+        "logo": "https://media.api-sports.io/football/teams/35.png"
+      },
+      "coach": {
+        "id": null,
+        "name": "Andoni Iraola",
+        "photo": null
+      },
+      "formation": "4-3-3",
+      "startXI": [
+        {
+          "player": {
+            "id": 792,
+            "name": "J. Kluivert",
+            "number": 19,
+            "pos": "F",
+            "grid": "4:3"
+          }
+        }
+      ],
+      "substitutes": [
+        {
+          "player": {
+            "id": null,
+            "name": "Unnamed substitute from API payload",
+            "number": null,
+            "pos": null,
+            "grid": null
+          }
+        }
+      ]
+    }
+  ]
+}

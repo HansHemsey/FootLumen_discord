@@ -1,0 +1,50 @@
+{
+  "response": [
+    {
+      "fixture": {
+        "id": 1387797,
+        "referee": "Abdelatif Kherradji, France",
+        "timezone": "UTC",
+        "date": "2025-11-09T16:15:00+00:00",
+        "timestamp": 1762704900,
+        "venue": {
+          "id": 634,
+          "name": "Stade Raymond-Kopa",
+          "city": "Angers"
+        },
+        "status": {
+          "long": "Match Finished",
+          "short": "FT",
+          "elapsed": 90
+        }
+      },
+      "league": {
+        "id": 61,
+        "name": "Ligue 1",
+        "country": "France",
+        "season": 2025,
+        "round": "Regular Season - 12"
+      },
+      "teams": {
+        "home": {
+          "id": 77,
+          "name": "Angers",
+          "winner": true
+        },
+        "away": {
+          "id": 108,
+          "name": "Auxerre",
+          "winner": false
+        }
+      },
+      "goals": {
+        "home": 2,
+        "away": 0
+      }
+    }
+  ],
+  "paging": {
+    "current": 1,
+    "total": 1
+  }
+}

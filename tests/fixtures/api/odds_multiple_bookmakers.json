@@ -1,0 +1,80 @@
+{
+  "get": "odds",
+  "parameters": {
+    "fixture": "1378969",
+    "bet": "1",
+    "page": "1"
+  },
+  "errors": [],
+  "results": 1,
+  "paging": {
+    "current": 1,
+    "total": 1
+  },
+  "response": [
+    {
+      "league": {
+        "id": 39,
+        "name": "Premier League",
+        "country": "England",
+        "season": 2025
+      },
+      "fixture": {
+        "id": 1378969,
+        "timezone": "UTC",
+        "date": "2025-08-15T19:00:00+00:00",
+        "timestamp": 1755284400
+      },
+      "bookmakers": [
+        {
+          "id": 8,
+          "name": "Bet365",
+          "bets": [
+            {
+              "id": 1,
+              "name": "Match Winner",
+              "values": [
+                {
+                  "value": "Home",
+                  "odd": "1.80"
+                },
+                {
+                  "value": "Draw",
+                  "odd": "3.80"
+                },
+                {
+                  "value": "Away",
+                  "odd": "4.50"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "name": "Pinnacle",
+          "bets": [
+            {
+              "id": 1,
+              "name": "Match Winner",
+              "values": [
+                {
+                  "value": "1",
+                  "odd": "1.85"
+                },
+                {
+                  "value": "X",
+                  "odd": "3.70"
+                },
+                {
+                  "value": "2",
+                  "odd": "4.40"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "get": "predictions",
+  "parameters": {
+    "fixture": "1378969"
+  },
+  "errors": [],
+  "results": 1,
+  "paging": {
+    "current": 1,
+    "total": 1
+  },
+  "response": [
+    {
+      "predictions": {
+        "winner": {
+          "id": 40,
+          "name": "Liverpool",
+          "comment": "Win or draw"
+        },
+        "win_or_draw": true,
+        "under_over": null,
+        "goals": {
+          "home": "-2.5",
+          "away": "-1.5"
+        },
+        "advice": "Double chance : Liverpool or draw",
+        "percent": {
+          "home": "45%",
+          "draw": "45%",
+          "away": "10%"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2025,
+        "name": "Premier League"
+      },
+      "teams": {
+        "home": {
+          "id": 40,
+          "name": "Liverpool"
+        },
+        "away": {
+          "id": 35,
+          "name": "Bournemouth"
+        }
+      }
+    }
+  ]
+}

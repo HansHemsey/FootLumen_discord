@@ -1,0 +1,133 @@
+{
+  "meta": {
+    "source": "sample extracted from docs/api_football_reference.json"
+  },
+  "competitions": [
+    {
+      "target": {
+        "key": "ligue_1",
+        "display_name": "Ligue 1",
+        "country": "France",
+        "category": "club",
+        "season": 2025,
+        "expected_league_id": 61
+      },
+      "league": {
+        "id": 61,
+        "name": "Ligue 1",
+        "type": "League",
+        "country": "France",
+        "country_code": "FR",
+        "logo": "https://media.api-sports.io/football/leagues/61.png",
+        "season": 2025,
+        "season_start": "2025-08-17",
+        "season_end": "2026-05-16",
+        "coverage": {
+          "standings": true,
+          "players": true,
+          "odds": true
+        }
+      },
+      "teams": [
+        {
+          "team_id": 77,
+          "name": "Angers",
+          "code": "ANG",
+          "country": "France",
+          "founded": 1919,
+          "national": false,
+          "logo": "https://media.api-sports.io/football/teams/77.png",
+          "venue_id": 634,
+          "venue_name": "Stade Raymond-Kopa",
+          "venue_city": "Angers",
+          "venue_capacity": 19000,
+          "venue_surface": "grass",
+          "venue_image": "https://media.api-sports.io/football/venues/634.png",
+          "raw": {
+            "venue": {
+              "id": 634,
+              "name": "Stade Raymond-Kopa",
+              "address": "73, boulevard Pierre de Coubertin",
+              "city": "Angers",
+              "capacity": 19000,
+              "surface": "grass",
+              "image": "https://media.api-sports.io/football/venues/634.png"
+            }
+          }
+        },
+        {
+          "team_id": 108,
+          "name": "Auxerre",
+          "code": "AUX",
+          "country": "France",
+          "founded": 1905,
+          "national": false,
+          "logo": "https://media.api-sports.io/football/teams/108.png",
+          "venue_id": 636,
+          "venue_name": "Stade de l'Abbe Deschamps",
+          "venue_city": "Auxerre",
+          "venue_capacity": 23467,
+          "venue_surface": "grass",
+          "venue_image": "https://media.api-sports.io/football/venues/636.png",
+          "raw": {
+            "venue": {
+              "id": 636,
+              "name": "Stade de l'Abbe Deschamps",
+              "address": "Route de Vaux",
+              "city": "Auxerre",
+              "capacity": 23467,
+              "surface": "grass",
+              "image": "https://media.api-sports.io/football/venues/636.png"
+            }
+          }
+        }
+      ],
+      "fixtures": [
+        {
+          "fixture_id": 1387797,
+          "date": "2025-11-09T16:15:00+00:00",
+          "timestamp": 1762704900,
+          "timezone": "UTC",
+          "round": "Regular Season - 12",
+          "league_id": 61,
+          "season": 2025,
+          "venue_id": 634,
+          "venue_name": "Stade Raymond-Kopa",
+          "venue_city": "Angers",
+          "referee": "Abdelatif Kherradji, France",
+          "status_long": "Match Finished",
+          "status_short": "FT",
+          "elapsed": 90,
+          "home_team_id": 77,
+          "home_team": "Angers",
+          "away_team_id": 108,
+          "away_team": "Auxerre",
+          "goals_home": 2,
+          "goals_away": 0
+        }
+      ],
+      "standings": [],
+      "rounds": ["Regular Season - 12"]
+    }
+  ],
+  "references": {
+    "bookmakers": [
+      {
+        "id": 1,
+        "name": "10Bet"
+      }
+    ],
+    "prematch_bets": [
+      {
+        "id": 1,
+        "name": "Match Winner"
+      }
+    ],
+    "live_bets": [
+      {
+        "id": 1,
+        "name": "Over/Under Extra Time"
+      }
+    ]
+  }
+}

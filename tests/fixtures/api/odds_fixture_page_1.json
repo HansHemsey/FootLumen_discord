@@ -1,0 +1,67 @@
+{
+  "get": "odds",
+  "parameters": {
+    "fixture": "1378969",
+    "bet": "1",
+    "page": "1"
+  },
+  "errors": [],
+  "results": 1,
+  "paging": {
+    "current": 1,
+    "total": 2
+  },
+  "response": [
+    {
+      "league": {
+        "id": 39,
+        "name": "Premier League",
+        "country": "England",
+        "season": 2025
+      },
+      "fixture": {
+        "id": 1378969,
+        "timezone": "UTC",
+        "date": "2025-08-15T19:00:00+00:00",
+        "timestamp": 1755284400
+      },
+      "update": "2026-05-02T10:00:00+00:00",
+      "bookmakers": [
+        {
+          "id": 8,
+          "name": "Bet365",
+          "bets": [
+            {
+              "id": 1,
+              "name": "Match Winner",
+              "values": [
+                {
+                  "value": "Home",
+                  "odd": "1.80"
+                },
+                {
+                  "value": "Draw",
+                  "odd": "3.80"
+                },
+                {
+                  "value": "Away",
+                  "odd": "4.50"
+                }
+              ]
+            },
+            {
+              "id": 5,
+              "name": "Goals Over/Under",
+              "values": [
+                {
+                  "value": "Over 2.5",
+                  "odd": "1.95"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

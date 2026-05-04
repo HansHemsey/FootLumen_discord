@@ -1,0 +1,24 @@
+# Example only. Do not put real webhook URLs in this file.
+webhooks:
+  global:
+    score_pronos_semaine:
+      webhook_url: "REPLACE_WITH_WEBHOOK_URL"
+      enabled: true
+  ligue1:
+    predictions:
+      webhook_url: "REPLACE_WITH_WEBHOOK_URL"
+      enabled: true
+    analyses:
+      webhook_url: "REPLACE_WITH_WEBHOOK_URL"
+      enabled: true
+  premier_league:
+    predictions:
+      webhook_url: "REPLACE_WITH_WEBHOOK_URL"
+      enabled: true
+    resultats:
+      webhook_url: "REPLACE_WITH_WEBHOOK_URL"
+      enabled: true
+  cdm_2026:
+    calendrier:
+      webhook_url: "REPLACE_WITH_WEBHOOK_URL"
+      enabled: true

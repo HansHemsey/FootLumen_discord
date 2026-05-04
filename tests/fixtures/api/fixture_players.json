@@ -1,0 +1,82 @@
+{
+  "get": "fixtures/players",
+  "parameters": {
+    "fixture": "1378969"
+  },
+  "errors": [],
+  "results": 2,
+  "paging": {
+    "current": 1,
+    "total": 1
+  },
+  "response": [
+    {
+      "team": {
+        "id": 40,
+        "name": "Liverpool",
+        "logo": "https://media.api-sports.io/football/teams/40.png"
+      },
+      "players": [
+        {
+          "player": {
+            "id": 2864,
+            "name": "A. Isak",
+            "photo": "https://media.api-sports.io/football/players/2864.png"
+          },
+          "statistics": [
+            {
+              "games": {
+                "minutes": 90,
+                "number": 9,
+                "position": "F",
+                "rating": "8.1",
+                "captain": false,
+                "substitute": false
+              },
+              "shots": {
+                "total": 4,
+                "on": 3
+              },
+              "goals": {
+                "total": 1,
+                "assists": null
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "team": {
+        "id": 35,
+        "name": "Bournemouth",
+        "logo": "https://media.api-sports.io/football/teams/35.png"
+      },
+      "players": [
+        {
+          "player": {
+            "id": 792,
+            "name": "J. Kluivert",
+            "photo": "https://media.api-sports.io/football/players/792.png"
+          },
+          "statistics": [
+            {
+              "games": {
+                "minutes": 78,
+                "number": 19,
+                "position": "F",
+                "rating": "6.7",
+                "captain": false,
+                "substitute": false
+              },
+              "shots": {
+                "total": 1,
+                "on": 0
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

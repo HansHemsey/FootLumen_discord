@@ -1,0 +1,316 @@
+# Operations Guide
+
+Ce guide decrit l'exploitation locale quotidienne, les diagnostics et les procedures de reprise.
+
+## Sources Et Secrets
+
+Les secrets restent hors Git :
+
+- `.env` local ;
+- variables d'environnement du systeme ;
+- `config/discord_webhooks.local.yaml` pour les URLs Discord.
+
+Ne jamais afficher une cle API, une URL webhook complete ou un bot token. Les logs peuvent afficher
+un statut configure/non configure et un hash court.
+
+## Fichiers De Reference
+
+Les cinq fichiers suivants doivent etre presents sur la machine d'exploitation :
+
+```text
+docs/api_football_reference.md
+docs/api_football_reference.json
+docs/api_football_players_reference.md
+docs/api_football_players_reference.json
+docs/api_football_players_cache.json
+```
+
+`api_football_players_cache.json` est un cache technique de collecte. Le seed metier joueurs doit
+utiliser `api_football_players_reference.json`.
+
+## Checklist Quotidienne
+
+```bash
+football-predictor doctor --strict
+football-predictor data-quality
+scripts/smoke_test_local.sh
+```
+
+Le smoke test local n'appelle ni API-Football ni Discord. Il valide les fichiers de reference, la
+DB, le seed local et une execution `predict-today` en dry-run.
+
+## Routine De Prediction
+
+### T-24h
+
+Objectif : prediction early avec fixtures connues, standings et odds deja disponibles.
+
+```bash
+WINDOW=early REFRESH_DATA=false DRY_RUN=true scripts/run_predict_today.sh
+```
+
+### H-6h
+
+Objectif : refresh odds et donnees match si la cle API est disponible.
+
+```bash
+REFRESH_DATA=true WINDOW=mid DRY_RUN=true scripts/run_predict_today.sh
+```
+
+### M-30min
+
+Objectif : tenter lineups, blessures et mouvements de cotes avant kickoff.
+
+```bash
+REFRESH_DATA=true WINDOW=late DRY_RUN=true scripts/run_predict_today.sh
+```
+
+Passe `SEND_DISCORD=true` seulement apres validation des webhooks et des routes.
+
+## Automatisation Quotidienne Multi-Ligues
+
+Les scripts quotidiens utilisent `config/competitions.yaml` et le binaire local `.venv` si
+present. Ils ne contiennent aucun secret et n'affichent pas les valeurs de `.env`.
+
+```bash
+# Matin : doctor, init DB, seed docs, refresh standings/odds et publications operationnelles.
+scripts/daily_morning.sh
+
+# Avant match : window late, refresh odds/injuries/API predictions/lineups si disponibles.
+scripts/daily_late.sh
+
+# Publication seule : classement, prochaine journee et matchs du jour.
+scripts/publish_daily_discord.sh
+
+# Backfill manuel plus lourd sur les saisons completes.
+scripts/refresh_all_leagues.sh
+
+# Dataset multi-ligues, entrainement et backtest.
+scripts/train_backtest_all.sh
+```
+
+Variables utiles :
+
+```bash
+DATE=YYYY-MM-DD
+WINDOW=now|early|mid|late|all
+CONFIG=config/competitions.yaml
+MODEL_DIR=data/models/v1
+SEND_DISCORD=false
+DRY_RUN=true
+FORCE=false
+SAVE_RAW=true
+LIMIT=
+```
+
+Par defaut, `daily_morning.sh` et `daily_late.sh` n'envoient rien dans Discord. Pour un
+envoi reel, utiliser explicitement :
+
+```bash
+SEND_DISCORD=true DRY_RUN=false scripts/daily_late.sh
+```
+
+`daily_morning.sh` appelle `publish_daily_discord.sh` apres le refresh standings/fixtures.
+Il ne lance plus de prediction matinale. Les publications alimentent `classement`, `calendrier`,
+`matchs_du_jour` et `score_pronos_semaine`. Le calendrier correspond a la prochaine
+journee/round connue, pas a la saison complete. Les messages sont decoupes automatiquement
+en plusieurs parties sous la limite Discord de 2000 caracteres.
+
+`REPLACE_PREVIOUS=true` est le defaut pour ces publications operationnelles : l'outil
+supprime les anciens messages Discord qu'il a envoyes et qui sont encore retrouves dans la
+DB, puis publie la nouvelle version. Les predictions, analyses, resultats et discussions
+ne sont pas nettoyes automatiquement. Pour conserver l'historique des messages
+operationnels :
+
+```bash
+REPLACE_PREVIOUS=false scripts/publish_daily_discord.sh
+```
+
+Les channels `analyses` et `resultats` ont leurs propres scripts. Ils publient un seul
+message par match et gardent l'historique :
+
+Le score hebdomadaire compte uniquement les predictions `daily_late` réellement envoyées
+dans Discord et dont le match est terminé. Les matchs en attente ne sont pas affichés.
+Il est remplace par `week_key` : une relance dans la même semaine met a jour le message
+de cette semaine, mais ne supprime pas les autres semaines. Le lundi, `daily_morning.sh`
+publie aussi une finalisation de la semaine précédente pour inclure les matchs du dimanche
+dont les scores ont ete rafraîchis pendant la nuit.
+
+```bash
+# A lancer toutes les 15 minutes si tu veux capter la fenetre H-6 -> H-5h45.
+SEND_DISCORD=true DRY_RUN=false scripts/publish_match_analyses.sh
+
+# A lancer toutes les 30-60 minutes apres les matchs.
+SEND_DISCORD=true DRY_RUN=false scripts/publish_match_results.sh
+REFRESH_DATA=true SEND_DISCORD=true DRY_RUN=false scripts/publish_match_results.sh
+```
+
+`publish_match_analyses.sh` appelle `publish-match-analyses` et utilise strictement
+`prediction_time = fixture.date - 6h`. La marge d'envoi est `ANALYSIS_GRACE_MINUTES=15`
+par defaut. Le message contient le contexte, la forme recente, le classement, les odds, les
+absences/XI si disponibles, les points forts/faibles et une conclusion prudente.
+`publish_match_results.sh` appelle `publish-match-results` uniquement pour les fixtures
+`FT/AET/PEN` avec score final, puis compare le resultat a la prediction pre-match publiee
+si elle existe. Avec `REFRESH_DATA=true`, il rafraichit les fixtures du jour pour capter
+les scores finaux. Ces deux flux ne remplacent jamais les anciens messages.
+
+`daily_late.sh` peut appeler ces deux scripts sans les activer par defaut :
+
+```bash
+PUBLISH_ANALYSES=true PUBLISH_RESULTS=true SEND_DISCORD=true DRY_RUN=false scripts/daily_late.sh
+```
+
+`refresh_all_leagues.sh` ne backfill pas les details de match par defaut, car les endpoints
+`/fixtures/statistics`, `/fixtures/events` et `/fixtures/players` multiplient les appels par
+fixture. Pour un backfill progressif :
+
+```bash
+REFRESH_DETAILS=true DETAILS_LIMIT=5 DETAILS_DELAY_SECONDS=2 scripts/refresh_all_leagues.sh
+```
+
+Routine hebdomadaire recommandee pour les details des matchs termines :
+
+```bash
+REFRESH_DETAILS=true \
+DETAILS_ONLY="statistics events players" \
+DETAILS_DAYS_BACK=7 \
+DETAILS_STATUSES="FT AET PEN" \
+DETAILS_LIMIT=100 \
+DETAILS_DELAY_SECONDS=3 \
+scripts/refresh_all_leagues.sh
+```
+
+`DETAILS_DAYS_BACK=7` limite la selection a la periode recente et
+`DETAILS_STATUSES="FT AET PEN"` est converti en filtres de statuts separes. Si
+API-Football retourne `429`, le batch s'arrete au premier rate-limit. Attends le reset de
+quota ou reduis `DETAILS_LIMIT` avant de relancer.
+
+Les joueurs absents du referentiel statique sont collectes dans
+`data/processed/unknown_players.jsonl`. Pour les resoudre progressivement dans la DB locale :
+
+```bash
+RESOLVE_UNKNOWN_PLAYERS=true UNKNOWN_PLAYERS_LIMIT=50 UNKNOWN_PLAYERS_DELAY_SECONDS=2 \
+  scripts/refresh_all_leagues.sh
+```
+
+Cette resolution est optionnelle, explicite et ne modifie jamais
+`docs/api_football_players_reference.json`.
+
+## Refresh Live Et Quota API
+
+Les appels live sont toujours explicites :
+
+```bash
+football-predictor ingest-fixtures --league 39 --season 2025 --refresh-api --save-raw
+football-predictor predict-today --date YYYY-MM-DD --window late --league 39 --season 2025 --refresh-data --save-raw
+```
+
+`league_id=39` est verifie dans `docs/api_football_reference.json`. Pour une autre competition,
+verifie le referentiel avant de lancer la commande.
+
+Economise le quota avec :
+
+```bash
+football-predictor seed-reference-from-docs \
+  --reference docs/api_football_reference.json \
+  --players docs/api_football_players_reference.json
+```
+
+## Cron
+
+Exemple local sans refresh :
+
+```cron
+15 7 * * * cd /path/to/ProBet_discord && . .venv/bin/activate && football-predictor doctor --strict
+30 8 * * * cd /path/to/ProBet_discord && . .venv/bin/activate && scripts/run_predict_today.sh
+```
+
+Exemple live quotidien recommande :
+
+```cron
+0 8 * * * cd /path/to/ProBet_discord && scripts/daily_morning.sh
+*/15 * * * * cd /path/to/ProBet_discord && SEND_DISCORD=true DRY_RUN=false scripts/publish_match_analyses.sh
+*/10 * * * * cd /path/to/ProBet_discord && SEND_DISCORD=true DRY_RUN=false scripts/daily_late.sh
+*/45 * * * * cd /path/to/ProBet_discord && REFRESH_DATA=true SEND_DISCORD=true DRY_RUN=false scripts/publish_match_results.sh
+0 3 * * 1 cd /path/to/ProBet_discord && scripts/train_backtest_all.sh
+```
+
+Garde `DRY_RUN=true` tant que la configuration Discord n'est pas validee.
+
+## Surveillance Logs
+
+Surveille surtout :
+
+- erreurs API-Football 499, 5xx ou timeouts ;
+- warnings de sources optionnelles absentes ;
+- data quality basse ;
+- erreurs Discord 401/403/404/429 ;
+- doublons Discord ignores par deduplication.
+
+Les logs ne doivent jamais afficher de cle API, URL webhook complete ou token.
+
+## Docker
+
+```bash
+make docker-build
+make docker-doctor
+make docker-seed-reference
+make docker-predict-today-dry-run
+```
+
+`docker-compose.yml` monte :
+
+- `./data:/app/data` pour DB, snapshots, datasets et modeles ;
+- `./docs:/app/docs:ro` pour les referentiels ;
+- `./config:/app/config:ro` pour les configs locales.
+
+Ne place jamais `.env` ou `config/discord_webhooks.local.yaml` dans l'image.
+
+## Sauvegardes
+
+Sauvegarde regulierement :
+
+- `data/football_predictor.db` ou la DB configuree ;
+- `data/raw/api_football/` pour les snapshots bruts ;
+- `data/processed/` pour datasets et backtests ;
+- `data/models/` pour artefacts modeles ;
+- les configs locales non commitees.
+
+## Reset DB Local
+
+Pour reconstruire une DB locale sans toucher aux referentiels :
+
+```bash
+mv data/football_predictor.db data/football_predictor.db.bak
+football-predictor init-db
+football-predictor seed-reference-from-docs \
+  --reference docs/api_football_reference.json \
+  --players docs/api_football_players_reference.json
+```
+
+Ne supprime pas les snapshots ou modeles sans sauvegarde si tu veux conserver l'historique.
+
+## Refresh Des Referentiels `docs/`
+
+Les referentiels `docs/api_football_*` ne sont pas regeneres par les commandes quotidiennes. Un
+refresh de ces fichiers doit etre un workflow manuel explicite, relu, puis valide par tests.
+
+Le cache joueurs economise les appels `/players/squads` lors d'une reprise technique, mais la source
+metier principale reste `docs/api_football_players_reference.json`.
+
+## Runbooks
+
+- `doctor` signale un JSON absent ou invalide : restaure le fichier depuis la copie de reference
+  avant toute ingestion live.
+- API-Football rate limit ou timeout : relance plus tard, conserve les snapshots existants, ne
+  contourne pas le client central.
+- Odds ou lineups absentes : la prediction doit continuer avec qualite de donnees plus faible.
+- Discord 401/403/404 : regenere le webhook ou corrige la route, sans logger l'URL complete.
+- DB corrompue en local : restaure une sauvegarde ou cree une DB neuve puis relance le seed docs.
+
+## Limites V1
+
+- Pas de serveur web ; orchestration via CLI, cron ou Docker.
+- Les predictions dependent fortement de la couverture des snapshots locaux.
+- Les lineups officielles peuvent arriver seulement 20 a 40 minutes avant kickoff.
+- Les modeles doivent etre reevalues par backtest avant usage operationnel confiant.

@@ -17,6 +17,10 @@ from football_predictor.modeling.poisson import (
     poisson_predict,
     score_matrix,
 )
+from football_predictor.modeling.poisson_v2 import (
+    estimate_lambda_home_away_v2,
+    poisson_v2_predict,
+)
 from football_predictor.modeling.preprocessing import (
     PreprocessedDataset,
     features_dict_to_dataframe,
@@ -38,10 +42,12 @@ from football_predictor.modeling.stacking import (
 )
 from football_predictor.modeling.train import TrainModelResult, train_model_from_dataset
 from football_predictor.modeling.training import train_model_artifact
+from football_predictor.modeling.v2_model import FootballOutcomeV2Model, V2TrainingConfig
 
 __all__ = [
     "CLASSES",
     "FootballOutcomeModel",
+    "FootballOutcomeV2Model",
     "ModelArtifact",
     "ModelTrainingConfig",
     "PreprocessedDataset",
@@ -53,6 +59,7 @@ __all__ = [
     "api_prediction_probability",
     "api_prediction_predict",
     "estimate_lambda_home_away",
+    "estimate_lambda_home_away_v2",
     "fallback_prior",
     "features_dict_to_dataframe",
     "load_model_artifact",
@@ -60,6 +67,7 @@ __all__ = [
     "odds_only_predict",
     "poisson_baseline_probability",
     "poisson_predict",
+    "poisson_v2_predict",
     "predict_sport_probabilities",
     "score_matrix",
     "select_safe_feature_columns",
@@ -70,4 +78,5 @@ __all__ = [
     "train_model_artifact",
     "train_sport_model",
     "uniform_predict",
+    "V2TrainingConfig",
 ]

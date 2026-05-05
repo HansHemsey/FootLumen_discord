@@ -9,11 +9,11 @@ cd "$ROOT_DIR"
 PYTHON_BIN="$(resolve_python_bin)"
 CLI_BIN="$(resolve_cli_bin)"
 CONFIG_PATH="${CONFIG:-config/competitions.yaml}"
-DATASET="${DATASET:-data/processed/training.parquet}"
-MODEL_DIR="${MODEL_DIR:-data/models/v1}"
-BACKTEST_DIR="${BACKTEST_DIR:-reports/backtest_v1}"
-PREDICTION_WINDOW="${PREDICTION_WINDOW:-24h}"
-MODEL_VERSION="${MODEL_VERSION:-v1}"
+DATASET="${DATASET:-data/processed/training_v2_late.parquet}"
+MODEL_DIR="${MODEL_DIR:-data/models/v2-late}"
+BACKTEST_DIR="${BACKTEST_DIR:-reports/backtest_v2_late}"
+PREDICTION_WINDOW="${PREDICTION_WINDOW:-30m}"
+MODEL_VERSION="${MODEL_VERSION:-v2-late}"
 REPORT_FORMAT="${REPORT_FORMAT:-both}"
 MIN_QUALITY="${MIN_QUALITY:-0}"
 
@@ -42,4 +42,5 @@ fi
   --dataset "$DATASET" \
   --model-dir "$MODEL_DIR" \
   --output-dir "$BACKTEST_DIR" \
-  --format "$REPORT_FORMAT"
+  --format "$REPORT_FORMAT" \
+  --retrain-v2-model-version "$MODEL_VERSION"

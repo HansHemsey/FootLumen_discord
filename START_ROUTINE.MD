@@ -581,10 +581,19 @@ scripts/train_backtest_all.sh
 
 Ce que ça fait :
 
-1. construit `data/processed/training.parquet` ;
-2. entraîne le modèle dans `data/models/v1` ;
-3. lance le backtest ;
-4. écrit le rapport dans `reports/backtest_v1`.
+1. construit `data/processed/training_v2_late.parquet` en fenêtre M-30 ;
+2. entraîne le modèle V2 dans `data/models/v2-late` ;
+3. lance le backtest temporel V2 ;
+4. écrit le rapport dans `reports/backtest_v2_late`.
+
+Concept V2 :
+
+- plusieurs experts produisent une probabilité : marché calibré, Poisson V2, Elo V2,
+  modèle tabulaire ;
+- un stacking V2 apprend à combiner ces experts sur validation temporelle ;
+- les probabilités par expert sont stockées dans les prédictions pour expliquer les
+  décisions ;
+- la V1 reste disponible en rollback dans `data/models/v1`.
 
 Rythme conseillé :
 
@@ -596,9 +605,9 @@ Ensuite         : une fois par semaine.
 Commande avec paramètres :
 
 ```bash
-PREDICTION_WINDOW=24h \
-MODEL_DIR=data/models/v1 \
-MODEL_VERSION=v1 \
+PREDICTION_WINDOW=30m \
+MODEL_DIR=data/models/v2-late \
+MODEL_VERSION=v2-late \
 scripts/train_backtest_all.sh
 ```
 
@@ -609,7 +618,7 @@ scripts/train_backtest_all.sh
 Sans refresh API :
 
 ```bash
-football-predictor predict --fixture <fixture_id> --model-dir data/models/v1
+football-predictor predict --fixture <fixture_id> --model-dir data/models/v2-late
 ```
 
 Avec refresh API explicite :
@@ -617,7 +626,7 @@ Avec refresh API explicite :
 ```bash
 football-predictor predict \
   --fixture <fixture_id> \
-  --model-dir data/models/v1 \
+  --model-dir data/models/v2-late \
   --refresh-data
 ```
 
@@ -717,7 +726,7 @@ Sur ton PC local, tu peux lancer ces scripts manuellement. Un cron n'est utile q
 ```text
 DATE=YYYY-MM-DD
 CONFIG=config/competitions.yaml
-MODEL_DIR=data/models/v1
+MODEL_DIR=data/models/v2-late
 LIMIT=1
 FORCE=true
 SAVE_RAW=true

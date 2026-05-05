@@ -91,8 +91,8 @@ make daily-late
 make publish-daily-discord
 make refresh-all-leagues
 make train-backtest-all
-make train DATASET=data/processed/training.parquet MODEL_DIR=data/models/v1
-make backtest DATASET=data/processed/training.parquet MODEL_DIR=data/models/v1
+make train DATASET=data/processed/training_v2_late.parquet MODEL_DIR=data/models/v2-late
+make backtest DATASET=data/processed/training_v2_late.parquet MODEL_DIR=data/models/v2-late
 ```
 
 `scripts/init_local.sh` crée les dossiers `data/`, vérifie `.env`, vérifie les cinq
@@ -404,27 +404,28 @@ football-predictor odds-features --fixture <fixture_id> --as-of YYYY-MM-DDTHH:MM
 football-predictor build-dataset \
   --league <league_id> \
   --season <season> \
-  --prediction-window 24h \
-  --output data/processed/training.parquet \
+  --prediction-window 30m \
+  --output data/processed/training_v2_late.parquet \
   --format parquet
 football-predictor train \
-  --dataset data/processed/training.parquet \
-  --output-dir data/models/v1 \
-  --model-version v1 \
+  --dataset data/processed/training_v2_late.parquet \
+  --output-dir data/models/v2-late \
+  --model-version v2-late \
   --calibration sigmoid
 football-predictor backtest \
-  --dataset data/processed/training.parquet \
-  --model-dir data/models/v1 \
-  --output-dir reports/backtest_v1 \
+  --dataset data/processed/training_v2_late.parquet \
+  --model-dir data/models/v2-late \
+  --output-dir reports/backtest_v2_late \
+  --retrain-v2-model-version v2-late \
   --format both
 football-predictor predict \
   --fixture <fixture_id> \
-  --model-dir data/models/v1 \
+  --model-dir data/models/v2-late \
   --no-refresh \
   --json-output reports/prediction.json
 football-predictor predict-and-send \
   --fixture <fixture_id> \
-  --model-dir data/models/v1 \
+  --model-dir data/models/v2-late \
   --competition-key ligue1 \
   --channel predictions \
   --dry-run
@@ -582,15 +583,40 @@ La commande `build-dataset` et le module `backtesting.dataset_builder` construis
 dataset historique point-in-time depuis la DB locale. Ils sélectionnent les fixtures
 terminées avec score, simulent par défaut `prediction_time = fixture.date - 24h`,
 calculent un snapshot global, puis ajoutent la cible `HOME/DRAW/AWAY` hors
-`features_json`. Les exports CSV et Parquet sont supportés.
+`features_json`. La fenêtre `30m` est disponible pour entraîner un modèle aligné sur
+`daily_late`. Les exports CSV et Parquet sont supportés.
 
-Le module `modeling/` entraîne le modèle sportif V1 avec scikit-learn. Le modèle par défaut
-est `HistGradientBoostingClassifier`, avec fallback `LogisticRegression` si nécessaire. La
-commande `train` lit un dataset CSV ou Parquet, exclut les colonnes de fuite (`target`,
-scores finaux, IDs naïfs, dates, statuts post-match et JSON bruts), puis écrit
-`model.joblib`, `metadata.json`, `feature_names.json` et `metrics.json` dans
-`data/models/<version>/`. Les baselines odds-only, API prediction et Poisson restent
-disponibles pour les fallbacks et le stacking.
+Le module `modeling/` entraîne le modèle sportif. La V1 scikit-learn reste disponible,
+mais la production recommandée utilise la V2 `late` M-30 : marché calibré, Poisson
+amélioré, Elo dynamique, modèle tabulaire LightGBM optionnel/fallback sklearn, puis
+stacking appris sur validation temporelle. La commande `train` exclut les colonnes de
+fuite (`target`, scores finaux, IDs naïfs, dates, statuts post-match et JSON bruts), puis
+écrit `model.joblib`, `metadata.json`, `feature_names.json`, `metrics.json` et, pour V2,
+`feature_coverage.json` dans `data/models/<version>/`.
+
+Workflow V2 recommandé :
+
+```bash
+football-predictor build-dataset \
+  --league 39 \
+  --season 2025 \
+  --prediction-window 30m \
+  --output data/processed/training_v2_late.parquet
+
+football-predictor train \
+  --dataset data/processed/training_v2_late.parquet \
+  --output-dir data/models/v2-late \
+  --model-version v2-late
+
+football-predictor backtest \
+  --dataset data/processed/training_v2_late.parquet \
+  --model-dir data/models/v2-late \
+  --output-dir reports/backtest_v2_late \
+  --retrain-v2-model-version v2-late \
+  --format both
+```
+
+`scripts/train_backtest_all.sh` utilise ce workflow V2 par défaut.
 
 La commande `backtest` lit le même dataset historique, impose un split temporel sans
 shuffle, évalue le modèle sauvegardé et les baselines `odds_only`, `poisson` et
@@ -602,12 +628,11 @@ doivent provenir de snapshots construits point-in-time.
 
 La commande `predict` prédit une fixture unique depuis la DB locale par défaut
 (`--no-refresh`). Elle construit un `FeatureSnapshot` point-in-time, charge le modèle depuis
-`--model-dir` si disponible, puis combine modèle sportif, odds, prédiction API-Football et
-Poisson via stacking. Si le modèle est absent ou qu'une source optionnelle manque, le
-pipeline continue avec les fallbacks disponibles et diminue la qualité des données. Les
-appels API live ne sont faits qu'avec `--refresh-data`, jamais implicitement. La sortie peut
-être affichée en console Rich, imprimée en JSON avec `--json`, ou écrite dans un fichier avec
-`--json-output`.
+`--model-dir` si disponible, puis combine les sources autorisées. Si
+`data/models/v2-late/model.joblib` existe, `daily_late` l'utilise par défaut ; sinon il
+revient à `data/models/v1`, puis aux fallbacks. Avec V2, les probabilités par expert sont
+persistées dans `ModelPrediction.payload_json.expert_probabilities`. Les appels API live ne
+sont faits qu'avec `--refresh-data`, jamais implicitement.
 
 La commande `predict-today` automatise les prédictions d'une date sans serveur web. Elle
 peut être appelée par cron ou par une tâche planifiée. Les fenêtres filtrent les fixtures

@@ -520,7 +520,9 @@ Colonnes cible hors features :
 - `prediction_time` ;
 - `feature_snapshot_id`.
 
-Par défaut, `prediction_time = fixture.date - 24h`. Les exports `.csv` et `.parquet` sont
+Par défaut, `prediction_time = fixture.date - 24h`. La fenêtre `30m` est disponible pour
+entraîner la V2 alignée avec `daily_late`; `40m` reste accepté pour compatibilité. Les
+exports `.csv` et `.parquet` sont
 supportés. Les splits temporels utilisent `fixture_date` et ne mélangent jamais les lignes
 par défaut.
 
@@ -691,6 +693,16 @@ Sources probabilistes autorisées :
 - odds prematch déjà filtrées par `fetched_at <= prediction_time` ;
 - prédiction API-Football déjà filtrée par `fetched_at <= prediction_time`.
 
+Avec un artefact V2, `ModelPrediction.payload_json.expert_probabilities` peut contenir :
+
+- `market_calibrated` ;
+- `poisson_v2` ;
+- `elo_v2` ;
+- `tabular_v2`.
+
+Ces probabilités sont des diagnostics exploitables pour expliquer la décision finale. Elles
+ne remplacent pas `p_home`, `p_draw`, `p_away`, qui restent la sortie officielle.
+
 Sans `--refresh-data`, le pipeline lit seulement la DB locale et les référentiels `docs/`.
 Avec `--refresh-data`, les appels live sont explicites et snapshotés avant construction des
 features.
@@ -706,7 +718,8 @@ Fenêtres de prédiction, calculées fixture par fixture :
 
 - `early` : `prediction_time = fixture.date - 24h` ;
 - `mid` : `prediction_time = fixture.date - 6h` ;
-- `late` : `prediction_time = fixture.date - 40min` ;
+- `late` : `prediction_time = heure courante`, avec sélection des matchs dans les 30
+  prochaines minutes ;
 - `now` : `prediction_time = heure courante` ;
 - `all` : alias de compatibilité pour l'heure courante.
 

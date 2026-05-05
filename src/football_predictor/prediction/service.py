@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+import joblib  # type: ignore[import-untyped]
 import pandas as pd  # type: ignore[import-untyped]
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -21,7 +22,6 @@ from football_predictor.ingestion.fixtures import FixtureIngestionService, Stand
 from football_predictor.ingestion.ingest_match_details import FixtureDetailsIngestionService
 from football_predictor.ingestion.ingest_odds import OddsIngestionService
 from football_predictor.modeling.baselines import api_prediction_probability
-from football_predictor.modeling.multiclass_model import FootballOutcomeModel
 from football_predictor.modeling.poisson import poisson_predict
 from football_predictor.modeling.probabilities import ProbabilityTriple
 from football_predictor.modeling.stacking import stack_probabilities_with_details
@@ -90,6 +90,7 @@ class PredictionOutput:
     model_prediction_id: int | None = None
     refresh_summary: JsonDict = field(default_factory=dict)
     key_absences_json: JsonDict = field(default_factory=dict)
+    expert_probabilities: dict[str, ProbabilityTriple] = field(default_factory=dict)
 
     def to_dict(self) -> JsonDict:
         """Return a JSON-serializable prediction payload."""
@@ -114,6 +115,10 @@ class PredictionOutput:
                 "poisson": _optional_probability_payload(self.poisson_probabilities),
                 "market": _optional_probability_payload(self.market_probabilities),
                 "api": _optional_probability_payload(self.api_probabilities),
+                "experts": {
+                    name: _optional_probability_payload(probability)
+                    for name, probability in self.expert_probabilities.items()
+                },
             },
             "model_version": self.model_version,
             "feature_snapshot_id": self.feature_snapshot_id,
@@ -130,6 +135,8 @@ class ProbabilitySources:
     api: ProbabilityTriple | None
     poisson: ProbabilityTriple
     sport_source: str
+    final: ProbabilityTriple | None = None
+    expert_probabilities: dict[str, ProbabilityTriple] = field(default_factory=dict)
 
 
 class PredictionService:
@@ -191,12 +198,19 @@ class PredictionService:
             model=model,
             market_override=market_probabilities,
         )
-        stacking = stack_probabilities_with_details(
-            sport=sources.sport,
-            market=sources.market,
-            api=sources.api,
-        )
-        probabilities = stacking.probabilities.normalized()
+        if sources.final is not None:
+            probabilities = sources.final.normalized()
+            stacking_weights = {"v2_composite": 1.0}
+            sources_used = [sources.sport_source]
+        else:
+            stacking = stack_probabilities_with_details(
+                sport=sources.sport,
+                market=sources.market,
+                api=sources.api,
+            )
+            probabilities = stacking.probabilities.normalized()
+            stacking_weights = stacking.normalized_weights
+            sources_used = stacking.sources_used
         data_quality = _data_quality_from_payload(feature_result.data_quality_json)
         score = _confidence_score_from_quality(probabilities, feature_result.data_quality_json)
         explanations = explain_prediction(
@@ -204,7 +218,7 @@ class PredictionService:
             probabilities=probabilities,
             data_quality=feature_result.data_quality_json,
             sport_source=sources.sport_source,
-            sources_used=stacking.sources_used,
+            sources_used=sources_used,
             home_team_name=fixture.home_team,
             away_team_name=fixture.away_team,
         )
@@ -225,13 +239,14 @@ class PredictionService:
             sport_probabilities=sources.sport,
             poisson_probabilities=sources.poisson,
             api_probabilities=sources.api,
-            stacking_weights=stacking.normalized_weights,
-            sources_used=stacking.sources_used,
+            stacking_weights=stacking_weights,
+            sources_used=sources_used,
             sport_source=sources.sport_source,
             model_version=_model_version(model, fallback_source=sources.sport_source),
             feature_snapshot_id=feature_result.snapshot.id,
             refresh_summary=refresh_summary,
             key_absences_json=_key_absences_payload(feature_result.features_json),
+            expert_probabilities=sources.expert_probabilities,
         )
         record = self._save_prediction(output, feature_result)
         return _output_with_model_prediction_id(output, record.id)
@@ -363,26 +378,47 @@ class PredictionService:
             },
         )
 
-    def _load_model(self, model_dir: Path | None) -> FootballOutcomeModel | None:
+    def _load_model(self, model_dir: Path | None) -> Any | None:
         if model_dir is None:
             return None
         model_path = model_dir / "model.joblib" if model_dir.is_dir() else model_dir
         if not model_path.exists():
             logger.info("No model artifact found at %s; using prediction fallbacks", model_path)
             return None
-        return FootballOutcomeModel.load(model_path)
+        model = joblib.load(model_path)
+        if not hasattr(model, "predict_proba"):
+            raise PredictionError(f"Model artifact has no predict_proba: {model_path}")
+        return model
 
     def _probability_sources(
         self,
         features: Mapping[str, Any],
         *,
-        model: FootballOutcomeModel | None,
+        model: Any | None,
         market_override: ProbabilityTriple | None,
     ) -> ProbabilitySources:
         poisson = ProbabilityTriple.from_vector(poisson_predict(features))
         sport_source = "poisson"
         sport = poisson
-        if model is not None:
+        expert_probabilities: dict[str, ProbabilityTriple] = {}
+        final: ProbabilityTriple | None = None
+        if model is not None and getattr(model, "is_v2_composite", False):
+            final = ProbabilityTriple.from_vector(
+                model.predict_proba(pd.DataFrame([dict(features)]))[0]
+            )
+            expert_rows = (
+                model.predict_expert_probabilities(pd.DataFrame([dict(features)]))
+                if hasattr(model, "predict_expert_probabilities")
+                else []
+            )
+            if expert_rows:
+                expert_probabilities = {
+                    name: ProbabilityTriple.from_vector(values)
+                    for name, values in expert_rows[0].items()
+                }
+            sport = final
+            sport_source = "model_v2"
+        elif model is not None:
             sport = ProbabilityTriple.from_vector(
                 model.predict_proba(pd.DataFrame([dict(features)]))[0]
             )
@@ -398,6 +434,8 @@ class PredictionService:
             api=api,
             poisson=poisson,
             sport_source=sport_source,
+            final=final,
+            expert_probabilities=expert_probabilities,
         )
 
     def _competition_name(self, fixture: FixtureRef) -> str:
@@ -447,6 +485,10 @@ class PredictionService:
                 "stacking_weights": output.stacking_weights,
                 "sport_source": output.sport_source,
                 "refresh_summary": output.refresh_summary,
+                "expert_probabilities": {
+                    name: _probability_payload(probability)
+                    for name, probability in output.expert_probabilities.items()
+                },
             },
         )
         session.add(record)
@@ -521,9 +563,9 @@ def _confidence_score_from_quality(
     return round(max(0.0, min(100.0, (edge * 140) + ((quality / 100) * 35))), 1)
 
 
-def _model_version(model: FootballOutcomeModel | None, *, fallback_source: str) -> str:
+def _model_version(model: Any | None, *, fallback_source: str) -> str:
     if model is not None:
-        return model.model_version
+        return str(getattr(model, "model_version", "unknown-model"))
     return f"v1-fallback-{fallback_source}"
 
 
@@ -569,6 +611,7 @@ def _output_with_model_prediction_id(
         model_prediction_id=model_prediction_id,
         refresh_summary=output.refresh_summary,
         key_absences_json=output.key_absences_json,
+        expert_probabilities=output.expert_probabilities,
     )
 
 

@@ -22,7 +22,7 @@ from football_predictor.modeling.baselines import (
 )
 from football_predictor.modeling.constants import CLASSES
 from football_predictor.modeling.evaluation import evaluate_probabilities
-from football_predictor.modeling.multiclass_model import FootballOutcomeModel
+from football_predictor.modeling.loader import PredictionModel, load_prediction_model
 from football_predictor.modeling.poisson import poisson_predict
 from football_predictor.modeling.preprocessing import (
     is_forbidden_feature,
@@ -30,6 +30,7 @@ from football_predictor.modeling.preprocessing import (
 )
 from football_predictor.modeling.probabilities import ProbabilityTriple
 from football_predictor.modeling.stacking import blend_probabilities
+from football_predictor.modeling.v2_model import V2TrainingConfig, train_v2_model_from_frame
 from football_predictor.utils.time import utc_now
 
 ReportFormat = Literal["json", "markdown", "both"]
@@ -43,6 +44,7 @@ class BacktestConfig:
     confidence_thresholds: tuple[float, ...] = (0.40, 0.50, 0.60, 0.70, 0.80)
     calibration_bins: int = 10
     report_format: ReportFormat = "both"
+    retrain_v2_model_version: str | None = None
 
 
 @dataclass(frozen=True)
@@ -124,7 +126,13 @@ def run_backtest(
     frame = _load_dataset(dataset_path)
     _validate_dataset(frame)
     train_frame, valid_frame, test_frame = temporal_split(frame, config=config)
-    model = _load_model(model_dir) if model_dir is not None else None
+    model = (
+        _train_v2_for_backtest(train_frame, valid_frame, config.retrain_v2_model_version)
+        if config.retrain_v2_model_version
+        else _load_model(model_dir)
+        if model_dir is not None
+        else None
+    )
 
     periods = {
         "train": _period_for("train", train_frame),
@@ -195,7 +203,7 @@ def temporal_split(
 def _evaluate_frame(
     frame: pd.DataFrame,
     *,
-    model: FootballOutcomeModel | None,
+    model: PredictionModel | None,
     config: BacktestConfig,
 ) -> dict[str, Any]:
     if frame.empty:
@@ -209,15 +217,34 @@ def _evaluate_frame(
         ],
     }
     if model is not None:
-        data = separate_metadata_target_features(frame, impute=True)
+        predict_frame = frame if getattr(model, "is_v2_composite", False) else None
+        data = (
+            separate_metadata_target_features(frame, impute=True)
+            if predict_frame is None
+            else None
+        )
         sport_predictions = [
-            _optional_triple(row) for row in model.predict_proba(data.features)
+            _optional_triple(row)
+            for row in model.predict_proba(
+                predict_frame if predict_frame is not None else data.features  # type: ignore[union-attr]
+            )
         ]
         predictions["model_final"] = sport_predictions
-        predictions["stacking_final"] = [
-            _stack_row(sport, row)
-            for sport, row in zip(sport_predictions, _rows(frame), strict=True)
-        ]
+        if getattr(model, "is_v2_composite", False) and hasattr(
+            model,
+            "predict_expert_probabilities",
+        ):
+            expert_rows = model.predict_expert_probabilities(frame)
+            for source in ("market_calibrated", "poisson_v2", "elo_v2", "tabular_v2"):
+                predictions[source] = [
+                    _optional_triple(experts.get(source)) for experts in expert_rows
+                ]
+            predictions["stacking_v2"] = sport_predictions
+        else:
+            predictions["stacking_final"] = [
+                _stack_row(sport, row)
+                for sport, row in zip(sport_predictions, _rows(frame), strict=True)
+            ]
 
     results: dict[str, Any] = {}
     for name, model_predictions in predictions.items():
@@ -290,7 +317,7 @@ def _confidence_threshold_metrics(
 def _group_metrics(
     frame: pd.DataFrame,
     *,
-    model: FootballOutcomeModel | None,
+    model: PredictionModel | None,
     config: BacktestConfig,
 ) -> dict[str, Any]:
     groups: dict[str, Any] = {}
@@ -338,7 +365,7 @@ def _comparisons_against_model(results: dict[str, Any]) -> dict[str, Any]:
 def _confidence_bucket_metrics(
     frame: pd.DataFrame,
     *,
-    model: FootballOutcomeModel | None,
+    model: PredictionModel | None,
     config: BacktestConfig,
 ) -> dict[str, Any]:
     evaluation = _evaluate_frame(frame, model=model, config=config)
@@ -374,7 +401,7 @@ def _confidence_bucket_metrics(
 def _data_quality_bucket_metrics(
     frame: pd.DataFrame,
     *,
-    model: FootballOutcomeModel | None,
+    model: PredictionModel | None,
     config: BacktestConfig,
 ) -> dict[str, Any]:
     quality_column = _quality_column(frame)
@@ -407,7 +434,7 @@ def _evaluate_index_subset(
     frame: pd.DataFrame,
     indexes: list[int],
     *,
-    model: FootballOutcomeModel | None,
+    model: PredictionModel | None,
     config: BacktestConfig,
 ) -> dict[str, Any]:
     subset = frame.iloc[indexes].copy()
@@ -418,7 +445,7 @@ def _predictions_for_model(
     frame: pd.DataFrame,
     model_name: str,
     *,
-    model: FootballOutcomeModel | None,
+    model: PredictionModel | None,
 ) -> list[ProbabilityTriple | None]:
     rows = _rows(frame)
     if model_name == "odds_only":
@@ -429,10 +456,19 @@ def _predictions_for_model(
         return [_optional_triple(api_prediction_predict(row)) for row in rows]
     if model is None:
         return [None for _ in rows]
-    data = separate_metadata_target_features(frame, impute=True)
-    sport = [_optional_triple(row) for row in model.predict_proba(data.features)]
+    if getattr(model, "is_v2_composite", False):
+        sport = [_optional_triple(row) for row in model.predict_proba(frame)]
+    else:
+        data = separate_metadata_target_features(frame, impute=True)
+        sport = [_optional_triple(row) for row in model.predict_proba(data.features)]
     if model_name == "model_final":
         return sport
+    if getattr(model, "is_v2_composite", False) and hasattr(model, "predict_expert_probabilities"):
+        if model_name == "stacking_v2":
+            return sport
+        expert_rows = model.predict_expert_probabilities(frame)
+        if model_name in {"market_calibrated", "poisson_v2", "elo_v2", "tabular_v2"}:
+            return [_optional_triple(experts.get(model_name)) for experts in expert_rows]
     if model_name == "stacking_final":
         return [_stack_row(prediction, row) for prediction, row in zip(sport, rows, strict=True)]
     return [None for _ in rows]
@@ -528,9 +564,22 @@ def _quality_column(frame: pd.DataFrame) -> str | None:
     return None
 
 
-def _load_model(model_dir: Path) -> FootballOutcomeModel:
+def _load_model(model_dir: Path) -> PredictionModel:
     model_path = model_dir / "model.joblib" if model_dir.is_dir() else model_dir
-    return FootballOutcomeModel.load(model_path)
+    return load_prediction_model(model_path)
+
+
+def _train_v2_for_backtest(
+    train_frame: pd.DataFrame,
+    valid_frame: pd.DataFrame,
+    model_version: str,
+) -> PredictionModel:
+    model, _metrics = train_v2_model_from_frame(
+        train_frame,
+        valid_frame,
+        config=V2TrainingConfig(model_version=model_version),
+    )
+    return model
 
 
 def _validate_dataset(frame: pd.DataFrame) -> None:

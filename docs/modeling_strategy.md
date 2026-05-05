@@ -148,7 +148,7 @@ Le dataset historique reconstruit chaque ligne comme une prédiction passée :
 
 - fixtures terminées uniquement ;
 - `prediction_time = fixture.date - 24h` par défaut ;
-- variantes supportées : `6h` et `40m` avant le match ;
+- variantes supportées : `6h`, `30m` et `40m` avant le match ;
 - labels `HOME/DRAW/AWAY` ajoutés après la construction du snapshot ;
 - aucune cible ou score final dans `features_json`.
 
@@ -309,6 +309,57 @@ Exports V1 :
 - `backtest_report.json` : métriques complètes, périodes, group metrics, calibration bins et
   données de seuils de confiance réutilisables pour de futurs graphiques ;
 - `backtest_report.md` : résumé lisible des mêmes résultats.
+
+## Modélisation V2 Late M-30
+
+La V2 est pensée pour la production Discord `daily_late`, donc pour les prédictions
+faites environ 30 minutes avant le coup d'envoi. Elle ne cherche pas à remplacer le marché
+avec un seul gros modèle : elle combine plusieurs experts, puis apprend un meta-modèle sur
+validation temporelle.
+
+Experts V2 :
+
+- `market_calibrated` : probabilités bookmaker corrigées par une régression logistique si
+  assez de données sont disponibles ;
+- `poisson_v2` : lambdas de buts issus de la forme, pseudo-xG, avantage domicile et impact
+  absences, avec correction légère des petits scores ;
+- `elo_v2` : rating dynamique calculé avant chaque match dans l'ordre chronologique ;
+- `tabular_v2` : modèle tabulaire LightGBM si installé, sinon fallback sklearn ;
+- `stacking_v2` : meta-modèle multinomial appris sur validation, ou mélange pondéré si le
+  volume est insuffisant.
+
+L'entraînement V2 écrit `model.joblib`, `metadata.json`, `feature_names.json`,
+`metrics.json` et `feature_coverage.json` dans `data/models/v2-late`. Le fichier de
+couverture indique quelles familles de features sont réellement exploitables. Les
+probabilités par expert sont aussi persistées dans `ModelPrediction.payload_json` afin de
+comprendre pourquoi une prédiction a été envoyée.
+
+Commandes recommandées :
+
+```bash
+football-predictor build-dataset \
+  --league 39 \
+  --season 2025 \
+  --prediction-window 30m \
+  --output data/processed/training_v2_late.parquet
+
+football-predictor train \
+  --dataset data/processed/training_v2_late.parquet \
+  --output-dir data/models/v2-late \
+  --model-version v2-late
+
+football-predictor backtest \
+  --dataset data/processed/training_v2_late.parquet \
+  --model-dir data/models/v2-late \
+  --output-dir reports/backtest_v2_late \
+  --retrain-v2-model-version v2-late \
+  --format both
+```
+
+Le script `scripts/train_backtest_all.sh` utilise ces paramètres par défaut. Le backtest
+avec `--retrain-v2-model-version` réentraîne un modèle V2 uniquement sur le split train,
+calibre/choisit le meta-modèle sur validation, puis évalue le test. C'est le rapport à
+utiliser pour juger la V2.
 
 ## Règles Anti Data Leakage
 

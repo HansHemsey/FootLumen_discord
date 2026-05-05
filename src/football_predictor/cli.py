@@ -2321,7 +2321,7 @@ def build_dataset(
     prediction_window: str = typer.Option(
         "24h",
         "--prediction-window",
-        help="Point-in-time simulation window: 24h, 6h, or 40m before fixture date.",
+        help="Point-in-time simulation window: 24h, 6h, 30m, or 40m before fixture date.",
     ),
     output: Path | None = typer.Option(
         None,
@@ -2425,6 +2425,9 @@ def train(
             "metadata_path": str(result.metadata_path),
             "feature_names_path": str(result.feature_names_path),
             "metrics_path": str(result.metrics_path),
+            "feature_coverage_path": str(result.feature_coverage_path)
+            if result.feature_coverage_path is not None
+            else None,
             "calibration_requested": normalized_calibration,
         }
     )
@@ -2451,6 +2454,14 @@ def backtest(
     train_ratio: float = typer.Option(0.60, "--train-ratio"),
     valid_ratio: float = typer.Option(0.20, "--valid-ratio"),
     test_ratio: float = typer.Option(0.20, "--test-ratio"),
+    retrain_v2_model_version: str | None = typer.Option(
+        None,
+        "--retrain-v2-model-version",
+        help=(
+            "Train a V2 model inside the temporal backtest on train/validation only, "
+            "then evaluate test."
+        ),
+    ),
 ) -> None:
     """Backtest a model artifact and baselines with a temporal split."""
     normalized_format = output_format.casefold()
@@ -2466,6 +2477,7 @@ def backtest(
             valid_ratio=valid_ratio,
             test_ratio=test_ratio,
             report_format=cast(ReportFormat, normalized_format),
+            retrain_v2_model_version=retrain_v2_model_version,
         )
         result = run_backtest(
             dataset,

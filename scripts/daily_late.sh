@@ -11,7 +11,11 @@ CLI_BIN="$(resolve_cli_bin)"
 RUN_DATE="${DATE:-$(default_run_date)}"
 RUN_WINDOW="${WINDOW:-late}"
 CONFIG_PATH="${CONFIG:-config/competitions.yaml}"
-MODEL_DIR="${MODEL_DIR:-data/models/v1}"
+DEFAULT_MODEL_DIR="data/models/v2-late"
+if [ ! -f "$DEFAULT_MODEL_DIR/model.joblib" ]; then
+  DEFAULT_MODEL_DIR="data/models/v1"
+fi
+MODEL_DIR="${MODEL_DIR:-$DEFAULT_MODEL_DIR}"
 REFRESH_DATA="${REFRESH_DATA:-true}"
 SEND_DISCORD="${SEND_DISCORD:-false}"
 DRY_RUN="${DRY_RUN:-true}"

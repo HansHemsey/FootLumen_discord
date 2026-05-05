@@ -53,6 +53,8 @@ def test_daily_scripts_default_to_safe_discord_behavior(repo_root: Path) -> None
     assert "predict-today" not in morning
     assert "--json-output" in late
     assert "predict-today" in late
+    assert "data/models/v2-late" in late
+    assert "data/models/v1" in late
     assert 'REPLACE_PREVIOUS="${REPLACE_PREVIOUS:-true}"' in morning
     assert "scripts/publish_weekly_score.sh" in morning
     publish = (repo_root / "scripts/publish_daily_discord.sh").read_text(encoding="utf-8")
@@ -74,6 +76,10 @@ def test_refresh_and_training_scripts_use_competitions_config(repo_root: Path) -
     assert "competition_dataset_args" in training
     assert "config/competitions.yaml" in refresh
     assert "config/competitions.yaml" in training
+    assert 'PREDICTION_WINDOW="${PREDICTION_WINDOW:-30m}"' in training
+    assert 'MODEL_VERSION="${MODEL_VERSION:-v2-late}"' in training
+    assert "data/models/v2-late" in training
+    assert "--retrain-v2-model-version" in training
     assert "39" not in refresh
     assert "61" not in refresh
     assert 'REFRESH_DETAILS="${REFRESH_DETAILS:-false}"' in refresh

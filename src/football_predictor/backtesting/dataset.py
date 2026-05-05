@@ -87,9 +87,11 @@ def parse_prediction_window(value: str) -> timedelta:
         return timedelta(hours=24)
     if normalized == "6h":
         return timedelta(hours=6)
+    if normalized == "30m":
+        return timedelta(minutes=30)
     if normalized == "40m":
         return timedelta(minutes=40)
-    raise ValueError("prediction_window must be one of: 24h, 6h, 40m")
+    raise ValueError("prediction_window must be one of: 24h, 6h, 30m, 40m")
 
 
 def export_dataset(

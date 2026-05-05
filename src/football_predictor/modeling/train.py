@@ -14,17 +14,22 @@ from football_predictor.modeling.evaluation import evaluate_probabilities
 from football_predictor.modeling.multiclass_model import FootballOutcomeModel
 from football_predictor.modeling.preprocessing import separate_metadata_target_features
 from football_predictor.modeling.probabilities import ProbabilityTriple
+from football_predictor.modeling.v2_model import (
+    V2TrainingConfig,
+    train_v2_model_from_dataset,
+)
 from football_predictor.utils.time import utc_now
 
 
 @dataclass(frozen=True)
 class TrainModelResult:
-    model: FootballOutcomeModel
+    model: Any
     model_path: Path
     metadata_path: Path
     feature_names_path: Path
     metrics_path: Path
     metrics: dict[str, Any]
+    feature_coverage_path: Path | None = None
 
 
 def train_model_from_dataset(
@@ -33,6 +38,21 @@ def train_model_from_dataset(
     *,
     model_version: str = "v1",
 ) -> TrainModelResult:
+    if model_version.startswith("v2"):
+        result = train_v2_model_from_dataset(
+            dataset_path,
+            output_dir,
+            config=V2TrainingConfig(model_version=model_version),
+        )
+        return TrainModelResult(
+            model=result.model,
+            model_path=result.model_path,
+            metadata_path=result.metadata_path,
+            feature_names_path=result.feature_names_path,
+            metrics_path=result.metrics_path,
+            metrics=result.metrics,
+            feature_coverage_path=result.feature_coverage_path,
+        )
     frame = _load_dataset(dataset_path)
     train_frame, valid_frame = _time_based_train_valid_split(frame)
     train_data = separate_metadata_target_features(train_frame, impute=True)

@@ -31,13 +31,20 @@ utiliser `api_football_players_reference.json`.
 ## Checklist Quotidienne
 
 ```bash
-football-predictor doctor --strict
-football-predictor data-quality
+scripts/football_predictor_cli.sh doctor --strict
+scripts/football_predictor_cli.sh data-quality
 scripts/smoke_test_local.sh
 ```
 
 Le smoke test local n'appelle ni API-Football ni Discord. Il valide les fichiers de reference, la
 DB, le seed local et une execution `predict-today` en dry-run.
+
+Si l'entrypoint `football-predictor` installé dans `.venv` semble en retard sur le code
+local, utiliser `scripts/football_predictor_cli.sh`. Ce wrapper injecte `PYTHONPATH=src`.
+`make install` répare aussi l'installation editable Python 3.13 avec un `.pth` non caché.
+Une erreur `Unknown competition key='global'` dans `doctor` indique souvent un paquet
+installé obsolète : `global` est une route Discord volontaire pour les channels globaux
+comme `score_pronos_semaine`, pas une compétition API-Football.
 
 ## Routine De Prediction
 
@@ -177,6 +184,7 @@ DETAILS_DAYS_BACK=7 \
 DETAILS_STATUSES="FT AET PEN" \
 DETAILS_LIMIT=100 \
 DETAILS_DELAY_SECONDS=3 \
+DETAILS_SKIP_IF_COMPLETE=true \
 scripts/refresh_all_leagues.sh
 ```
 
@@ -184,6 +192,9 @@ scripts/refresh_all_leagues.sh
 `DETAILS_STATUSES="FT AET PEN"` est converti en filtres de statuts separes. Si
 API-Football retourne `429`, le batch s'arrete au premier rate-limit. Attends le reset de
 quota ou reduis `DETAILS_LIMIT` avant de relancer.
+`DETAILS_SKIP_IF_COMPLETE=true` est le comportement recommande : le script saute les endpoints
+detail deja stockes ou deja connus comme `no content`, endpoint par endpoint, pour ne pas
+rappeler inutilement API-Football.
 
 Les joueurs absents du referentiel statique sont collectes dans
 `data/processed/unknown_players.jsonl`. Pour les resoudre progressivement dans la DB locale :

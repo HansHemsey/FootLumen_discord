@@ -64,6 +64,42 @@ webhooks:
     assert route.webhook_url == "https://example.invalid/l1"
 
 
+def test_global_weekly_score_webhook_route_is_not_treated_as_competition(
+    tmp_path: Path,
+    reference_path: Path,
+) -> None:
+    reference = load_api_football_reference(reference_path)
+    config = tmp_path / "discord_webhooks.yaml"
+    config.write_text(
+        """
+webhooks:
+  global:
+    score_pronos_semaine:
+      webhook_url_env: DISCORD_WEBHOOK_WEEKLY_SCORE
+      enabled: true
+""",
+        encoding="utf-8",
+    )
+
+    webhooks = load_discord_webhooks_config(
+        config,
+        reference,
+        env={"DISCORD_WEBHOOK_WEEKLY_SCORE": "https://example.invalid/weekly-score"},
+    )
+    route = webhooks.find_route(
+        competition_key=None,
+        league_id=None,
+        season=None,
+        channel_key="score_pronos_semaine",
+    )
+
+    assert route is not None
+    assert route.competition_key == "global"
+    assert route.league_id is None
+    assert route.season is None
+    assert route.webhook_url == "https://example.invalid/weekly-score"
+
+
 def test_discord_config_rejects_unknown_league_id(
     tmp_path: Path,
     reference_path: Path,
@@ -91,6 +127,27 @@ competitions:
 
     with pytest.raises(ReferenceLookupError):
         load_discord_channels_config(config, reference)
+
+
+def test_discord_webhook_config_rejects_unknown_competition_key(
+    tmp_path: Path,
+    reference_path: Path,
+) -> None:
+    reference = load_api_football_reference(reference_path)
+    config = tmp_path / "discord_webhooks.yaml"
+    config.write_text(
+        """
+webhooks:
+  unknown_competition:
+    predictions:
+      webhook_url_env: DISCORD_WEBHOOK_UNKNOWN
+      enabled: true
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ReferenceLookupError):
+        load_discord_webhooks_config(config, reference)
 
 
 def test_discord_config_rejects_invalid_channel_key(

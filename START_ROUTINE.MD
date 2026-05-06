@@ -431,6 +431,7 @@ DETAILS_DAYS_BACK=7 \
 DETAILS_STATUSES="FT AET PEN" \
 DETAILS_LIMIT=100 \
 DETAILS_DELAY_SECONDS=3 \
+DETAILS_SKIP_IF_COMPLETE=true \
 scripts/refresh_all_leagues.sh
 ```
 
@@ -455,6 +456,7 @@ DETAILS_DAYS_BACK=7 \
 DETAILS_STATUSES="FT AET PEN" \
 DETAILS_LIMIT=100 \
 DETAILS_DELAY_SECONDS=3 \
+DETAILS_SKIP_IF_COMPLETE=true \
 scripts/refresh_all_leagues.sh
 ```
 
@@ -473,6 +475,17 @@ matchs terminés des 7 derniers jours
 statuts FT, AET, PEN
 toutes les compétitions enabled dans config/competitions.yaml
 ```
+
+Par défaut, `refresh_all_leagues.sh` utilise maintenant :
+
+```text
+DETAILS_SKIP_IF_COMPLETE=true
+```
+
+Cela veut dire que, pour une fixture déjà enrichie, le script ne rappelle pas les endpoints
+déjà présents en DB ou déjà connus comme `no content`. Le skip se fait endpoint par endpoint :
+si `statistics` et `players` existent déjà mais que `events` manque, seul `events` est rappelé.
+Tu économises donc du quota sans empêcher la DB de compléter les trous.
 
 Budget approximatif :
 
@@ -507,6 +520,7 @@ DETAILS_TO=2026-05-07 \
 DETAILS_STATUSES="FT AET PEN" \
 DETAILS_LIMIT=100 \
 DETAILS_DELAY_SECONDS=3 \
+DETAILS_SKIP_IF_COMPLETE=true \
 scripts/refresh_all_leagues.sh
 ```
 
@@ -561,6 +575,7 @@ DETAILS_DAYS_BACK=7 \
 DETAILS_STATUSES="FT AET PEN" \
 DETAILS_LIMIT=100 \
 DETAILS_DELAY_SECONDS=3 \
+DETAILS_SKIP_IF_COMPLETE=true \
 RESOLVE_UNKNOWN_PLAYERS=true \
 UNKNOWN_PLAYERS_LIMIT=50 \
 UNKNOWN_PLAYERS_DELAY_SECONDS=2 \
@@ -683,6 +698,7 @@ DETAILS_DAYS_BACK=7 \
 DETAILS_STATUSES="FT AET PEN" \
 DETAILS_LIMIT=100 \
 DETAILS_DELAY_SECONDS=3 \
+DETAILS_SKIP_IF_COMPLETE=true \
 scripts/refresh_all_leagues.sh
 ```
 
@@ -762,6 +778,7 @@ DETAILS_DAYS_BACK=7
 DETAILS_STATUSES="FT AET PEN"
 DETAILS_LIMIT=100
 DETAILS_DELAY_SECONDS=3
+DETAILS_SKIP_IF_COMPLETE=true
 DETAILS_FROM=YYYY-MM-DD
 DETAILS_TO=YYYY-MM-DD
 ```

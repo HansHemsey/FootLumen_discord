@@ -100,8 +100,9 @@ fichiers référentiels `docs/`, initialise la DB puis lance `doctor --strict`.
 `scripts/run_predict_today.sh` lance `predict-today` avec variables optionnelles :
 `DATE`, `WINDOW`, `LEAGUE_ID`, `SEASON`, `MODEL_DIR`, `CONFIG`, `LIMIT`,
 `REFRESH_DATA`, `SEND_DISCORD`, `DRY_RUN`, `PRINT_ONLY` et `FORCE`.
-Les scripts d'automatisation quotidiens utilisent le binaire local `.venv` s'il existe,
-puis retombent sur `football-predictor` :
+Les scripts d'automatisation quotidiens utilisent `scripts/football_predictor_cli.sh`
+quand il est disponible. Ce wrapper force l'import depuis `src/` et évite d'utiliser une
+ancienne copie installée dans `.venv/site-packages`.
 
 ```bash
 # Matin : diagnostics, seed idempotent, refresh du jour et publications operationnelles.
@@ -142,12 +143,15 @@ DETAILS_DAYS_BACK=7 \
 DETAILS_STATUSES="FT AET PEN" \
 DETAILS_LIMIT=100 \
 DETAILS_DELAY_SECONDS=3 \
+DETAILS_SKIP_IF_COMPLETE=true \
 scripts/refresh_all_leagues.sh
 ```
 
 `DETAILS_STATUSES` est transforme en statuts separes, et `DETAILS_LIMIT` reste un garde-fou
 par competition. Si un `429` apparait, le batch details s'arrete au premier rate-limit au
 lieu de continuer a consommer des appels.
+`DETAILS_SKIP_IF_COMPLETE=true` est actif par defaut dans le script : les endpoints deja
+presents en DB, ou deja connus comme sans contenu, sont ignores pour economiser le quota API.
 Les joueurs live absents de `docs/api_football_players_reference.json` sont ajoutes dans
 `data/processed/unknown_players.jsonl` sans bloquer l'ingestion. Pour les enrichir ensuite
 dans la DB locale, active la resolution batch :
@@ -801,8 +805,8 @@ Les hooks sont volontairement non destructifs : `ruff check`, `ruff format --che
 Avant un lancement quotidien, exécuter :
 
 ```bash
-football-predictor doctor --strict
-football-predictor data-quality --date YYYY-MM-DD
+scripts/football_predictor_cli.sh doctor --strict
+scripts/football_predictor_cli.sh data-quality --date YYYY-MM-DD
 ```
 
 `doctor` doit confirmer que les settings sont chargés, que la DB est accessible, que les
@@ -821,6 +825,15 @@ Le diagnostic vérifie aussi explicitement les références locales :
 
 Le cache joueurs est seulement un cache de reprise de collecte. Il ne remplace pas
 `docs/api_football_players_reference.json` comme source métier.
+
+Si `football-predictor doctor --strict` affiche `Unknown competition key='global'` alors
+que `scripts/football_predictor_cli.sh doctor --strict` passe, l'entrypoint installé est
+obsolète. Réinstaller le paquet local avec `make install` ou continuer à utiliser le
+wrapper `scripts/football_predictor_cli.sh`. Sur Python 3.13, `make install` ajoute aussi
+un fichier `.pth` non caché pour que `.venv/bin/football-predictor` importe bien le
+dossier `src/`. Dans la configuration Discord, `global` est réservé aux routes non liées
+à une compétition, par exemple `score_pronos_semaine`; les compétitions API-Football
+restent sous `competitions`.
 
 Checklist avant automatisation :
 

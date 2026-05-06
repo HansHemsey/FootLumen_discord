@@ -102,6 +102,7 @@ class FixtureDetailsIngestionSummary:
     raw_snapshots: int = 0
     no_content: int = 0
     skipped: int = 0
+    skipped_complete: int = 0
     errors: list[str] = field(default_factory=list)
 
     def merge(
@@ -120,6 +121,7 @@ class FixtureDetailsIngestionSummary:
         self.raw_snapshots += other.raw_snapshots
         self.no_content += other.no_content
         self.skipped += other.skipped
+        self.skipped_complete += other.skipped_complete
         self.errors.extend(other.errors)
         return self
 
@@ -137,6 +139,7 @@ class FixtureDetailsIngestionSummary:
             "raw_snapshots": self.raw_snapshots,
             "no_content": self.no_content,
             "skipped": self.skipped,
+            "skipped_complete": self.skipped_complete,
             "errors": self.errors,
         }
 
@@ -171,12 +174,21 @@ class FixtureDetailsIngestionService:
         *,
         include: Iterable[str] | None = None,
         save_raw: bool | None = None,
+        skip_if_complete: bool = False,
     ) -> FixtureDetailsIngestionSummary:
         """Ingest all or selected detail endpoints for one stored fixture."""
         self._require_fixture_exists(fixture_id)
         self._warn_if_unknown_fixture(fixture_id)
         summary = FixtureDetailsIngestionSummary(fixture_details=1)
         for key in _normalize_include(include):
+            if skip_if_complete and self._detail_endpoint_is_complete(fixture_id, key):
+                summary.skipped_complete += 1
+                logger.info(
+                    "Skipping complete fixture detail endpoint fixture_id=%s endpoint=%s",
+                    fixture_id,
+                    DETAIL_ENDPOINTS[key],
+                )
+                continue
             try:
                 endpoint_summary = self._ingest_endpoint(
                     fixture_id,
@@ -229,6 +241,7 @@ class FixtureDetailsIngestionService:
         continue_on_error: bool = True,
         stop_on_rate_limit: bool = True,
         delay_seconds: float = 0.0,
+        skip_if_complete: bool = False,
     ) -> FixtureDetailsIngestionSummary:
         """Ingest detail endpoints for several fixtures."""
         summary = FixtureDetailsIngestionSummary()
@@ -240,6 +253,7 @@ class FixtureDetailsIngestionService:
                     fixture_id,
                     include=include,
                     save_raw=save_raw,
+                    skip_if_complete=skip_if_complete,
                 )
             except ApiFootballRateLimitError as exc:
                 summary.skipped += 1
@@ -313,6 +327,7 @@ class FixtureDetailsIngestionService:
         continue_on_error: bool = True,
         stop_on_rate_limit: bool = True,
         delay_seconds: float = 0.0,
+        skip_if_complete: bool = False,
     ) -> FixtureDetailsIngestionSummary:
         fixture_ids = self.fixture_ids_for_filters(
             league_id=league_id,
@@ -331,6 +346,7 @@ class FixtureDetailsIngestionService:
             continue_on_error=continue_on_error,
             stop_on_rate_limit=stop_on_rate_limit,
             delay_seconds=delay_seconds,
+            skip_if_complete=skip_if_complete,
         )
 
     def _ingest_single_detail(
@@ -344,6 +360,58 @@ class FixtureDetailsIngestionService:
         summary.merge(self._ingest_endpoint(fixture_id, key, save_raw=self.save_raw))
         self.session.flush()
         return summary
+
+    def _detail_endpoint_is_complete(self, fixture_id: int, key: str) -> bool:
+        return self._has_detail_rows(fixture_id, key) or self._has_no_content_snapshot(
+            fixture_id,
+            DETAIL_ENDPOINTS[key],
+        )
+
+    def _has_detail_rows(self, fixture_id: int, key: str) -> bool:
+        if key == DETAIL_STATISTICS:
+            stmt = select(models.FixtureStatistics.id).where(
+                models.FixtureStatistics.fixture_id == fixture_id
+            )
+        elif key == DETAIL_EVENTS:
+            stmt = select(models.FixtureEvent.id).where(
+                models.FixtureEvent.fixture_id == fixture_id
+            )
+        elif key == DETAIL_LINEUPS:
+            stmt = select(models.FixtureLineup.id).where(
+                models.FixtureLineup.fixture_id == fixture_id
+            )
+        elif key == DETAIL_PLAYERS:
+            stmt = select(models.FixturePlayerStats.id).where(
+                models.FixturePlayerStats.fixture_id == fixture_id
+            )
+        elif key == DETAIL_INJURIES:
+            stmt = select(models.Injury.id).where(models.Injury.fixture_id == fixture_id)
+        elif key == DETAIL_PREDICTIONS:
+            stmt = select(models.ApiPredictionSnapshot.id).where(
+                models.ApiPredictionSnapshot.fixture_id == fixture_id
+            )
+        else:
+            return False
+        return self.session.execute(stmt.limit(1)).first() is not None
+
+    def _has_no_content_snapshot(self, fixture_id: int, endpoint: str) -> bool:
+        stmt = (
+            select(models.RawApiSnapshot)
+            .where(
+                models.RawApiSnapshot.endpoint == endpoint,
+                models.RawApiSnapshot.status_code.in_((200, 204)),
+            )
+            .order_by(models.RawApiSnapshot.fetched_at.desc())
+        )
+        for snapshot in self.session.execute(stmt).scalars():
+            params = snapshot.params_json if isinstance(snapshot.params_json, dict) else {}
+            if int(params.get("fixture") or 0) != fixture_id:
+                continue
+            payload = snapshot.payload_json
+            has_response = isinstance(payload, dict) and bool(response_items(payload))
+            if snapshot.status_code == 204 or not has_response:
+                return True
+        return False
 
     def _ingest_endpoint(
         self,

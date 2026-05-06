@@ -193,6 +193,91 @@ def test_fixture_details_ingestion_snapshots_and_upserts_are_idempotent(
     assert synthetic_player.payload_json["reference_status"] == "unknown_live"
 
 
+def test_fixture_details_skip_if_complete_avoids_duplicate_api_calls(
+    tmp_path,
+    repo_root,
+) -> None:
+    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'details_skip_complete.db'}")
+    session_factory = create_session_factory(engine)
+    client = DetailPayloadClient(repo_root / "tests/fixtures/api")
+
+    with session_scope(session_factory) as session:
+        _seed_fixture(session)
+        service = FixtureDetailsIngestionService(session, client)
+
+        first = service.ingest_fixture_details(
+            1378969,
+            include=["statistics", "events", "players"],
+        )
+        client.calls.clear()
+        second = service.ingest_fixture_details(
+            1378969,
+            include=["statistics", "events", "players"],
+            skip_if_complete=True,
+        )
+
+        assert first.statistics == 2
+        assert first.events == 2
+        assert first.player_stats == 2
+        assert second.raw_snapshots == 0
+        assert second.skipped_complete == 3
+        assert client.calls == []
+
+
+def test_fixture_details_skip_if_complete_only_fetches_missing_endpoints(
+    tmp_path,
+    repo_root,
+) -> None:
+    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'details_skip_partial.db'}")
+    session_factory = create_session_factory(engine)
+    client = DetailPayloadClient(repo_root / "tests/fixtures/api")
+
+    with session_scope(session_factory) as session:
+        _seed_fixture(session)
+        service = FixtureDetailsIngestionService(session, client)
+
+        service.ingest_fixture_details(1378969, include=["statistics"])
+        client.calls.clear()
+        summary = service.ingest_fixture_details(
+            1378969,
+            include=["statistics", "events"],
+            skip_if_complete=True,
+        )
+
+        assert summary.skipped_complete == 1
+        assert summary.events == 2
+        assert client.calls == [(FIXTURES_EVENTS, {"fixture": 1378969})]
+
+
+def test_fixture_details_skip_if_complete_respects_stored_no_content_snapshot(
+    tmp_path,
+    repo_root,
+) -> None:
+    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'details_skip_no_content.db'}")
+    session_factory = create_session_factory(engine)
+    client = DetailPayloadClient(
+        repo_root / "tests/fixtures/api",
+        status_overrides={(FIXTURES_LINEUPS, 1378969): 204},
+    )
+
+    with session_scope(session_factory) as session:
+        _seed_fixture(session)
+        service = FixtureDetailsIngestionService(session, client)
+
+        first = service.ingest_fixture_details(1378969, include=["lineups"])
+        client.calls.clear()
+        second = service.ingest_fixture_details(
+            1378969,
+            include=["lineups"],
+            skip_if_complete=True,
+        )
+
+        assert first.no_content == 1
+        assert second.skipped_complete == 1
+        assert second.raw_snapshots == 0
+        assert client.calls == []
+
+
 def test_individual_fixture_detail_methods(tmp_path, repo_root, players_reference_path) -> None:
     engine = create_db_and_tables(f"sqlite:///{tmp_path / 'details_individual.db'}")
     session_factory = create_session_factory(engine)

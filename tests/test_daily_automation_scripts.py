@@ -85,6 +85,8 @@ def test_refresh_and_training_scripts_use_competitions_config(repo_root: Path) -
     assert 'REFRESH_DETAILS="${REFRESH_DETAILS:-false}"' in refresh
     assert "DETAILS_DAYS_BACK" in refresh
     assert "DETAILS_STATUSES" in refresh
+    assert 'DETAILS_SKIP_IF_COMPLETE="${DETAILS_SKIP_IF_COMPLETE:-true}"' in refresh
+    assert "--skip-if-complete" in refresh
     assert "--stop-on-rate-limit" in refresh
     assert "--delay-seconds" in refresh
     assert 'RESOLVE_UNKNOWN_PLAYERS="${RESOLVE_UNKNOWN_PLAYERS:-false}"' in refresh
@@ -119,10 +121,15 @@ def test_refresh_all_leagues_expands_weekly_detail_statuses(repo_root: Path) -> 
     assert "--days-back 7" in output
     assert "--status FT --status AET --status PEN" in output
     assert "--limit 100" in output
+    assert "--skip-if-complete" in output
 
 
 def test_makefile_exposes_daily_automation_targets(repo_root: Path) -> None:
     text = (repo_root / "Makefile").read_text(encoding="utf-8")
+
+    assert "CLI ?= scripts/football_predictor_cli.sh" in text
+    assert "$(CLI) doctor --strict" in text
+    assert "$(CLI) data-quality" in text
 
     for target in (
         "publish-daily-discord:",

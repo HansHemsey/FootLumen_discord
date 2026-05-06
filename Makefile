@@ -1,5 +1,6 @@
-PYTHON ?= python
-PIP ?= pip
+PYTHON ?= .venv/bin/python
+PIP ?= .venv/bin/pip
+CLI ?= scripts/football_predictor_cli.sh
 DOCKER ?= docker
 COMPOSE ?= docker compose
 DOCKER_IMAGE ?= football-predictor:local
@@ -19,6 +20,7 @@ PREDICT_TODAY_ARGS ?= --date $(DATE) --window $(WINDOW) --no-refresh-data --dry-
 
 install:
 	$(PYTHON) -m pip install -e ".[dev]"
+	$(PYTHON) scripts/repair_editable_install.py
 
 test:
 	$(PYTHON) -m pytest
@@ -35,18 +37,18 @@ typecheck:
 check: lint typecheck test
 
 doctor:
-	football-predictor doctor --strict
+	$(CLI) doctor --strict
 
 init-db:
-	football-predictor init-db
+	$(CLI) init-db
 
 seed-reference:
-	football-predictor seed-reference-from-docs \
+	$(CLI) seed-reference-from-docs \
 		--reference docs/api_football_reference.json \
 		--players docs/api_football_players_reference.json
 
 data-quality:
-	football-predictor data-quality
+	$(CLI) data-quality
 
 smoke:
 	scripts/smoke_test_local.sh
@@ -56,7 +58,7 @@ smoke-live:
 
 predict-fixture:
 	test -n "$(FIXTURE_ID)"
-	football-predictor predict --fixture "$(FIXTURE_ID)" --model-dir "$(MODEL_DIR)" --no-refresh
+	$(CLI) predict --fixture "$(FIXTURE_ID)" --model-dir "$(MODEL_DIR)" --no-refresh
 
 predict-today:
 	scripts/run_predict_today.sh
@@ -74,13 +76,13 @@ refresh-all-leagues:
 	scripts/refresh_all_leagues.sh
 
 train:
-	football-predictor train --dataset "$(DATASET)" --output-dir "$(MODEL_DIR)" --model-version "$(MODEL_VERSION)"
+	$(CLI) train --dataset "$(DATASET)" --output-dir "$(MODEL_DIR)" --model-version "$(MODEL_VERSION)"
 
 train-backtest-all:
 	scripts/train_backtest_all.sh
 
 backtest:
-	football-predictor backtest --dataset "$(DATASET)" --model-dir "$(MODEL_DIR)" --output-dir "$(BACKTEST_DIR)" --retrain-v2-model-version "$(MODEL_VERSION)" --format both
+	$(CLI) backtest --dataset "$(DATASET)" --model-dir "$(MODEL_DIR)" --output-dir "$(BACKTEST_DIR)" --retrain-v2-model-version "$(MODEL_VERSION)" --format both
 
 docker-build:
 	$(DOCKER) build -t $(DOCKER_IMAGE) .

@@ -23,6 +23,7 @@ DETAILS_LIMIT="${DETAILS_LIMIT:-5}"
 DETAILS_DELAY_SECONDS="${DETAILS_DELAY_SECONDS:-2}"
 DETAILS_ONLY="${DETAILS_ONLY:-statistics events players}"
 DETAILS_INCLUDE_UPCOMING="${DETAILS_INCLUDE_UPCOMING:-false}"
+DETAILS_SKIP_IF_COMPLETE="${DETAILS_SKIP_IF_COMPLETE:-true}"
 RESOLVE_UNKNOWN_PLAYERS="${RESOLVE_UNKNOWN_PLAYERS:-false}"
 UNKNOWN_PLAYERS_INPUT="${UNKNOWN_PLAYERS_INPUT:-data/processed/unknown_players.jsonl}"
 UNKNOWN_PLAYERS_LIMIT="${UNKNOWN_PLAYERS_LIMIT:-50}"
@@ -96,6 +97,9 @@ enabled_competitions "$CONFIG_PATH" | while IFS="$(printf '\t')" read -r league_
     fi
     if bool_flag "$SAVE_RAW"; then
       set -- "$@" --save-raw
+    fi
+    if bool_flag "$DETAILS_SKIP_IF_COMPLETE"; then
+      set -- "$@" --skip-if-complete
     fi
     for detail_key in $DETAILS_ONLY; do
       set -- "$@" --only "$detail_key"

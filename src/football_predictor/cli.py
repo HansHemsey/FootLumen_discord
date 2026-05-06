@@ -2000,6 +2000,14 @@ def ingest_fixture_details(
         "--stop-on-rate-limit/--continue-on-rate-limit",
         help="Stop batch ingestion after the first API-Football rate-limit response.",
     ),
+    skip_if_complete: bool = typer.Option(
+        False,
+        "--skip-if-complete",
+        help=(
+            "Skip detail endpoints already present in DB or already known as no-content. "
+            "This saves API quota in repeated historical refreshes."
+        ),
+    ),
 ) -> None:
     """Ingest detailed dynamic data for one fixture or DB-filtered fixture batch."""
     _require_refresh_api(refresh_api)
@@ -2033,9 +2041,16 @@ def ingest_fixture_details(
             )
             if fixture is not None:
                 if only:
-                    summary = service.ingest_fixture_details(fixture, include=only)
+                    summary = service.ingest_fixture_details(
+                        fixture,
+                        include=only,
+                        skip_if_complete=skip_if_complete,
+                    )
                 else:
-                    summary = service.ingest_full_fixture_details(fixture)
+                    summary = service.ingest_fixture_details(
+                        fixture,
+                        skip_if_complete=skip_if_complete,
+                    )
             else:
                 effective_statuses = status_values
                 if effective_statuses is None and not include_upcoming:
@@ -2051,6 +2066,7 @@ def ingest_fixture_details(
                     include=only,
                     stop_on_rate_limit=stop_on_rate_limit,
                     delay_seconds=delay_seconds,
+                    skip_if_complete=skip_if_complete,
                 )
         if dry_run:
             session.rollback()
@@ -2127,6 +2143,11 @@ def ingest_fixture_details_batch(
         "--stop-on-rate-limit/--continue-on-rate-limit",
         help="Stop batch ingestion after the first API-Football rate-limit response.",
     ),
+    skip_if_complete: bool = typer.Option(
+        False,
+        "--skip-if-complete",
+        help="Skip detail endpoints already present in DB or already known as no-content.",
+    ),
 ) -> None:
     """Compatibility command for fixture detail batch ingestion."""
     ingest_fixture_details(
@@ -2146,6 +2167,7 @@ def ingest_fixture_details_batch(
         save_raw=save_raw,
         delay_seconds=delay_seconds,
         stop_on_rate_limit=stop_on_rate_limit,
+        skip_if_complete=skip_if_complete,
     )
 
 

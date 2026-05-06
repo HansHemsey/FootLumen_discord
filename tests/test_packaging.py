@@ -98,7 +98,11 @@ def test_docker_entrypoint_routes_cli_commands(repo_root: Path) -> None:
 
 
 def test_local_scripts_exist_and_do_not_embed_secrets(repo_root: Path) -> None:
-    for relative_path in ("scripts/init_local.sh", "scripts/run_predict_today.sh"):
+    for relative_path in (
+        "scripts/init_local.sh",
+        "scripts/run_predict_today.sh",
+        "scripts/repair_editable_install.py",
+    ):
         text = (repo_root / relative_path).read_text(encoding="utf-8")
 
         assert "API_FOOTBALL_KEY" + "=" not in text
@@ -107,6 +111,7 @@ def test_local_scripts_exist_and_do_not_embed_secrets(repo_root: Path) -> None:
         assert "discord.com/api/webhooks" not in text
 
     init_text = (repo_root / "scripts/init_local.sh").read_text(encoding="utf-8")
+    assert "scripts/football_predictor_cli.sh" in init_text
     assert "docs/api_football_reference.json" in init_text
     assert "docs/api_football_players_reference.json" in init_text
     assert "docs/api_football_players_cache.json" in init_text
@@ -114,4 +119,7 @@ def test_local_scripts_exist_and_do_not_embed_secrets(repo_root: Path) -> None:
 
     run_text = (repo_root / "scripts/run_predict_today.sh").read_text(encoding="utf-8")
     assert "predict-today" in run_text
+
+    makefile_text = (repo_root / "Makefile").read_text(encoding="utf-8")
+    assert "scripts/repair_editable_install.py" in makefile_text
     assert "--no-refresh-data" in run_text

@@ -4,7 +4,13 @@ set -eu
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
-CLI_BIN="${FOOTBALL_PREDICTOR_BIN:-football-predictor}"
+if [ -n "${FOOTBALL_PREDICTOR_BIN:-}" ]; then
+  CLI_BIN="$FOOTBALL_PREDICTOR_BIN"
+elif [ -x "$ROOT_DIR/scripts/football_predictor_cli.sh" ]; then
+  CLI_BIN="$ROOT_DIR/scripts/football_predictor_cli.sh"
+else
+  CLI_BIN="football-predictor"
+fi
 
 if [ ! -f ".env" ]; then
   echo "Missing .env. Create it from .env.example and fill local secrets outside Git." >&2

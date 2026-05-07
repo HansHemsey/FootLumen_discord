@@ -42,18 +42,26 @@ def fit_ou_lightgbm(
     try:
         from lightgbm import LGBMClassifier
         model = LGBMClassifier(
-            n_estimators=200,
-            learning_rate=0.03,
-            num_leaves=20,
-            subsample=0.80,
-            colsample_bytree=0.80,
+            n_estimators=300,
+            learning_rate=0.02,
+            num_leaves=8,           # shallow trees — anti-overfit
+            min_child_samples=40,   # at least 40 samples per leaf
+            subsample=0.70,
+            colsample_bytree=0.50,  # use half the features per tree
+            reg_alpha=0.5,          # L1
+            reg_lambda=2.0,         # L2
             objective="binary",
             random_state=random_state,
             verbose=-1,
         )
     except ImportError:
         from sklearn.ensemble import HistGradientBoostingClassifier
-        model = HistGradientBoostingClassifier(random_state=random_state)
+        model = HistGradientBoostingClassifier(
+            max_leaf_nodes=8,
+            min_samples_leaf=40,
+            l2_regularization=2.0,
+            random_state=random_state,
+        )
 
     available = [f for f in feature_names if f in X_train.columns]
     model.fit(X_train[available], y_train)

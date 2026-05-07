@@ -62,6 +62,7 @@ class OUTrainingConfig:
     min_rows_for_meta: int = 80
     feature_min_coverage: float = 0.05
     max_features: int = 120
+    max_boosting_features: int = 40  # narrower feature set for GBDT models
     random_state: int = 42
     fit_lgbm: bool = True
     fit_xgb: bool = True
@@ -126,11 +127,48 @@ def select_ou_feature_names(
         else:
             selected = selected[:max_features]
 
-    if "market_p_over25" not in selected and "market_p_over25" in frame.columns:
-        if len(selected) >= max_features:
-            selected = selected[:-1]
-        selected.append("market_p_over25")
+    for required in ("market_p_over25", "market_odd_over25", "market_odd_under25"):
+        if required not in selected and required in frame.columns:
+            if len(selected) >= max_features:
+                selected = selected[:-1]
+            selected.append(required)
 
+    return selected
+
+
+def select_boosting_features(
+    frame: pd.DataFrame,
+    feature_names: list[str],
+    *,
+    max_features: int = 40,
+) -> list[str]:
+    """Return the top-N features for boosting models by mutual information.
+
+    Boosting models overfit badly with 100+ features on small datasets (~700 rows).
+    Limiting to the most informative subset improves generalization.
+    Market features are always included as they carry the strongest signal.
+    """
+    if len(feature_names) <= max_features:
+        return feature_names
+
+    from sklearn.feature_selection import mutual_info_classif
+    from sklearn.impute import SimpleImputer
+
+    always_include = [
+        f for f in ("market_p_over25", "market_odd_over25", "market_odd_under25",
+                    "market_ou_overround", "market_ou_bookmaker_count")
+        if f in feature_names
+    ]
+    candidates = [f for f in feature_names if f not in always_include]
+
+    imp = SimpleImputer(strategy="median")
+    X = imp.fit_transform(frame[candidates].fillna(0))
+    y = frame[TARGET_COL].values
+    mi = mutual_info_classif(X, y, random_state=42, n_neighbors=5)
+    ranked = sorted(zip(candidates, mi, strict=True), key=lambda x: x[1], reverse=True)
+
+    budget = max_features - len(always_include)
+    selected = always_include + [col for col, _ in ranked[:budget]]
     return selected
 
 
@@ -265,26 +303,34 @@ def train_ou_model_from_frames(
     y_train = train_frame[TARGET_COL].values.astype(int)
     X_train = train_frame[available_features].fillna(0)
 
+    # Narrow feature set for boosting models (reduces overfitting on ~700-row datasets)
+    boosting_features = select_boosting_features(
+        train_frame,
+        available_features,
+        max_features=resolved_config.max_boosting_features,
+    )
+    X_train_boost = train_frame[boosting_features].fillna(0)
+
     logistic_pipe, logistic_features = fit_ou_logistic(X_train, y_train, random_state=rs)
 
     lgbm_model = None
     if resolved_config.fit_lgbm:
         try:
-            lgbm_model = fit_ou_lightgbm(X_train, y_train, available_features, random_state=rs)
+            lgbm_model = fit_ou_lightgbm(X_train_boost, y_train, boosting_features, random_state=rs)
         except Exception:
             pass
 
     xgb_model = None
     if resolved_config.fit_xgb:
         try:
-            xgb_model = fit_ou_xgboost(X_train, y_train, available_features, random_state=rs)
+            xgb_model = fit_ou_xgboost(X_train_boost, y_train, boosting_features, random_state=rs)
         except Exception:
             pass
 
     catboost_model = None
     if resolved_config.fit_catboost:
         try:
-            catboost_model = fit_ou_catboost(X_train, y_train, available_features, random_state=rs)
+            catboost_model = fit_ou_catboost(X_train_boost, y_train, boosting_features, random_state=rs)
         except Exception:
             pass
 

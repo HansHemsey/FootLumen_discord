@@ -42,11 +42,15 @@ def fit_ou_xgboost(
     try:
         from xgboost import XGBClassifier
         model = XGBClassifier(
-            n_estimators=200,
-            learning_rate=0.03,
-            max_depth=4,
-            subsample=0.80,
-            colsample_bytree=0.80,
+            n_estimators=300,
+            learning_rate=0.02,
+            max_depth=3,            # shallow — anti-overfit
+            min_child_weight=15,    # high min node weight
+            subsample=0.70,
+            colsample_bytree=0.50,
+            gamma=1.0,              # min loss reduction per split
+            reg_alpha=0.5,
+            reg_lambda=2.0,
             eval_metric="logloss",
             random_state=random_state,
             verbosity=0,
@@ -54,10 +58,11 @@ def fit_ou_xgboost(
     except ImportError:
         from sklearn.ensemble import GradientBoostingClassifier
         model = GradientBoostingClassifier(
-            n_estimators=200,
-            learning_rate=0.03,
-            max_depth=4,
-            subsample=0.80,
+            n_estimators=300,
+            learning_rate=0.02,
+            max_depth=3,
+            min_samples_leaf=40,
+            subsample=0.70,
             random_state=random_state,
         )
 

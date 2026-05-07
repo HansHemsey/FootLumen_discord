@@ -42,9 +42,13 @@ def fit_ou_catboost(
     try:
         from catboost import CatBoostClassifier
         model = CatBoostClassifier(
-            iterations=200,
-            learning_rate=0.03,
-            depth=5,
+            iterations=300,
+            learning_rate=0.02,
+            depth=4,                # shallower trees
+            min_data_in_leaf=30,    # anti-overfit
+            l2_leaf_reg=5.0,        # L2 regularization
+            subsample=0.70,
+            colsample_bylevel=0.50,
             loss_function="Logloss",
             eval_metric="Logloss",
             random_seed=random_state,
@@ -52,7 +56,12 @@ def fit_ou_catboost(
         )
     except ImportError:
         from sklearn.ensemble import ExtraTreesClassifier
-        model = ExtraTreesClassifier(n_estimators=200, random_state=random_state)
+        model = ExtraTreesClassifier(
+            n_estimators=300,
+            min_samples_leaf=40,
+            max_features=0.5,
+            random_state=random_state,
+        )
 
     available = [f for f in feature_names if f in X_train.columns]
     model.fit(X_train[available], y_train)

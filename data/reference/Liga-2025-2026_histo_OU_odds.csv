@@ -1,0 +1,341 @@
+League,Date,HomeTeam,AwayTeam,Avg>2.5,Avg<2.5
+Liga,15/08/2025,Girona,Vallecano,2.14,1.68
+Liga,15/08/2025,Villarreal,Oviedo,1.84,1.92
+Liga,16/08/2025,Mallorca,Barcelona,1.6,2.25
+Liga,16/08/2025,Alaves,Levante,2.58,1.47
+Liga,16/08/2025,Valencia,Sociedad,2.76,1.41
+Liga,17/08/2025,Celta,Getafe,2.36,1.54
+Liga,17/08/2025,Ath Bilbao,Sevilla,02.07,1.71
+Liga,17/08/2025,Espanol,Ath Madrid,2.14,1.66
+Liga,18/08/2025,Elche,Betis,02.08,1.7
+Liga,19/08/2025,Real Madrid,Osasuna,1.49,2.56
+Liga,22/08/2025,Betis,Alaves,2.23,1.62
+Liga,23/08/2025,Mallorca,Celta,2.34,1.55
+Liga,23/08/2025,Ath Madrid,Elche,1.76,2
+Liga,23/08/2025,Levante,Barcelona,1.35,03.02
+Liga,24/08/2025,Osasuna,Valencia,2.34,1.55
+Liga,24/08/2025,Sociedad,Espanol,2.26,1.59
+Liga,24/08/2025,Villarreal,Girona,1.64,2.17
+Liga,24/08/2025,Oviedo,Real Madrid,1.7,02.09
+Liga,25/08/2025,Ath Bilbao,Vallecano,2.18,1.64
+Liga,25/08/2025,Sevilla,Getafe,2.55,1.48
+Liga,27/08/2025,Celta,Betis,1.85,1.9
+Liga,29/08/2025,Elche,Levante,2.24,1.61
+Liga,29/08/2025,Valencia,Getafe,2.83,1.4
+Liga,30/08/2025,Alaves,Ath Madrid,2.12,1.67
+Liga,30/08/2025,Oviedo,Sociedad,2.44,1.52
+Liga,30/08/2025,Girona,Sevilla,02.02,1.74
+Liga,30/08/2025,Real Madrid,Mallorca,1.53,2.39
+Liga,31/08/2025,Celta,Villarreal,1.67,2.12
+Liga,31/08/2025,Betis,Ath Bilbao,2.17,1.64
+Liga,31/08/2025,Espanol,Osasuna,2.22,1.61
+Liga,31/08/2025,Vallecano,Barcelona,1.41,2.74
+Liga,12/09/2025,Sevilla,Elche,2.18,1.66
+Liga,13/09/2025,Getafe,Oviedo,2.71,1.42
+Liga,13/09/2025,Sociedad,Real Madrid,1.73,02.04
+Liga,13/09/2025,Ath Bilbao,Alaves,2.21,1.62
+Liga,13/09/2025,Ath Madrid,Villarreal,1.7,02.09
+Liga,14/09/2025,Celta,Girona,1.71,02.07
+Liga,14/09/2025,Levante,Betis,1.99,1.77
+Liga,14/09/2025,Osasuna,Vallecano,2.22,1.62
+Liga,14/09/2025,Barcelona,Valencia,1.31,3.26
+Liga,15/09/2025,Espanol,Mallorca,2.24,1.6
+Liga,19/09/2025,Betis,Sociedad,1.78,1.99
+Liga,20/09/2025,Girona,Levante,1.87,1.87
+Liga,20/09/2025,Real Madrid,Espanol,1.38,2.91
+Liga,20/09/2025,Alaves,Sevilla,2.38,1.54
+Liga,20/09/2025,Villarreal,Osasuna,1.75,02.01
+Liga,20/09/2025,Valencia,Ath Bilbao,2.35,1.55
+Liga,21/09/2025,Vallecano,Celta,02.02,1.74
+Liga,21/09/2025,Mallorca,Ath Madrid,2.15,1.66
+Liga,21/09/2025,Elche,Oviedo,2.55,1.48
+Liga,21/09/2025,Barcelona,Getafe,1.53,2.41
+Liga,23/09/2025,Ath Bilbao,Girona,1.81,1.95
+Liga,23/09/2025,Espanol,Valencia,2.21,1.64
+Liga,23/09/2025,Levante,Real Madrid,1.43,2.73
+Liga,23/09/2025,Sevilla,Villarreal,1.94,1.82
+Liga,24/09/2025,Getafe,Alaves,3.21,1.32
+Liga,24/09/2025,Ath Madrid,Vallecano,1.83,1.92
+Liga,24/09/2025,Sociedad,Mallorca,2.11,1.68
+Liga,25/09/2025,Osasuna,Elche,2.28,1.58
+Liga,25/09/2025,Oviedo,Barcelona,1.4,2.78
+Liga,26/09/2025,Girona,Espanol,1.96,1.81
+Liga,27/09/2025,Getafe,Levante,2.44,1.52
+Liga,27/09/2025,Ath Madrid,Real Madrid,1.66,2.14
+Liga,27/09/2025,Mallorca,Alaves,2.74,1.42
+Liga,27/09/2025,Villarreal,Ath Bilbao,1.92,1.83
+Liga,28/09/2025,Vallecano,Sevilla,2.1,1.69
+Liga,28/09/2025,Elche,Celta,2.17,1.64
+Liga,28/09/2025,Barcelona,Sociedad,1.31,3.26
+Liga,28/09/2025,Betis,Osasuna,1.88,1.86
+Liga,30/09/2025,Valencia,Oviedo,02.09,1.69
+Liga,03/10/2025,Osasuna,Getafe,3.15,1.34
+Liga,04/10/2025,Oviedo,Levante,2.19,1.64
+Liga,04/10/2025,Girona,Valencia,1.92,1.83
+Liga,04/10/2025,Ath Bilbao,Mallorca,2.17,1.64
+Liga,04/10/2025,Real Madrid,Villarreal,1.39,2.87
+Liga,05/10/2025,Alaves,Elche,2.61,1.46
+Liga,05/10/2025,Sevilla,Barcelona,1.39,2.84
+Liga,05/10/2025,Espanol,Betis,1.79,1.96
+Liga,05/10/2025,Sociedad,Vallecano,02.09,1.69
+Liga,05/10/2025,Celta,Ath Madrid,1.79,1.96
+Liga,17/10/2025,Oviedo,Espanol,2.51,1.5
+Liga,18/10/2025,Sevilla,Mallorca,2.17,1.64
+Liga,18/10/2025,Barcelona,Girona,1.24,3.77
+Liga,18/10/2025,Villarreal,Betis,1.65,2.16
+Liga,18/10/2025,Ath Madrid,Osasuna,1.84,1.9
+Liga,19/10/2025,Elche,Ath Bilbao,2.29,1.58
+Liga,19/10/2025,Celta,Sociedad,1.92,1.83
+Liga,19/10/2025,Levante,Vallecano,1.91,1.83
+Liga,19/10/2025,Getafe,Real Madrid,1.9,1.84
+Liga,20/10/2025,Alaves,Valencia,2.39,1.54
+Liga,24/10/2025,Sociedad,Sevilla,1.93,1.83
+Liga,25/10/2025,Girona,Oviedo,1.99,1.77
+Liga,25/10/2025,Espanol,Elche,02.07,1.71
+Liga,25/10/2025,Ath Bilbao,Getafe,2.62,1.45
+Liga,25/10/2025,Valencia,Villarreal,1.8,1.94
+Liga,26/10/2025,Mallorca,Levante,2.12,1.67
+Liga,26/10/2025,Real Madrid,Barcelona,1.28,3.43
+Liga,26/10/2025,Osasuna,Celta,2.16,1.65
+Liga,26/10/2025,Vallecano,Alaves,2.53,1.48
+Liga,27/10/2025,Betis,Ath Madrid,1.79,1.95
+Liga,31/10/2025,Getafe,Girona,2.64,1.46
+Liga,01/11/2025,Villarreal,Vallecano,1.71,02.06
+Liga,01/11/2025,Ath Madrid,Sevilla,1.58,2.28
+Liga,01/11/2025,Sociedad,Ath Bilbao,2.39,1.53
+Liga,01/11/2025,Real Madrid,Valencia,1.34,03.07
+Liga,02/11/2025,Levante,Celta,1.78,1.96
+Liga,02/11/2025,Alaves,Espanol,2.48,1.5
+Liga,02/11/2025,Barcelona,Elche,1.33,3.14
+Liga,02/11/2025,Betis,Mallorca,1.85,1.9
+Liga,03/11/2025,Oviedo,Osasuna,2.4,1.53
+Liga,07/11/2025,Elche,Sociedad,2.18,1.65
+Liga,08/11/2025,Girona,Alaves,2.27,1.6
+Liga,08/11/2025,Sevilla,Osasuna,2.22,1.62
+Liga,08/11/2025,Ath Madrid,Levante,1.45,2.62
+Liga,08/11/2025,Espanol,Villarreal,1.73,02.03
+Liga,09/11/2025,Ath Bilbao,Oviedo,2.16,1.65
+Liga,09/11/2025,Vallecano,Real Madrid,1.57,2.3
+Liga,09/11/2025,Mallorca,Getafe,2.96,1.36
+Liga,09/11/2025,Valencia,Betis,1.87,1.88
+Liga,09/11/2025,Celta,Barcelona,1.4,2.79
+Liga,21/11/2025,Valencia,Levante,1.84,1.92
+Liga,22/11/2025,Alaves,Celta,2.29,1.58
+Liga,22/11/2025,Barcelona,Ath Bilbao,1.5,2.49
+Liga,22/11/2025,Osasuna,Sociedad,2.28,1.59
+Liga,22/11/2025,Villarreal,Mallorca,1.65,2.17
+Liga,23/11/2025,Oviedo,Vallecano,2.2,1.63
+Liga,23/11/2025,Betis,Girona,1.6,2.24
+Liga,23/11/2025,Getafe,Ath Madrid,2.52,1.49
+Liga,23/11/2025,Elche,Real Madrid,1.47,2.57
+Liga,24/11/2025,Espanol,Sevilla,02.06,1.71
+Liga,28/11/2025,Getafe,Elche,2.79,1.41
+Liga,29/11/2025,Mallorca,Osasuna,2.43,1.52
+Liga,29/11/2025,Barcelona,Alaves,1.35,03.03
+Liga,29/11/2025,Levante,Ath Bilbao,02.07,1.71
+Liga,29/11/2025,Ath Madrid,Oviedo,1.66,2.16
+Liga,30/11/2025,Sociedad,Villarreal,1.84,1.9
+Liga,30/11/2025,Sevilla,Betis,1.9,1.83
+Liga,30/11/2025,Celta,Espanol,1.85,1.89
+Liga,30/11/2025,Girona,Real Madrid,1.39,2.87
+Liga,01/12/2025,Vallecano,Valencia,02.08,1.7
+Liga,02/12/2025,Barcelona,Ath Madrid,1.4,2.86
+Liga,03/12/2025,Ath Bilbao,Real Madrid,1.7,02.08
+Liga,05/12/2025,Oviedo,Mallorca,2.46,1.52
+Liga,06/12/2025,Villarreal,Getafe,02.09,1.69
+Liga,06/12/2025,Alaves,Sociedad,2.5,1.49
+Liga,06/12/2025,Betis,Barcelona,1.34,03.06
+Liga,06/12/2025,Ath Bilbao,Ath Madrid,2.14,1.66
+Liga,07/12/2025,Elche,Girona,1.86,1.89
+Liga,07/12/2025,Valencia,Sevilla,02.08,1.7
+Liga,07/12/2025,Espanol,Vallecano,2.22,1.62
+Liga,07/12/2025,Real Madrid,Celta,1.36,03.01
+Liga,08/12/2025,Osasuna,Levante,1.94,1.81
+Liga,12/12/2025,Sociedad,Girona,1.88,1.87
+Liga,13/12/2025,Ath Madrid,Valencia,1.7,02.08
+Liga,13/12/2025,Mallorca,Elche,2.3,1.57
+Liga,13/12/2025,Barcelona,Osasuna,1.23,3.87
+Liga,13/12/2025,Getafe,Espanol,03.01,1.36
+Liga,14/12/2025,Sevilla,Oviedo,2.18,1.64
+Liga,14/12/2025,Celta,Ath Bilbao,2.13,1.67
+Liga,14/12/2025,Alaves,Real Madrid,1.71,02.05
+Liga,15/12/2025,Vallecano,Betis,1.92,1.83
+Liga,19/12/2025,Valencia,Mallorca,2.4,1.54
+Liga,20/12/2025,Oviedo,Celta,2.21,1.62
+Liga,20/12/2025,Levante,Sociedad,1.87,1.86
+Liga,20/12/2025,Osasuna,Alaves,2.52,1.49
+Liga,20/12/2025,Real Madrid,Sevilla,1.34,3.11
+Liga,21/12/2025,Girona,Ath Madrid,1.73,02.03
+Liga,21/12/2025,Villarreal,Barcelona,1.26,3.66
+Liga,21/12/2025,Elche,Vallecano,2.3,1.57
+Liga,21/12/2025,Betis,Getafe,2.34,1.56
+Liga,22/12/2025,Ath Bilbao,Espanol,2.22,1.61
+Liga,02/01/2026,Vallecano,Getafe,3.19,1.33
+Liga,03/01/2026,Celta,Valencia,02.09,1.69
+Liga,03/01/2026,Osasuna,Ath Bilbao,2.38,1.54
+Liga,03/01/2026,Elche,Villarreal,1.75,2
+Liga,03/01/2026,Espanol,Barcelona,1.39,2.86
+Liga,04/01/2026,Sevilla,Levante,1.87,1.86
+Liga,04/01/2026,Real Madrid,Betis,1.44,2.66
+Liga,04/01/2026,Alaves,Oviedo,2.77,1.4
+Liga,04/01/2026,Mallorca,Girona,2.17,1.64
+Liga,04/01/2026,Sociedad,Ath Madrid,2,1.75
+Liga,09/01/2026,Getafe,Sociedad,03.04,1.36
+Liga,10/01/2026,Oviedo,Betis,02.05,1.72
+Liga,10/01/2026,Villarreal,Alaves,1.85,1.88
+Liga,10/01/2026,Girona,Osasuna,02.08,1.69
+Liga,10/01/2026,Valencia,Elche,2.12,1.67
+Liga,11/01/2026,Vallecano,Mallorca,2.4,1.53
+Liga,11/01/2026,Levante,Espanol,02.04,1.73
+Liga,12/01/2026,Sevilla,Celta,1.97,1.77
+Liga,16/01/2026,Espanol,Girona,02.07,1.71
+Liga,17/01/2026,Real Madrid,Levante,1.27,3.52
+Liga,17/01/2026,Mallorca,Ath Bilbao,2.45,1.51
+Liga,17/01/2026,Osasuna,Oviedo,2.35,1.55
+Liga,17/01/2026,Betis,Villarreal,1.65,2.16
+Liga,18/01/2026,Getafe,Valencia,3.17,1.32
+Liga,18/01/2026,Ath Madrid,Alaves,1.82,1.91
+Liga,18/01/2026,Celta,Vallecano,2.2,1.63
+Liga,18/01/2026,Sociedad,Barcelona,1.39,2.85
+Liga,19/01/2026,Elche,Sevilla,2.11,1.68
+Liga,23/01/2026,Levante,Elche,1.98,1.78
+Liga,24/01/2026,Vallecano,Osasuna,2.32,1.56
+Liga,24/01/2026,Valencia,Espanol,2.23,1.61
+Liga,24/01/2026,Sevilla,Ath Bilbao,2.25,1.6
+Liga,24/01/2026,Villarreal,Real Madrid,1.46,2.62
+Liga,25/01/2026,Ath Madrid,Mallorca,1.66,2.15
+Liga,25/01/2026,Barcelona,Oviedo,1.22,04.02
+Liga,25/01/2026,Sociedad,Celta,02.01,1.75
+Liga,25/01/2026,Alaves,Betis,2.24,1.6
+Liga,26/01/2026,Girona,Getafe,2.76,1.41
+Liga,30/01/2026,Espanol,Alaves,2.51,1.5
+Liga,31/01/2026,Oviedo,Girona,2.23,1.61
+Liga,31/01/2026,Osasuna,Villarreal,1.87,1.87
+Liga,31/01/2026,Levante,Ath Madrid,1.74,02.02
+Liga,31/01/2026,Elche,Barcelona,1.33,3.15
+Liga,01/02/2026,Real Madrid,Vallecano,1.46,2.6
+Liga,01/02/2026,Betis,Valencia,1.86,1.88
+Liga,01/02/2026,Getafe,Celta,2.86,1.39
+Liga,01/02/2026,Ath Bilbao,Sociedad,2.19,1.64
+Liga,02/02/2026,Mallorca,Sevilla,2.2,1.63
+Liga,06/02/2026,Celta,Osasuna,2.19,1.65
+Liga,07/02/2026,Barcelona,Mallorca,1.25,3.72
+Liga,07/02/2026,Sociedad,Elche,1.8,1.94
+Liga,08/02/2026,Alaves,Getafe,3.34,1.3
+Liga,08/02/2026,Ath Bilbao,Levante,1.94,1.8
+Liga,08/02/2026,Sevilla,Girona,1.97,1.77
+Liga,08/02/2026,Ath Madrid,Betis,1.65,2.17
+Liga,08/02/2026,Valencia,Real Madrid,1.55,2.35
+Liga,09/02/2026,Villarreal,Espanol,1.72,02.04
+Liga,13/02/2026,Elche,Osasuna,02.01,1.75
+Liga,14/02/2026,Espanol,Celta,2.16,1.66
+Liga,14/02/2026,Getafe,Villarreal,2.39,1.53
+Liga,14/02/2026,Sevilla,Alaves,2.34,1.55
+Liga,14/02/2026,Real Madrid,Sociedad,1.42,2.72
+Liga,15/02/2026,Oviedo,Ath Bilbao,2.32,1.57
+Liga,15/02/2026,Vallecano,Ath Madrid,02.04,1.72
+Liga,15/02/2026,Levante,Valencia,1.95,1.79
+Liga,15/02/2026,Mallorca,Betis,1.99,1.76
+Liga,16/02/2026,Girona,Barcelona,1.3,3.3
+Liga,18/02/2026,Levante,Villarreal,1.65,2.16
+Liga,20/02/2026,Ath Bilbao,Elche,1.83,1.91
+Liga,21/02/2026,Sociedad,Oviedo,1.91,1.84
+Liga,21/02/2026,Betis,Vallecano,1.88,1.86
+Liga,21/02/2026,Osasuna,Real Madrid,1.65,2.15
+Liga,21/02/2026,Ath Madrid,Espanol,1.83,1.91
+Liga,22/02/2026,Getafe,Sevilla,2.87,1.38
+Liga,22/02/2026,Barcelona,Levante,1.21,4.23
+Liga,22/02/2026,Celta,Mallorca,2.14,1.66
+Liga,22/02/2026,Villarreal,Valencia,1.76,1.99
+Liga,23/02/2026,Alaves,Girona,2.41,1.53
+Liga,27/02/2026,Levante,Alaves,2.23,1.62
+Liga,28/02/2026,Vallecano,Ath Bilbao,2.26,1.59
+Liga,28/02/2026,Barcelona,Villarreal,1.26,3.62
+Liga,28/02/2026,Mallorca,Sociedad,02.03,1.73
+Liga,28/02/2026,Oviedo,Ath Madrid,1.98,1.76
+Liga,01/03/2026,Elche,Espanol,1.99,1.76
+Liga,01/03/2026,Valencia,Osasuna,2.19,1.63
+Liga,01/03/2026,Betis,Sevilla,1.93,1.81
+Liga,01/03/2026,Girona,Celta,1.95,1.78
+Liga,02/03/2026,Real Madrid,Getafe,1.77,1.98
+Liga,04/03/2026,Vallecano,Oviedo,02.09,1.69
+Liga,06/03/2026,Celta,Real Madrid,1.98,1.78
+Liga,07/03/2026,Osasuna,Mallorca,2.16,1.65
+Liga,07/03/2026,Levante,Girona,1.89,1.85
+Liga,07/03/2026,Ath Madrid,Sociedad,1.75,2
+Liga,07/03/2026,Ath Bilbao,Barcelona,1.47,2.57
+Liga,08/03/2026,Villarreal,Elche,1.56,2.31
+Liga,08/03/2026,Getafe,Betis,2.69,1.43
+Liga,08/03/2026,Sevilla,Vallecano,2.17,1.64
+Liga,08/03/2026,Valencia,Alaves,2.38,1.54
+Liga,09/03/2026,Espanol,Oviedo,2.15,1.65
+Liga,13/03/2026,Alaves,Villarreal,1.93,1.82
+Liga,14/03/2026,Girona,Ath Bilbao,1.99,1.77
+Liga,14/03/2026,Ath Madrid,Getafe,2.34,1.55
+Liga,14/03/2026,Oviedo,Valencia,2.31,1.57
+Liga,14/03/2026,Real Madrid,Elche,1.42,2.69
+Liga,15/03/2026,Mallorca,Espanol,2.31,1.57
+Liga,15/03/2026,Barcelona,Sevilla,1.31,3.25
+Liga,15/03/2026,Betis,Celta,1.91,1.81
+Liga,15/03/2026,Sociedad,Osasuna,1.96,1.78
+Liga,16/03/2026,Vallecano,Levante,1.86,1.87
+Liga,20/03/2026,Villarreal,Sociedad,1.75,02.02
+Liga,21/03/2026,Elche,Mallorca,02.05,1.72
+Liga,21/03/2026,Espanol,Getafe,2.9,1.38
+Liga,21/03/2026,Levante,Oviedo,02.07,1.7
+Liga,21/03/2026,Osasuna,Girona,1.93,1.81
+Liga,21/03/2026,Sevilla,Valencia,2.29,1.57
+Liga,22/03/2026,Barcelona,Vallecano,1.33,3.16
+Liga,22/03/2026,Celta,Alaves,2.27,1.59
+Liga,22/03/2026,Ath Bilbao,Betis,1.9,1.84
+Liga,22/03/2026,Real Madrid,Ath Madrid,1.57,2.31
+Liga,03/04/2026,Vallecano,Elche,1.8,1.96
+Liga,04/04/2026,Sociedad,Levante,1.69,2.11
+Liga,04/04/2026,Mallorca,Real Madrid,1.63,2.19
+Liga,04/04/2026,Betis,Espanol,1.81,1.93
+Liga,04/04/2026,Ath Madrid,Barcelona,1.45,2.63
+Liga,05/04/2026,Getafe,Ath Bilbao,2.98,1.36
+Liga,05/04/2026,Valencia,Celta,2.1,1.68
+Liga,05/04/2026,Oviedo,Sevilla,2.33,1.55
+Liga,05/04/2026,Alaves,Osasuna,2.25,1.59
+Liga,06/04/2026,Girona,Villarreal,1.67,2.12
+Liga,10/04/2026,Real Madrid,Girona,1.42,2.77
+Liga,11/04/2026,Sociedad,Alaves,1.86,1.88
+Liga,11/04/2026,Elche,Valencia,02.01,1.74
+Liga,11/04/2026,Barcelona,Espanol,1.3,3.34
+Liga,11/04/2026,Sevilla,Ath Madrid,2.1,1.68
+Liga,12/04/2026,Osasuna,Betis,1.88,1.86
+Liga,12/04/2026,Mallorca,Vallecano,2.19,1.63
+Liga,12/04/2026,Celta,Oviedo,1.92,1.82
+Liga,12/04/2026,Ath Bilbao,Villarreal,1.88,1.86
+Liga,13/04/2026,Levante,Getafe,2.68,1.44
+Liga,21/04/2026,Ath Bilbao,Osasuna,1.93,1.82
+Liga,21/04/2026,Mallorca,Valencia,2.1,1.68
+Liga,21/04/2026,Girona,Betis,1.83,1.92
+Liga,21/04/2026,Real Madrid,Alaves,1.4,2.81
+Liga,22/04/2026,Elche,Ath Madrid,1.66,2.13
+Liga,22/04/2026,Sociedad,Getafe,2.51,1.49
+Liga,22/04/2026,Barcelona,Celta,1.28,3.48
+Liga,23/04/2026,Levante,Sevilla,2.1,1.68
+Liga,23/04/2026,Vallecano,Espanol,2.11,1.67
+Liga,23/04/2026,Oviedo,Villarreal,1.9,1.83
+Liga,24/04/2026,Betis,Real Madrid,1.48,2.54
+Liga,25/04/2026,Alaves,Mallorca,02.09,1.68
+Liga,25/04/2026,Getafe,Barcelona,1.8,1.94
+Liga,25/04/2026,Valencia,Girona,1.88,1.85
+Liga,25/04/2026,Ath Madrid,Ath Bilbao,1.83,1.9
+Liga,26/04/2026,Vallecano,Sociedad,1.92,1.81
+Liga,26/04/2026,Oviedo,Elche,02.04,1.72
+Liga,26/04/2026,Osasuna,Sevilla,02.02,1.73
+Liga,26/04/2026,Villarreal,Celta,1.79,1.95
+Liga,27/04/2026,Espanol,Levante,1.89,1.84
+Liga,01/05/2026,Girona,Mallorca,1.81,1.94
+Liga,02/05/2026,Villarreal,Levante,1.56,2.31
+Liga,02/05/2026,Valencia,Ath Madrid,1.77,1.97
+Liga,02/05/2026,Alaves,Ath Bilbao,1.97,1.76
+Liga,02/05/2026,Osasuna,Barcelona,1.52,2.43
+Liga,03/05/2026,Celta,Elche,1.71,02.06
+Liga,03/05/2026,Getafe,Vallecano,2.62,1.45
+Liga,03/05/2026,Betis,Oviedo,1.83,1.9
+Liga,03/05/2026,Espanol,Real Madrid,1.53,2.39
+Liga,04/05/2026,Sevilla,Sociedad,1.92,1.82

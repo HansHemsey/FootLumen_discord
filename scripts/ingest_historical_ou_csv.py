@@ -47,11 +47,42 @@ logger = logging.getLogger(__name__)
 # Extend this dict whenever a new season CSV uses different short names.
 # ---------------------------------------------------------------------------
 NAME_MAP: dict[str, str] = {
-    "Brest":    "Stade Brestois 29",
-    "Paris SG": "Paris Saint Germain",
-    "Man United": "Manchester United",
-    "Man City":   "Manchester City",
-    "Spurs":      "Tottenham",
+    # Ligue 1
+    "Brest":         "Stade Brestois 29",
+    "Paris SG":      "Paris Saint Germain",
+    # Premier League
+    "Man City":      "Manchester City",
+    "Man United":    "Manchester United",
+    "Nott'm Forest": "Nottingham Forest",
+    "Spurs":         "Tottenham",
+    # Bundesliga
+    "Bayern Munich": "Bayern München",
+    "Ein Frankfurt": "Eintracht Frankfurt",
+    "FC Koln":       "1. FC Köln",
+    "Freiburg":      "SC Freiburg",
+    "Hamburg":       "Hamburger SV",
+    "Heidenheim":    "1. FC Heidenheim",
+    "Hoffenheim":    "1899 Hoffenheim",
+    "Leverkusen":    "Bayer Leverkusen",
+    "M'gladbach":    "Borussia Mönchengladbach",
+    "Mainz":         "FSV Mainz 05",
+    "St Pauli":      "FC St. Pauli",
+    "Stuttgart":     "VfB Stuttgart",
+    "Augsburg":      "FC Augsburg",
+    "Wolfsburg":     "VfL Wolfsburg",
+    "Dortmund":      "Borussia Dortmund",
+    # Serie A
+    "Milan":         "AC Milan",
+    "Roma":          "AS Roma",
+    "Verona":        "Hellas Verona",
+    # La Liga
+    "Ath Bilbao":    "Athletic Club",
+    "Ath Madrid":    "Atletico Madrid",
+    "Betis":         "Real Betis",
+    "Celta":         "Celta Vigo",
+    "Espanol":       "Espanyol",
+    "Sociedad":      "Real Sociedad",
+    "Vallecano":     "Rayo Vallecano",
 }
 
 BOOKMAKER_ID   = 9999

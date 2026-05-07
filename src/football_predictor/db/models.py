@@ -427,6 +427,63 @@ class ModelPrediction(Base, TimestampMixin):
     payload_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
 
 
+class OUFeatureSnapshot(Base, TimestampMixin):
+    __tablename__ = "ou_feature_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "fixture_id",
+            "prediction_time",
+            "feature_version",
+            "threshold",
+            name="uq_ou_feature_snapshot",
+        ),
+        Index("ix_ou_feature_snapshot_fixture_time", "fixture_id", "prediction_time"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    fixture_id: Mapped[int] = mapped_column(ForeignKey("fixtures.fixture_id"), index=True)
+    prediction_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    feature_version: Mapped[str] = mapped_column(String(64))
+    threshold: Mapped[float] = mapped_column(Float, default=2.5)
+    features_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+    data_quality_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+
+
+class OUModelPrediction(Base, TimestampMixin):
+    __tablename__ = "ou_model_predictions"
+    __table_args__ = (
+        Index("ix_ou_prediction_fixture_time", "fixture_id", "prediction_time"),
+        Index("ix_ou_prediction_model_version", "model_version"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    fixture_id: Mapped[int] = mapped_column(ForeignKey("fixtures.fixture_id"), index=True)
+    ou_feature_snapshot_id: Mapped[int] = mapped_column(
+        ForeignKey("ou_feature_snapshots.id"), index=True
+    )
+    prediction_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    model_version: Mapped[str] = mapped_column(String(64))
+    threshold: Mapped[float] = mapped_column(Float, default=2.5)
+    p_over: Mapped[float] = mapped_column(Float)
+    p_under: Mapped[float] = mapped_column(Float)
+    xg_home: Mapped[float | None] = mapped_column(Float, nullable=True)
+    xg_away: Mapped[float | None] = mapped_column(Float, nullable=True)
+    xg_total: Mapped[float | None] = mapped_column(Float, nullable=True)
+    market_p_over: Mapped[float | None] = mapped_column(Float, nullable=True)
+    market_p_under: Mapped[float | None] = mapped_column(Float, nullable=True)
+    edge_over: Mapped[float | None] = mapped_column(Float, nullable=True)
+    edge_under: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ev_over: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ev_under: Mapped[float | None] = mapped_column(Float, nullable=True)
+    market_odd_over: Mapped[float | None] = mapped_column(Float, nullable=True)
+    market_odd_under: Mapped[float | None] = mapped_column(Float, nullable=True)
+    confidence_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    confidence_label: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    expert_probabilities_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+    data_quality_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+    payload_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+
+
 class DiscordMessage(Base, TimestampMixin):
     __tablename__ = "discord_messages"
 

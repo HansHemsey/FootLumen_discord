@@ -45,10 +45,13 @@ if bool_flag "$REFRESH_DATA"; then
       standings_cmd="$standings_cmd --save-raw"
       odds_cmd="$odds_cmd --save-raw"
     fi
+    ou_odds_cmd="ou ingest-odds --date $RUN_DATE --league-id $league_id --season $season"
     # shellcheck disable=SC2086
     run_optional "Refreshing standings competition=$competition_key league=$league_id season=$season" "$CLI_BIN" $standings_cmd
     # shellcheck disable=SC2086
     run_optional "Refreshing odds date=$RUN_DATE competition=$competition_key league=$league_id season=$season" "$CLI_BIN" $odds_cmd
+    # shellcheck disable=SC2086
+    run_optional "Refreshing O/U odds date=$RUN_DATE competition=$competition_key league=$league_id season=$season" "$CLI_BIN" $ou_odds_cmd
   done
 fi
 

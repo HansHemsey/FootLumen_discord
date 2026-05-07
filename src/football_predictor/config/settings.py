@@ -101,6 +101,18 @@ class Settings(BaseSettings):
         default=None,
         validation_alias="MARKET_1X2_BET_ID",
     )
+    market_ou25_bet_name: str = Field(
+        default="Goals Over/Under",
+        validation_alias="MARKET_OU25_BET_NAME",
+    )
+    market_ou25_bet_id: int = Field(
+        default=5,
+        validation_alias="MARKET_OU25_BET_ID",
+    )
+    ou_model_dir: Path = Field(
+        default=Path("data/models/ou-v1"),
+        validation_alias="OU_MODEL_DIR",
+    )
 
     @field_validator("market_1x2_bet_id", mode="before")
     @classmethod

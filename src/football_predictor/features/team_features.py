@@ -174,6 +174,27 @@ def build_team_features(
     return TeamFeatureResult(features_json=features, data_quality_json=data_quality)
 
 
+def get_historical_matches_for_team(
+    session: Session,
+    fixture_id: int,
+    team_id: int,
+    prediction_time: datetime,
+) -> list[TeamMatch]:
+    """Return finished historical TeamMatch objects for a team, PIT-safe.
+
+    Exposed as public API for the O/U module feature engineering.
+    """
+    target = session.get(models.Fixture, fixture_id)
+    if target is None:
+        return []
+    return _historical_matches_for_team(
+        session,
+        target,
+        team_id,
+        ensure_aware_utc(prediction_time),
+    )
+
+
 def save_team_feature_snapshot(
     session: Session,
     fixture_id: int,

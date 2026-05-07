@@ -207,6 +207,68 @@ RESOLVE_UNKNOWN_PLAYERS=true UNKNOWN_PLAYERS_LIMIT=50 UNKNOWN_PLAYERS_DELAY_SECO
 Cette resolution est optionnelle, explicite et ne modifie jamais
 `docs/api_football_players_reference.json`.
 
+### Config Production Et Historique
+
+`config/competitions.yaml` est la config de production quotidienne. Les scripts
+`daily_morning.sh`, `daily_late.sh`, `daily_ou.sh` et `refresh_all_leagues.sh` l'utilisent
+par defaut pour rafraichir uniquement les competitions suivies en saison courante.
+
+`config/competitions_history.yaml` est la config d'entrainement/backtest. Elle liste Ligue
+1, Premier League, La Liga, Bundesliga et Serie A sur les saisons `2022`, `2023`, `2024`
+et `2025`, avec une cle unique par saison et un `reference_key` qui valide le vrai
+`league_id` depuis `docs/api_football_reference.json`.
+
+Les fixtures hebdomadaires ingerees via la config production sont stockees une seule fois
+dans la DB avec leur `league_id` et leur `season`. Elles sont ensuite reprises par les
+datasets d'entrainement car la saison courante existe aussi dans
+`config/competitions_history.yaml`.
+
+### Backfill Saison Complete
+
+Pour enrichir une saison entiere sans modifier `config/competitions.yaml`, utilise :
+
+```bash
+SEASON=2024 scripts/backfill_season.sh
+```
+
+Le script cree `data/processed/backfill/competitions_2024.yaml` depuis
+`config/competitions_history.yaml` quand il existe, en filtrant uniquement `season: 2024`.
+S'il n'existe pas, il genere un fallback temporaire depuis la config de production avec des
+`reference_key` historiques. Cela permet de gerer les montees/descentes via `ingest-teams`,
+puis de stocker les fixtures et details avec le bon couple `league_id` / `season`.
+Les competitions de coupe ou globales sont desactivees par defaut pour eviter d'appeler une
+CDM avec une saison de championnat. `BACKFILL_INCLUDE_CUPS=true` est reserve aux backfills
+specifiques de coupes.
+
+Parametres par defaut :
+
+```text
+DETAILS_FROM=2024-08-01
+DETAILS_TO=2025-07-31
+DETAILS_ONLY="statistics events players"
+DETAILS_STATUSES="FT AET PEN"
+DETAILS_LIMIT=400
+DETAILS_DELAY_SECONDS=3
+DETAILS_SKIP_IF_COMPLETE=true
+REFRESH_ODDS=false
+```
+
+`DETAILS_LIMIT` reste un plafond par ligue/saison. Pour resoudre les joueurs inconnus dans
+la meme passe, ajoute `RESOLVE_UNKNOWN_PLAYERS=true`, ou lance la resolution separement
+
+### Entrainement Et Backtest Multi-Saisons
+
+```bash
+scripts/train_backtest_all.sh
+scripts/train_backtest_ou.sh
+```
+
+Ces deux scripts utilisent `config/competitions_history.yaml` par defaut. Le premier
+entraine/backteste le modele 1X2 `data/models/v2-late`; le second entraine/backteste le
+modele Over/Under `data/models/ou-v1`. Les scripts quotidiens continuent d'utiliser
+`config/competitions.yaml`, donc l'historique ne ralentit pas la production.
+avec les refresh desactives si tu veux economiser le quota.
+
 ## Refresh Live Et Quota API
 
 Les appels live sont toujours explicites :

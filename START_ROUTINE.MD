@@ -531,6 +531,77 @@ Ne fais pas de backfill massif sans période :
 REFRESH_DETAILS=true DETAILS_LIMIT=9999 scripts/refresh_all_leagues.sh
 ```
 
+### Config production vs historique
+
+```text
+config/competitions.yaml         : production quotidienne, saison courante
+config/competitions_history.yaml : entrainement/backtest, saisons 2022 a 2025
+```
+
+Le refresh quotidien et hebdomadaire ecrit toujours en DB avec le bon couple
+`league_id` / `season`. Le modele retrouve ensuite ces fixtures via
+`config/competitions_history.yaml`, parce que la saison courante y est incluse. Il ne faut
+donc pas dupliquer les lignes historiques dans `config/competitions.yaml`.
+
+### Backfill d'une saison complete
+
+Pour remonter proprement une saison API-Football entiere sur toutes les ligues activees,
+utilise le script dedie :
+
+```bash
+SEASON=2024 scripts/backfill_season.sh
+```
+
+Cela signifie :
+
+```text
+season API-Football : 2024
+periode par defaut : 2024-08-01 -> 2025-07-31
+ligues             : les cinq championnats de config/competitions_history.yaml
+details            : statistics, events, players
+statuts            : FT, AET, PEN
+limite             : 400 fixtures par ligue/saison
+delai              : 3 secondes entre fixtures
+skip               : endpoints deja complets ignores
+```
+
+Le script genere automatiquement :
+
+```text
+data/processed/backfill/competitions_2024.yaml
+```
+
+avec uniquement les lignes de la saison demandee. Il lance aussi `ingest-teams` sur cette
+config, ce qui permet de recuperer les equipes propres a cette saison, y compris les clubs
+promus ou relegues. Les fixtures seront ensuite stockees avec leur `season` API-Football
+reelle. Les competitions de coupe/globales, comme la CDM, restent exclues par defaut du
+backfill de championnats.
+
+Si tu veux resoudre les joueurs inconnus dans la meme passe :
+
+```bash
+SEASON=2024 \
+RESOLVE_UNKNOWN_PLAYERS=true \
+UNKNOWN_PLAYERS_LIMIT=100 \
+UNKNOWN_PLAYERS_DELAY_SECONDS=2 \
+scripts/backfill_season.sh
+```
+
+Pour plus de prudence quota, fais plutot en deux temps :
+
+```bash
+SEASON=2024 scripts/backfill_season.sh
+
+REFRESH_FIXTURES=false \
+REFRESH_STANDINGS=false \
+REFRESH_ODDS=false \
+REFRESH_DETAILS=false \
+RESOLVE_UNKNOWN_PLAYERS=true \
+UNKNOWN_PLAYERS_LIMIT=100 \
+UNKNOWN_PLAYERS_DELAY_SECONDS=2 \
+scripts/refresh_all_leagues.sh
+```
+
 ---
 
 ## 11. Joueurs Inconnus
@@ -715,7 +786,18 @@ scripts/refresh_all_leagues.sh
 
 ```bash
 scripts/train_backtest_all.sh
+scripts/train_backtest_ou.sh
 ```
+
+Ces scripts utilisent `config/competitions_history.yaml` par defaut :
+
+```text
+1X2 : data/models/v2-late
+O/U : data/models/ou-v1
+```
+
+Les scripts de production (`daily_morning.sh`, `daily_late.sh`, `daily_ou.sh`) restent sur
+`config/competitions.yaml`.
 
 ---
 

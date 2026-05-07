@@ -22,6 +22,7 @@ class CompetitionConfig:
     country: str | None
     enabled: bool = True
     source: str | None = None
+    reference_key: str | None = None
 
 
 def competitions_from_reference(reference: ApiFootballReference) -> list[CompetitionConfig]:
@@ -33,6 +34,7 @@ def competitions_from_reference(reference: ApiFootballReference) -> list[Competi
             name=league.name,
             country=league.country,
             source="docs/api_football_reference.json",
+            reference_key=league.key,
         )
         for league in reference.leagues()
     ]
@@ -50,6 +52,7 @@ def competition_config_payload_from_reference(reference: ApiFootballReference) -
                 "country": competition.country,
                 "enabled": competition.enabled,
                 "source": competition.source,
+                "reference_key": competition.reference_key,
             }
             for competition in competitions_from_reference(reference)
         ]
@@ -79,7 +82,10 @@ def load_competition_config(
             raise ReferenceValidationError(f"Invalid competition row in {Path(path)}")
         enabled = bool(item.get("enabled", True))
         key = item.get("key")
-        if key:
+        reference_key = item.get("reference_key")
+        if reference_key:
+            league = reference.find_league_by_key(str(reference_key))
+        elif key:
             league = reference.find_league_by_key(str(key))
         elif item.get("league_id") is not None:
             league = reference.find_league_by_id(
@@ -91,11 +97,21 @@ def load_competition_config(
 
         league_id = int(item.get("league_id") or league.league_id)
         season = int(item.get("season") or league.season)
-        if key and (league_id != league.league_id or season != league.season):
+        if season <= 0:
+            raise ReferenceValidationError(f"Competition key={key!r} has invalid season={season}")
+        if reference_key and league_id != league.league_id:
+            raise ReferenceValidationError(
+                f"Competition reference_key={reference_key!r} does not match league_id={league_id}"
+            )
+        if not reference_key and key and (
+            league_id != league.league_id or season != league.season
+        ):
             raise ReferenceValidationError(
                 f"Competition key={key!r} does not match league_id={league_id} season={season}"
             )
-        if not key and (league_id != league.league_id or season != league.season):
+        if not reference_key and not key and (
+            league_id != league.league_id or season != league.season
+        ):
             reference.find_league_by_id(league_id, season)
         resolved.append(
             CompetitionConfig(
@@ -106,6 +122,7 @@ def load_competition_config(
                 country=item.get("country") or league.country,
                 enabled=enabled,
                 source=item.get("source"),
+                reference_key=str(reference_key) if reference_key is not None else league.key,
             )
         )
     return [competition for competition in resolved if competition.enabled]

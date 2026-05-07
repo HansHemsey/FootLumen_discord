@@ -19,6 +19,7 @@ RUN python -m pip install --upgrade pip \
 COPY alembic.ini ./
 COPY alembic ./alembic
 COPY config/competitions.example.yaml \
+     config/competitions_history.yaml \
      config/discord_channels.example.yaml \
      config/discord_webhooks.example.yaml \
      ./config/

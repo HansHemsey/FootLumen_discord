@@ -9,6 +9,7 @@ cd "$ROOT_DIR"
 PYTHON_BIN="$(resolve_python_bin)"
 CLI_BIN="$(resolve_cli_bin)"
 CONFIG_PATH="${CONFIG:-config/competitions.yaml}"
+REFRESH_TEAMS="${REFRESH_TEAMS:-false}"
 REFRESH_FIXTURES="${REFRESH_FIXTURES:-true}"
 REFRESH_STANDINGS="${REFRESH_STANDINGS:-true}"
 REFRESH_ODDS="${REFRESH_ODDS:-true}"
@@ -44,6 +45,11 @@ run_optional() {
 "$CLI_BIN" seed-reference-from-docs \
   --reference docs/api_football_reference.json \
   --players docs/api_football_players_reference.json
+
+if bool_flag "$REFRESH_TEAMS"; then
+  run_optional "Refreshing teams config=$CONFIG_PATH" \
+    "$CLI_BIN" ingest-teams --config "$CONFIG_PATH" --refresh-api
+fi
 
 enabled_competitions "$CONFIG_PATH" | while IFS="$(printf '\t')" read -r league_id season competition_key; do
   [ -n "$league_id" ] || continue

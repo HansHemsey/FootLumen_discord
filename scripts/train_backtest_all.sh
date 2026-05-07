@@ -8,7 +8,14 @@ cd "$ROOT_DIR"
 
 PYTHON_BIN="$(resolve_python_bin)"
 CLI_BIN="$(resolve_cli_bin)"
-CONFIG_PATH="${CONFIG:-config/competitions.yaml}"
+CONFIG_PATH="${CONFIG:-}"
+if [ -z "$CONFIG_PATH" ]; then
+  if [ -f "config/competitions_history.yaml" ]; then
+    CONFIG_PATH="config/competitions_history.yaml"
+  else
+    CONFIG_PATH="config/competitions.yaml"
+  fi
+fi
 DATASET="${DATASET:-data/processed/training_v2_late.parquet}"
 MODEL_DIR="${MODEL_DIR:-data/models/v2-late}"
 BACKTEST_DIR="${BACKTEST_DIR:-reports/backtest_v2_late}"
@@ -25,6 +32,8 @@ if [ -z "$COMPETITION_ARGS" ]; then
   echo "No enabled competitions found in $CONFIG_PATH" >&2
   exit 1
 fi
+
+echo "Training 1X2 config=$CONFIG_PATH dataset=$DATASET model_dir=$MODEL_DIR window=$PREDICTION_WINDOW"
 
 # shellcheck disable=SC2086
 "$CLI_BIN" build-dataset \

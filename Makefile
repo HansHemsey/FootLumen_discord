@@ -12,9 +12,10 @@ MODEL_DIR ?= data/models/v2-late
 BACKTEST_DIR ?= reports/backtest_v2_late
 MODEL_VERSION ?= v2-late
 PREDICT_TODAY_ARGS ?= --date $(DATE) --window $(WINDOW) --no-refresh-data --dry-run
+SEASON ?=
 
 .PHONY: install test lint format typecheck check doctor init-db seed-reference data-quality smoke smoke-live
-.PHONY: predict-fixture predict-today publish-daily-discord daily-morning daily-late refresh-all-leagues train train-backtest-all backtest
+.PHONY: predict-fixture predict-today publish-daily-discord daily-morning daily-late refresh-all-leagues backfill-season train train-backtest-all train-backtest-ou backtest
 .PHONY: docker-build docker-doctor docker-init-db docker-seed-reference docker-data-quality
 .PHONY: docker-predict-today-dry-run docker-shell compose-doctor compose-run compose-down
 
@@ -75,11 +76,18 @@ daily-late:
 refresh-all-leagues:
 	scripts/refresh_all_leagues.sh
 
+backfill-season:
+	test -n "$(SEASON)"
+	SEASON="$(SEASON)" scripts/backfill_season.sh
+
 train:
 	$(CLI) train --dataset "$(DATASET)" --output-dir "$(MODEL_DIR)" --model-version "$(MODEL_VERSION)"
 
 train-backtest-all:
 	scripts/train_backtest_all.sh
+
+train-backtest-ou:
+	scripts/train_backtest_ou.sh
 
 backtest:
 	$(CLI) backtest --dataset "$(DATASET)" --model-dir "$(MODEL_DIR)" --output-dir "$(BACKTEST_DIR)" --retrain-v2-model-version "$(MODEL_VERSION)" --format both

@@ -90,7 +90,9 @@ make daily-morning
 make daily-late
 make publish-daily-discord
 make refresh-all-leagues
+make backfill-season SEASON=2024
 make train-backtest-all
+make train-backtest-ou
 make train DATASET=data/processed/training_v2_late.parquet MODEL_DIR=data/models/v2-late
 make backtest DATASET=data/processed/training_v2_late.parquet MODEL_DIR=data/models/v2-late
 ```
@@ -119,7 +121,19 @@ make refresh-all-leagues
 
 # Dataset multi-ligues, entrainement et backtest.
 make train-backtest-all
+
+# Dataset multi-ligues, entrainement et backtest O/U 2.5.
+make train-backtest-ou
 ```
+
+`config/competitions.yaml` reste la config de production quotidienne : elle contient les
+ligues et saisons courantes que les scripts du matin et d'avant-match rafraichissent.
+`config/competitions_history.yaml` est la config d'entrainement/backtest : elle contient
+les cinq championnats suivis sur les saisons `2022`, `2023`, `2024` et `2025`. Les scripts
+`train_backtest_all.sh` et `train_backtest_ou.sh` l'utilisent par defaut si elle existe.
+Ainsi, les fixtures hebdomadaires ingerees via la config production enrichissent la DB une
+seule fois, puis deviennent automatiquement exploitables par les modeles car la saison
+courante est aussi incluse dans la config historique.
 
 Par defaut `SEND_DISCORD=false` et `DRY_RUN=true`. Un envoi Discord reel demande donc
 explicitement `SEND_DISCORD=true DRY_RUN=false`. Les publications quotidiennes alimentent
@@ -163,6 +177,26 @@ RESOLVE_UNKNOWN_PLAYERS=true UNKNOWN_PLAYERS_LIMIT=50 UNKNOWN_PLAYERS_DELAY_SECO
 
 La resolution appelle explicitement API-Football, upsert `Player` / `PlayerSquad`, et ne
 modifie jamais les fichiers referentiels `docs/`.
+
+Pour backfiller une saison entiere sur toutes les ligues activees, utilise le script dedie.
+Il part de `config/competitions_history.yaml` quand ce fichier existe, filtre la saison
+demandee, puis genere une config temporaire sous `data/processed/backfill/` avec la bonne
+`season` API-Football pour chaque ligue. Il rafraichit les equipes de cette saison pour
+gerer montees/descentes, puis ingere fixtures et details :
+
+```bash
+SEASON=2024 scripts/backfill_season.sh
+```
+
+Par defaut, `SEASON=2024` couvre `2024-08-01` a `2025-07-31`, avec
+`DETAILS_LIMIT=400` par ligue, `DETAILS_DELAY_SECONDS=3`,
+`DETAILS_STATUSES="FT AET PEN"` et `DETAILS_SKIP_IF_COMPLETE=true`. Les odds historiques
+sont desactivees par defaut, car un snapshot recupere aujourd'hui ne doit pas etre utilise
+comme odds point-in-time d'un ancien match.
+Les competitions de coupe/globales comme la CDM sont desactivees par defaut dans ce
+backfill de championnats; utilise `BACKFILL_INCLUDE_CUPS=true` seulement pour un cas dedie.
+Ne copie pas ces lignes historiques dans `config/competitions.yaml` : la config production
+reste centree sur la saison courante, tandis que training/backtest lit l'historique.
 
 Le packaging Docker exécute uniquement la CLI, sans serveur web :
 
@@ -620,7 +654,19 @@ football-predictor backtest \
   --format both
 ```
 
-`scripts/train_backtest_all.sh` utilise ce workflow V2 par défaut.
+`scripts/train_backtest_all.sh` utilise ce workflow V2 par défaut, avec
+`config/competitions_history.yaml` si le fichier existe. Le modèle de production late reste
+écrit dans `data/models/v2-late`, que `daily_late` charge automatiquement.
+
+Pour le modèle Over/Under 2.5, la commande dédiée utilise la même config historique et écrit
+l'artefact dans `data/models/ou-v1` :
+
+```bash
+scripts/train_backtest_ou.sh
+```
+
+Les scripts de production quotidienne, eux, restent sur `config/competitions.yaml` par
+défaut pour éviter de parcourir les anciennes saisons.
 
 La commande `backtest` lit le même dataset historique, impose un split temporel sans
 shuffle, évalue le modèle sauvegardé et les baselines `odds_only`, `poisson` et

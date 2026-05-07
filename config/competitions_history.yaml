@@ -1,0 +1,161 @@
+competitions:
+  - key: ligue_1_2022
+    reference_key: ligue_1
+    league_id: 61
+    season: 2022
+    name: Ligue 1
+    country: France
+    enabled: true
+    source: docs/api_football_reference.json
+  - key: ligue_1_2023
+    reference_key: ligue_1
+    league_id: 61
+    season: 2023
+    name: Ligue 1
+    country: France
+    enabled: true
+    source: docs/api_football_reference.json
+  - key: ligue_1_2024
+    reference_key: ligue_1
+    league_id: 61
+    season: 2024
+    name: Ligue 1
+    country: France
+    enabled: true
+    source: docs/api_football_reference.json
+  - key: ligue_1_2025
+    reference_key: ligue_1
+    league_id: 61
+    season: 2025
+    name: Ligue 1
+    country: France
+    enabled: true
+    source: docs/api_football_reference.json
+  - key: premier_league_2022
+    reference_key: premier_league
+    league_id: 39
+    season: 2022
+    name: Premier League
+    country: England
+    enabled: true
+    source: docs/api_football_reference.json
+  - key: premier_league_2023
+    reference_key: premier_league
+    league_id: 39
+    season: 2023
+    name: Premier League
+    country: England
+    enabled: true
+    source: docs/api_football_reference.json
+  - key: premier_league_2024
+    reference_key: premier_league
+    league_id: 39
+    season: 2024
+    name: Premier League
+    country: England
+    enabled: true
+    source: docs/api_football_reference.json
+  - key: premier_league_2025
+    reference_key: premier_league
+    league_id: 39
+    season: 2025
+    name: Premier League
+    country: England
+    enabled: true
+    source: docs/api_football_reference.json
+  - key: la_liga_2022
+    reference_key: la_liga
+    league_id: 140
+    season: 2022
+    name: La Liga
+    country: Spain
+    enabled: true
+    source: docs/api_football_reference.json
+  - key: la_liga_2023
+    reference_key: la_liga
+    league_id: 140
+    season: 2023
+    name: La Liga
+    country: Spain
+    enabled: true
+    source: docs/api_football_reference.json
+  - key: la_liga_2024
+    reference_key: la_liga
+    league_id: 140
+    season: 2024
+    name: La Liga
+    country: Spain
+    enabled: true
+    source: docs/api_football_reference.json
+  - key: la_liga_2025
+    reference_key: la_liga
+    league_id: 140
+    season: 2025
+    name: La Liga
+    country: Spain
+    enabled: true
+    source: docs/api_football_reference.json
+  - key: bundesliga_2022
+    reference_key: bundesliga
+    league_id: 78
+    season: 2022
+    name: Bundesliga
+    country: Germany
+    enabled: true
+    source: docs/api_football_reference.json
+  - key: bundesliga_2023
+    reference_key: bundesliga
+    league_id: 78
+    season: 2023
+    name: Bundesliga
+    country: Germany
+    enabled: true
+    source: docs/api_football_reference.json
+  - key: bundesliga_2024
+    reference_key: bundesliga
+    league_id: 78
+    season: 2024
+    name: Bundesliga
+    country: Germany
+    enabled: true
+    source: docs/api_football_reference.json
+  - key: bundesliga_2025
+    reference_key: bundesliga
+    league_id: 78
+    season: 2025
+    name: Bundesliga
+    country: Germany
+    enabled: true
+    source: docs/api_football_reference.json
+  - key: serie_a_2022
+    reference_key: serie_a
+    league_id: 135
+    season: 2022
+    name: Serie A
+    country: Italy
+    enabled: true
+    source: docs/api_football_reference.json
+  - key: serie_a_2023
+    reference_key: serie_a
+    league_id: 135
+    season: 2023
+    name: Serie A
+    country: Italy
+    enabled: true
+    source: docs/api_football_reference.json
+  - key: serie_a_2024
+    reference_key: serie_a
+    league_id: 135
+    season: 2024
+    name: Serie A
+    country: Italy
+    enabled: true
+    source: docs/api_football_reference.json
+  - key: serie_a_2025
+    reference_key: serie_a
+    league_id: 135
+    season: 2025
+    name: Serie A
+    country: Italy
+    enabled: true
+    source: docs/api_football_reference.json

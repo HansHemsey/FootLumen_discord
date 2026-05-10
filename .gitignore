@@ -24,3 +24,4 @@ data/models/*
 *.sqlite3
 config/discord_channels.yaml
 reports/
+logs/

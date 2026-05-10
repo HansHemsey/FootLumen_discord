@@ -356,24 +356,39 @@ football-predictor seed-reference-from-docs \
 
 ## Cron
 
-Exemple local sans refresh :
+La crontab de production autonome est versionnée dans `config/prod.crontab`.
+Elle utilise les scripts prod avec publication réelle :
+
+```bash
+scripts/install_prod_cron.sh
+crontab -l
+```
+
+Ce fichier active explicitement `SEND_DISCORD=true DRY_RUN=false` pour les publications
+Discord, garde des verrous `lockf` par routine, et écrit les logs dans `logs/cron/`.
+
+Exemple local sans refresh, uniquement pour test manuel :
 
 ```cron
 15 7 * * * cd /path/to/ProBet_discord && . .venv/bin/activate && football-predictor doctor --strict
 30 8 * * * cd /path/to/ProBet_discord && . .venv/bin/activate && scripts/run_predict_today.sh
 ```
 
-Exemple live quotidien recommande :
+Résumé des routines prod autonomes installées :
 
 ```cron
-0 8 * * * cd /path/to/ProBet_discord && scripts/daily_morning.sh
-*/15 * * * * cd /path/to/ProBet_discord && SEND_DISCORD=true DRY_RUN=false scripts/publish_match_analyses.sh
-*/10 * * * * cd /path/to/ProBet_discord && SEND_DISCORD=true DRY_RUN=false scripts/daily_late.sh
-*/45 * * * * cd /path/to/ProBet_discord && REFRESH_DATA=true SEND_DISCORD=true DRY_RUN=false scripts/publish_match_results.sh
-0 3 * * 1 cd /path/to/ProBet_discord && scripts/train_backtest_all.sh
+15 5 * * 1     scripts/weekly_ingestion.sh
+30 6 * * *     scripts/daily_morning.sh
+*/15 6-23 * * * scripts/publish_match_analyses.sh
+*/10 7-23 * * * scripts/daily_late.sh
+*/10 7-23 * * * scripts/daily_ou.sh
+20,50 12-23 * * * scripts/publish_match_results.sh
+10 8,12,18 * * * scripts/publish_weekly_score.sh
+55 23 * * *    scripts/publish_weekly_score.sh
 ```
 
-Garde `DRY_RUN=true` tant que la configuration Discord n'est pas validee.
+Garde `DRY_RUN=true` seulement pour les tests manuels. La crontab prod est volontairement
+configurée pour publier.
 
 ## Surveillance Logs
 

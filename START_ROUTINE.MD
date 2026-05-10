@@ -836,6 +836,17 @@ Au besoin             : resolve unknown players
 
 Sur ton PC local, tu peux lancer ces scripts manuellement. Un cron n'est utile que si ton Mac reste allumé et éveillé.
 
+La crontab prod autonome est versionnée et installable directement :
+
+```bash
+scripts/install_prod_cron.sh
+crontab -l
+```
+
+Elle utilise `config/prod.crontab`, publie réellement dans Discord avec
+`SEND_DISCORD=true DRY_RUN=false`, protège chaque routine avec `lockf`, et écrit les logs
+dans `logs/cron/`.
+
 ---
 
 ## 16. Variables Utiles

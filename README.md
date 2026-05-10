@@ -235,26 +235,27 @@ Les vraies clés API, URLs webhook et tokens restent dans `.env` ou dans
 mettre à jour les référentiels locaux sans reconstruire l'image ; l'image garde aussi une
 copie des mêmes référentiels pour les diagnostics autonomes.
 
-Exemples cron :
+La crontab prod autonome est prête dans `config/prod.crontab` :
+
+```bash
+scripts/install_prod_cron.sh
+crontab -l
+```
+
+Elle publie réellement dans Discord avec `SEND_DISCORD=true DRY_RUN=false`, utilise les
+scripts prod, verrouille chaque routine avec `lockf` et écrit les logs dans `logs/cron/`.
+
+Résumé des crons installés :
 
 ```cron
-# Diagnostic quotidien local.
-15 7 * * * cd /path/to/ProBet_discord && . .venv/bin/activate && football-predictor doctor --strict
-
-# Automatisation du matin : refresh live explicite, sans prediction matinale.
-0 8 * * * cd /path/to/ProBet_discord && scripts/daily_morning.sh
-
-# Analyses H-6, une seule fois par match.
-*/15 * * * * cd /path/to/ProBet_discord && SEND_DISCORD=true DRY_RUN=false scripts/publish_match_analyses.sh
-
-# Prediction late M-30, une seule fois par match.
-*/10 * * * * cd /path/to/ProBet_discord && SEND_DISCORD=true DRY_RUN=false scripts/daily_late.sh
-
-# Resultats apres match, avec refresh fixture pour capter les scores.
-*/45 * * * * cd /path/to/ProBet_discord && REFRESH_DATA=true SEND_DISCORD=true DRY_RUN=false scripts/publish_match_results.sh
-
-# Entrainement/backtest hebdomadaire quand assez de donnees sont disponibles.
-0 3 * * 1 cd /path/to/ProBet_discord && scripts/train_backtest_all.sh
+15 5 * * 1        weekly_ingestion.sh
+30 6 * * *        daily_morning.sh
+*/15 6-23 * * *   publish_match_analyses.sh
+1,11,21,31,41,51 7-23 * * * daily_late.sh
+3,13,23,33,43,53 7-23 * * * daily_ou.sh
+20,50 12-23 * * * publish_match_results.sh
+10 8,12,18 * * *  publish_weekly_score.sh
+55 23 * * *       publish_weekly_score.sh
 ```
 
 Pour une exécution Docker personnalisée :

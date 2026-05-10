@@ -12,6 +12,7 @@ AUTOMATION_SCRIPTS = (
     "scripts/daily_late.sh",
     "scripts/daily_ou.sh",
     "scripts/weekly_ingestion.sh",
+    "scripts/install_prod_cron.sh",
     "scripts/publish_daily_discord.sh",
     "scripts/publish_weekly_score.sh",
     "scripts/refresh_all_leagues.sh",
@@ -77,6 +78,36 @@ def test_daily_scripts_default_to_safe_discord_behavior(repo_root: Path) -> None
     daily_ou = (repo_root / "scripts/daily_ou.sh").read_text(encoding="utf-8")
     assert 'RUN_WINDOW="${WINDOW:-late}"' in daily_ou
     assert "--window" in daily_ou
+
+
+def test_prod_crontab_runs_publication_scripts_with_prod_flags(repo_root: Path) -> None:
+    text = (repo_root / "config/prod.crontab").read_text(encoding="utf-8")
+
+    assert "PROJECT=/Users/yanisruel/Documents/ProBet_discord" in text
+    assert "/usr/bin/lockf -t 0" in text
+    assert 'cd "$PROJECT"' in text
+    assert "scripts/weekly_ingestion.sh" in text
+    assert "SAVE_RAW=true DRY_RUN=false scripts/weekly_ingestion.sh" in text
+    assert "SEND_DISCORD=true DRY_RUN=false PUBLISH_DISCORD=true" in text
+    assert "scripts/daily_morning.sh" in text
+    assert "scripts/publish_match_analyses.sh" in text
+    assert "scripts/daily_late.sh" in text
+    assert "PREDICTION_ENGINE=v3 WINDOW=late" in text
+    assert "scripts/daily_ou.sh" in text
+    assert "scripts/publish_match_results.sh" in text
+    assert "scripts/publish_weekly_score.sh" in text
+    assert "DRY_RUN=true" not in text
+    assert "PRINT_ONLY=true" not in text
+    assert "config/discord_webhooks.local.yaml" not in text
+
+
+def test_prod_cron_installer_uses_versioned_crontab(repo_root: Path) -> None:
+    text = (repo_root / "scripts/install_prod_cron.sh").read_text(encoding="utf-8")
+
+    assert 'CRONTAB_FILE="${CRONTAB_FILE:-config/prod.crontab}"' in text
+    assert 'crontab "$CRONTAB_FILE"' in text
+    assert "crontab -l" in text
+    assert "logs/cron" in text
 
 
 def test_weekly_ingestion_echo_generates_seven_future_dates(

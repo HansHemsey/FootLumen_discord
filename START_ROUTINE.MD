@@ -161,10 +161,11 @@ score_pronos_semaine
 ```
 
 Le score hebdomadaire est global, toutes compétitions confondues. Il compte uniquement
-les prédictions `daily_late` réellement envoyées dans le channel `predictions`, puis
-compare ces pronostics aux scores finaux disponibles. Les matchs en attente ne sont pas
-affichés : seules les prédictions terminées, correctes ou incorrectes, entrent dans le
-bilan. Le lundi, le script publie deux bilans :
+les prédictions réellement envoyées dans le channel `predictions` : V2 legacy, V3 via
+`v3_model_prediction_id`, et O/U 2.5 via `ou_model_prediction_id`. Les prédictions
+stockées mais non publiées pour confiance insuffisante ne sont pas comptées. Les matchs
+en attente ne sont pas affichés : seules les prédictions terminées, correctes ou
+incorrectes, entrent dans le bilan. Le lundi, le script publie deux bilans :
 
 - la finalisation de la semaine précédente, pour inclure les matchs du dimanche dont les
   scores sont arrivés pendant la nuit ;
@@ -266,6 +267,7 @@ SEND_DISCORD=true DRY_RUN=false scripts/publish_match_analyses.sh
 ## 6. Prédiction Late M-30
 
 La prédiction late est le message principal envoyé dans `predictions`.
+Depuis Sprint 10, `scripts/daily_late.sh` utilise la V3 par défaut.
 
 Commande dry-run :
 
@@ -279,6 +281,16 @@ Envoi réel :
 SEND_DISCORD=true DRY_RUN=false scripts/daily_late.sh
 ```
 
+Rollback V2 explicite :
+
+```bash
+PREDICTION_ENGINE=v2 SEND_DISCORD=true DRY_RUN=false scripts/daily_late.sh
+```
+
+Règle publique commune V3 1X2 et O/U 2.5 : Discord publie uniquement `High` ou
+`Very High`. Les labels `Medium`, `Low`, `Uncertain` et assimilés restent internes avec
+`confidence_skipped`.
+
 Ce que ça fait :
 
 - sélectionne uniquement les matchs qui commencent dans les 30 prochaines minutes ;
@@ -290,9 +302,12 @@ Ce que ça fait :
   - predictions API ;
   - lineups si disponibles ;
 - construit le `FeatureSnapshot` ;
-- calcule la prédiction ;
+- calcule la prédiction V3 et persiste `V3FeatureSnapshot` / `V3ModelPrediction` ;
 - envoie dans `predictions` si Discord réel est activé ;
 - ne renvoie pas deux fois une prédiction late pour le même match sauf `FORCE=true`.
+
+Statut : la V3 est activée en production Discord malgré un backtest non validé. Surveiller
+les premiers envois réels, surtout la couverture odds/API/lineups rafraîchie à M-30.
 
 ### Quand le lancer
 
@@ -799,6 +814,10 @@ O/U : data/models/ou-v1
 Les scripts de production (`daily_morning.sh`, `daily_late.sh`, `daily_ou.sh`) restent sur
 `config/competitions.yaml`.
 
+Le lundi, `scripts/weekly_ingestion.sh` prépare les fixtures futures selon la convention
+`J+7` : date locale d'exécution incluse puis les 6 dates suivantes. Ne pas confondre avec
+`DETAILS_DAYS_BACK=7`, qui reste un `J-7` pour enrichir les détails des matchs terminés.
+
 ---
 
 ## 15. Fréquence Conseillée
@@ -807,8 +826,10 @@ Les scripts de production (`daily_morning.sh`, `daily_late.sh`, `daily_ou.sh`) r
 Tous les matins       : scripts/daily_morning.sh
 Jours de match H-6    : scripts/publish_match_analyses.sh toutes les 15 min
 Jours de match M-30   : scripts/daily_late.sh toutes les 5-10 min
+Jours de match M-30   : scripts/daily_ou.sh toutes les 5-10 min
 Après les matchs      : scripts/publish_match_results.sh toutes les 30-60 min
-Une fois par semaine  : refresh_all_leagues.sh avec DETAILS_DAYS_BACK=7
+Chaque lundi          : scripts/weekly_ingestion.sh pour les fixtures J+7
+Une fois par semaine  : refresh_all_leagues.sh avec DETAILS_DAYS_BACK=7 pour le passé
 Une fois par semaine  : train_backtest_all.sh, quand assez de données existent
 Au besoin             : resolve unknown players
 ```
@@ -824,7 +845,9 @@ Sur ton PC local, tu peux lancer ces scripts manuellement. Un cron n'est utile q
 ```text
 DATE=YYYY-MM-DD
 CONFIG=config/competitions.yaml
-MODEL_DIR=data/models/v2-late
+PREDICTION_ENGINE=v3
+MODEL_DIR=data/models/v3
+V2_MODEL_DIR=data/models/v2-late
 LIMIT=1
 FORCE=true
 SAVE_RAW=true

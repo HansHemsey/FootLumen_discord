@@ -7,7 +7,7 @@ import os
 from datetime import date as date_type
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 import typer
@@ -73,6 +73,7 @@ from football_predictor.prediction import (
     DailyPredictionWindow,
     PredictionService,
     run_daily_predictions,
+    run_daily_predictions_v3,
 )
 from football_predictor.prediction.service import RESULT_LABELS_FR, PredictionOutput
 from football_predictor.reference.loaders import load_api_football_reference, load_players_reference
@@ -233,23 +234,30 @@ def _validate_fixture_ingestion_args(
     strict_reference: bool = True,
 ) -> None:
     modes = [
-        league_id is not None or season is not None,
         fixture_date is not None,
+        fixture_date is None and (league_id is not None or season is not None),
         team_id is not None or last is not None or next_count is not None,
     ]
     if sum(1 for enabled in modes if enabled) != 1:
         raise typer.BadParameter(
-            "Use exactly one mode: --league-id/--season, --date, or --team-id with --last/--next"
+            "Use exactly one mode: --date [--league-id --season], "
+            "--league-id/--season, or --team-id with --last/--next"
         )
-    if league_id is not None or season is not None:
-        if league_id is None or season is None:
-            raise typer.BadParameter("--league-id and --season must be provided together")
-        _validate_league_id(settings, league_id, season, strict=strict_reference)
     if fixture_date is not None:
         try:
             date_type.fromisoformat(fixture_date)
         except ValueError as exc:
             raise typer.BadParameter("--date must use YYYY-MM-DD format") from exc
+        if (league_id is None) != (season is None):
+            raise typer.BadParameter(
+                "--date with league filtering requires both --league-id and --season"
+            )
+        if league_id is not None and season is not None:
+            _validate_league_id(settings, league_id, season, strict=strict_reference)
+    elif league_id is not None or season is not None:
+        if league_id is None or season is None:
+            raise typer.BadParameter("--league-id and --season must be provided together")
+        _validate_league_id(settings, league_id, season, strict=strict_reference)
     if team_id is not None or last is not None or next_count is not None:
         if team_id is None:
             raise typer.BadParameter("--team-id is required with --last or --next")
@@ -920,6 +928,37 @@ def _print_prediction_summary(prediction: PredictionOutput, timezone_name: str) 
         console.print(f"{index}. {explanation}")
 
 
+def _print_prediction_v3_summary(prediction: Any, timezone_name: str) -> None:
+    probabilities = prediction.probabilities.normalized()
+    table = Table(title="Prediction Football V3")
+    table.add_column("Champ", style="cyan")
+    table.add_column("Valeur")
+    table.add_row("Match", prediction.match_label)
+    table.add_row("Competition", prediction.competition)
+    table.add_row(
+        "Date",
+        format_in_timezone(prediction.match_date, timezone_name)
+        if prediction.match_date is not None
+        else "date inconnue",
+    )
+    table.add_row("Prediction time", prediction.prediction_time.isoformat())
+    table.add_row("Resultat", RESULT_LABELS_FR[prediction.predicted_result])
+    table.add_row("Confiance", prediction.confidence_label)
+    table.add_row("Score", f"{prediction.confidence_score:.1f} pts")
+    table.add_row("Fusion", prediction.fusion_strategy)
+    table.add_row("P(Home)", f"{probabilities.p_home * 100:.1f}%")
+    table.add_row("P(Draw)", f"{probabilities.p_draw * 100:.1f}%")
+    table.add_row("P(Away)", f"{probabilities.p_away * 100:.1f}%")
+    table.add_row("Risque nul", prediction.draw_risk_label)
+    table.add_row("Hors nul", prediction.no_draw_winner_label)
+    quality_score = prediction.data_quality_json.get("overall_data_quality_score")
+    table.add_row("Qualite", f"{quality_score}/100" if quality_score is not None else "unknown")
+    console.print(table)
+    console.print("Facteurs V3:")
+    for index, explanation in enumerate(prediction.explanations, start=1):
+        console.print(f"{index}. {explanation}")
+
+
 @app.command()
 def predict(
     fixture: int = typer.Option(..., "--fixture", help="API-Football fixture_id from local docs."),
@@ -991,6 +1030,172 @@ def predict(
         console.out(prediction_json)
     else:
         _print_prediction_summary(prediction, settings.app_timezone)
+
+
+@app.command("predict-v3")
+def predict_v3(
+    fixture: int = typer.Option(..., "--fixture", help="API-Football fixture_id from local docs."),
+    prediction_time: str | None = typer.Option(
+        None,
+        "--prediction-time",
+        help="Prediction cutoff timestamp, ISO 8601. Defaults to max(now, kickoff - 30m).",
+    ),
+    model_dir: Path = typer.Option(
+        Path("data/models/v3"),
+        "--model-dir",
+        help="Directory containing V3 component artifacts.",
+    ),
+    v2_model_dir: Path | None = typer.Option(
+        None,
+        "--v2-model-dir",
+        help="Optional V2 model directory used as a V3 signal.",
+    ),
+    refresh_data: bool = typer.Option(
+        False,
+        "--refresh-data/--no-refresh",
+        help="Explicitly refresh API-Football before prediction.",
+    ),
+    save_raw: bool = typer.Option(
+        False,
+        "--save-raw",
+        help="Also save raw API payload snapshots to disk during live refresh.",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Print JSON only."),
+    send_discord: bool = typer.Option(
+        False,
+        "--send-discord",
+        help="Send the V3 markdown prediction to Discord.",
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Persist Discord route without sending."),
+    print_only: bool = typer.Option(
+        False,
+        "--print-only",
+        help="Print markdown and persist Discord trace without sending.",
+    ),
+    force: bool = typer.Option(False, "--force", help="Bypass Discord message dedupe."),
+    discord_channels: Path | None = typer.Option(
+        None,
+        "--discord-channels",
+        help="Discord channels config path. Defaults to settings.",
+    ),
+    discord_webhooks: Path | None = typer.Option(
+        None,
+        "--discord-webhooks",
+        help="Discord webhook config path. Defaults to settings.",
+    ),
+) -> None:
+    """Predict a single fixture with V3 and optional Discord delivery."""
+    settings = get_settings()
+    if send_discord or dry_run or print_only:
+        reference, channels_config, webhooks_config = _load_discord_routing(
+            settings,
+            channels_path=discord_channels,
+            webhooks_path=discord_webhooks,
+        )
+    else:
+        reference = load_api_football_reference(settings.api_football_reference_path)
+        channels_config = None
+        webhooks_config = None
+    players_reference = load_players_reference(settings.api_football_players_reference_path)
+    cutoff = _parse_optional_prediction_time(prediction_time)
+    engine, session_factory = _engine_and_session(settings)
+    init_db(engine)
+
+    from football_predictor.discord.v3_formatter import format_prediction_v3_markdown
+    from football_predictor.prediction.v3_service import PredictionV3Service
+
+    discord_payload: dict[str, Any] | None = None
+    with session_scope(session_factory) as session:
+        service = PredictionV3Service(
+            reference,
+            session,
+            players_reference=players_reference,
+            market_1x2_bet_name=settings.market_1x2_bet_name,
+            market_1x2_bet_id=settings.market_1x2_bet_id,
+        )
+        if refresh_data:
+            with _api_client_from_settings(settings) as api_client:
+                prediction = service.predict_fixture_v3(
+                    fixture,
+                    cutoff,
+                    model_dir=model_dir,
+                    v2_model_dir=v2_model_dir,
+                    refresh_data=True,
+                    save_raw=save_raw,
+                    api_client=api_client,
+                )
+        else:
+            prediction = service.predict_fixture_v3(
+                fixture,
+                cutoff,
+                model_dir=model_dir,
+                v2_model_dir=v2_model_dir,
+                refresh_data=False,
+                save_raw=save_raw,
+            )
+        markdown = format_prediction_v3_markdown(
+            prediction,
+            timezone_name=settings.app_timezone,
+        )
+        if print_only and not json_output:
+            console.print(markdown)
+        if send_discord or dry_run or print_only:
+            fixture_row = session.get(Fixture, fixture)
+            competition_key = _competition_key_from_fixture(reference, fixture_row, None)
+            route_league_id = (
+                fixture_row.league_id
+                if fixture_row is not None
+                and (competition_key is not None or (fixture_row.league_id or 0) > 0)
+                else None
+            )
+            route_season = (
+                fixture_row.season
+                if fixture_row is not None
+                and (competition_key is not None or route_league_id is not None)
+                else None
+            )
+            routing_config_available = competition_key is not None or route_league_id is not None
+            delivery = DiscordDeliveryService(
+                session,
+                channels_config=channels_config if routing_config_available else None,
+                webhooks_config=webhooks_config if routing_config_available else None,
+                legacy_webhook_url=settings.discord_webhook_url,
+                timeout=settings.discord_timeout_seconds,
+            )
+            result = delivery.send_markdown(
+                markdown,
+                competition_key=competition_key,
+                league_id=route_league_id,
+                season=route_season,
+                channel_key="predictions",
+                message_type="prediction",
+                fixture_id=fixture,
+                model_prediction_id=None,
+                dry_run=dry_run,
+                print_only=print_only,
+                force=force,
+                payload_metadata={
+                    "model_family": "v3",
+                    "v3_model_prediction_id": prediction.v3_model_prediction_id,
+                    "v3_feature_snapshot_id": prediction.v3_feature_snapshot_id,
+                },
+            )
+            discord_payload = {
+                "status": result.status,
+                "discord_message_id": result.discord_message_id,
+                "webhook_hash": result.webhook_hash,
+                "channel": result.route.channel_key,
+            }
+
+    payload = prediction.to_dict()
+    if discord_payload is not None:
+        payload["discord"] = discord_payload
+    if json_output:
+        console.out(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        _print_prediction_v3_summary(prediction, settings.app_timezone)
+        if discord_payload is not None:
+            console.print({"discord": discord_payload})
 
 
 @app.command("predict-and-send")
@@ -1750,6 +1955,165 @@ def predict_today(
         )
 
 
+@app.command("predict-today-v3")
+def predict_today_v3(
+    prediction_date: str | None = typer.Option(
+        None,
+        "--date",
+        help="Date to scan, format YYYY-MM-DD. Defaults to the local date at prediction time.",
+    ),
+    window: DailyPredictionWindow = typer.Option(
+        DailyPredictionWindow.LATE,
+        "--window",
+        help="Prediction window: early, mid, late, now, or all. V3 shadow defaults to late.",
+    ),
+    league: list[int] | None = typer.Option(
+        None,
+        "--league",
+        help="Repeatable API-Football league_id filter, validated against docs reference.",
+    ),
+    season: int | None = typer.Option(None, "--season", help="Optional season filter."),
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        help="Competitions YAML/JSON config. Defaults to settings.",
+    ),
+    model_dir: Path | None = typer.Option(
+        Path("data/models/v3"),
+        "--model-dir",
+        help="Directory containing V3 component artifacts.",
+    ),
+    v2_model_dir: Path | None = typer.Option(
+        None,
+        "--v2-model-dir",
+        help="Optional V2 model directory used as a V3 signal.",
+    ),
+    prediction_time: str | None = typer.Option(
+        None,
+        "--prediction-time",
+        help="Prediction cutoff timestamp, ISO 8601. Defaults to now.",
+    ),
+    refresh_data: bool = typer.Option(
+        False,
+        "--refresh-data/--no-refresh-data",
+        help="Explicitly refresh API-Football before prediction.",
+    ),
+    send_discord: bool = typer.Option(
+        False,
+        "--send-discord",
+        help="Send V3 Discord output. Requires --production-mode for live sends.",
+    ),
+    shadow_mode: bool = typer.Option(
+        True,
+        "--shadow-mode/--production-mode",
+        help="Shadow mode logs V3 without live Discord sends; production mode allows live sends.",
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Persist Discord route without sending."),
+    print_only: bool = typer.Option(False, "--print-only", help="Print only, no Discord send."),
+    force: bool = typer.Option(False, "--force", help="Bypass Discord dry-run dedupe."),
+    limit: int | None = typer.Option(None, "--limit", help="Maximum selected fixtures to predict."),
+    save_raw: bool = typer.Option(
+        False,
+        "--save-raw",
+        help="Also save raw API payload snapshots to disk during live refresh.",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Print JSON summary only."),
+    json_output_path: Path | None = typer.Option(
+        None,
+        "--json-output",
+        help="Write JSON summary to this path.",
+    ),
+) -> None:
+    """Run V3 daily predictions, shadow-safe by default."""
+    target_date = None
+    if prediction_date is not None:
+        try:
+            target_date = date_type.fromisoformat(prediction_date)
+        except ValueError as exc:
+            raise typer.BadParameter("--date must use YYYY-MM-DD format") from exc
+    if limit is not None and limit < 1:
+        raise typer.BadParameter("--limit must be greater than 0")
+    if shadow_mode and send_discord and not dry_run and not print_only:
+        raise typer.BadParameter(
+            "V3 shadow mode blocks live Discord sends; use --production-mode or "
+            "--dry-run/--print-only"
+        )
+
+    settings = get_settings()
+    cutoff = _parse_optional_prediction_time(prediction_time)
+    reference = load_api_football_reference(settings.api_football_reference_path)
+    players_reference = load_players_reference(settings.api_football_players_reference_path)
+    competitions = _load_competitions(settings, config or settings.competitions_config_path)
+    if league:
+        for league_id in league:
+            _validate_league_id(settings, league_id, season, strict=True)
+    engine, session_factory = _engine_and_session(settings)
+    init_db(engine)
+    api_client = None
+    if refresh_data:
+        api_client = _api_client_from_settings(settings)
+
+    discord_requested = send_discord or dry_run or print_only
+    with session_scope(session_factory) as session:
+        delivery = None
+        if discord_requested:
+            if send_discord:
+                _, channels_config, webhooks_config = _load_discord_routing(settings)
+            else:
+                channels_config = None
+                webhooks_config = None
+            delivery = DiscordDeliveryService(
+                session,
+                channels_config=channels_config,
+                webhooks_config=webhooks_config,
+                legacy_webhook_url=settings.discord_webhook_url if send_discord else None,
+                timeout=settings.discord_timeout_seconds,
+            )
+        try:
+            summary = run_daily_predictions_v3(
+                target_date,
+                league_ids=tuple(league or ()),
+                window=window,
+                send_discord=discord_requested,
+                refresh_data=refresh_data,
+                dry_run=dry_run,
+                session=session,
+                reference=reference,
+                players_reference=players_reference,
+                competitions=competitions,
+                season=season,
+                model_dir=model_dir,
+                v2_model_dir=v2_model_dir,
+                api_client=api_client,
+                discord_delivery=delivery,
+                timezone_name=settings.app_timezone,
+                force=force,
+                print_only=print_only,
+                limit=limit,
+                save_raw=save_raw,
+                now=cutoff,
+                shadow_mode=shadow_mode,
+            )
+        finally:
+            if api_client is not None:
+                api_client.close()
+    summary_payload = summary.as_dict()
+    summary_json = json.dumps(summary_payload, indent=2, sort_keys=True)
+    if json_output_path is not None:
+        json_output_path.parent.mkdir(parents=True, exist_ok=True)
+        json_output_path.write_text(summary_json + "\n", encoding="utf-8")
+    if json_output:
+        console.out(summary_json)
+    else:
+        console.print(
+            f"Prediction automation V3 {'shadow' if summary.shadow_mode else 'production'} "
+            f"date={summary.target_date.isoformat()} window={summary.window.value} "
+            f"found={summary.found} predicted={summary.predicted} sent={summary.sent} "
+            f"duplicates={summary.duplicate_skipped} skipped={summary.skipped} "
+            f"failed={summary.failed}"
+        )
+
+
 @app.command("ingest-fixtures")
 def ingest_fixtures(
     league_id: int | None = typer.Option(
@@ -1830,10 +2194,16 @@ def ingest_fixtures(
         if refresh_api:
             with _api_client_from_settings(settings) as client:
                 service = FixtureIngestionService(session, client, save_raw=save_raw)
-                if league_id is not None and season is not None:
+                if fixture_date is not None:
+                    summary.merge(
+                        service.ingest_date(
+                            date_type.fromisoformat(fixture_date),
+                            league_id=league_id,
+                            season=season,
+                        )
+                    )
+                elif league_id is not None and season is not None:
                     summary.merge(service.ingest_league_season(league_id, season))
-                elif fixture_date is not None:
-                    summary.merge(service.ingest_date(date_type.fromisoformat(fixture_date)))
                 elif team_id is not None and last is not None:
                     summary.merge(service.ingest_team_last(team_id, last))
                 elif team_id is not None and next_count is not None:
@@ -2455,6 +2825,316 @@ def train(
     )
 
 
+@app.command("train-v3-draw-risk")
+def train_v3_draw_risk(
+    dataset: Path = typer.Option(..., "--dataset", help="CSV or Parquet V3 dataset."),
+    output_dir: Path = typer.Option(
+        Path("data/models/v3/draw_risk"),
+        "--output-dir",
+        help="Directory where Draw Risk artifacts are written.",
+    ),
+    model_version: str = typer.Option(
+        "v3.0-draw-risk",
+        "--model-version",
+        help="Draw Risk model version label.",
+    ),
+    calibration: str = typer.Option(
+        "isotonic",
+        "--calibration",
+        help="Calibration method: isotonic or none.",
+    ),
+    train_ratio: float = typer.Option(
+        0.60,
+        "--train-ratio",
+        help="Chronological train split ratio.",
+    ),
+    valid_ratio: float = typer.Option(
+        0.20,
+        "--valid-ratio",
+        help="Chronological validation split ratio.",
+    ),
+) -> None:
+    """Train the V3 binary Draw Risk model and save its artifacts."""
+    normalized_calibration = calibration.casefold()
+    if normalized_calibration not in {"isotonic", "none"}:
+        raise typer.BadParameter("--calibration must be isotonic or none")
+    if train_ratio <= 0 or valid_ratio <= 0 or train_ratio + valid_ratio >= 1:
+        raise typer.BadParameter("--train-ratio and --valid-ratio must be positive and sum < 1")
+    if not dataset.exists():
+        raise typer.BadParameter(f"Dataset not found: {dataset}")
+
+    from football_predictor.modeling.v3.draw_risk_model import (
+        CalibrationMode,
+        DrawRiskTrainingConfig,
+        train_draw_risk_from_dataset,
+    )
+
+    calibration_mode = cast(CalibrationMode, normalized_calibration)
+    result = train_draw_risk_from_dataset(
+        dataset,
+        output_dir,
+        config=DrawRiskTrainingConfig(
+            model_version=model_version,
+            calibration=calibration_mode,
+            train_ratio=train_ratio,
+            valid_ratio=valid_ratio,
+        ),
+    )
+    validation = result.metrics.get("validation") or {}
+    test = result.metrics.get("test") or {}
+    console.print(
+        {
+            "model_version": result.model.model_version,
+            "output_dir": str(output_dir),
+            "features": len(result.model.feature_names),
+            "model_path": str(result.model_path),
+            "metadata_path": str(result.metadata_path),
+            "feature_names_path": str(result.feature_names_path),
+            "metrics_path": str(result.metrics_path),
+            "feature_coverage_path": str(result.feature_coverage_path),
+            "calibration": result.model.calibration_decision,
+            "validation_log_loss": validation.get("log_loss"),
+            "validation_brier": validation.get("brier_score"),
+            "test_log_loss": test.get("log_loss"),
+            "test_brier": test.get("brier_score"),
+        }
+    )
+
+
+@app.command("train-v3-no-draw-winner")
+def train_v3_no_draw_winner(
+    dataset: Path = typer.Option(..., "--dataset", help="CSV or Parquet V3 dataset."),
+    output_dir: Path = typer.Option(
+        Path("data/models/v3/no_draw_winner"),
+        "--output-dir",
+        help="Directory where No-Draw Winner artifacts are written.",
+    ),
+    model_version: str = typer.Option(
+        "v3.0-no-draw-winner",
+        "--model-version",
+        help="No-Draw Winner model version label.",
+    ),
+    calibration: str = typer.Option(
+        "sigmoid",
+        "--calibration",
+        help="Calibration method: sigmoid or none.",
+    ),
+    train_ratio: float = typer.Option(
+        0.60,
+        "--train-ratio",
+        help="Chronological train split ratio after draw rows are filtered.",
+    ),
+    valid_ratio: float = typer.Option(
+        0.20,
+        "--valid-ratio",
+        help="Chronological validation split ratio after draw rows are filtered.",
+    ),
+) -> None:
+    """Train the V3 binary No-Draw Winner model and save its artifacts."""
+    normalized_calibration = calibration.casefold()
+    if normalized_calibration not in {"sigmoid", "none"}:
+        raise typer.BadParameter("--calibration must be sigmoid or none")
+    if train_ratio <= 0 or valid_ratio <= 0 or train_ratio + valid_ratio >= 1:
+        raise typer.BadParameter("--train-ratio and --valid-ratio must be positive and sum < 1")
+    if not dataset.exists():
+        raise typer.BadParameter(f"Dataset not found: {dataset}")
+
+    from football_predictor.modeling.v3.no_draw_winner_model import (
+        CalibrationMode,
+        NoDrawWinnerTrainingConfig,
+        train_no_draw_winner_from_dataset,
+    )
+
+    calibration_mode = cast(CalibrationMode, normalized_calibration)
+    result = train_no_draw_winner_from_dataset(
+        dataset,
+        output_dir,
+        config=NoDrawWinnerTrainingConfig(
+            model_version=model_version,
+            calibration=calibration_mode,
+            train_ratio=train_ratio,
+            valid_ratio=valid_ratio,
+        ),
+    )
+    validation = result.metrics.get("validation") or {}
+    test = result.metrics.get("test") or {}
+    console.print(
+        {
+            "model_version": result.model.model_version,
+            "output_dir": str(output_dir),
+            "features": len(result.model.feature_names),
+            "model_path": str(result.model_path),
+            "metadata_path": str(result.metadata_path),
+            "feature_names_path": str(result.feature_names_path),
+            "metrics_path": str(result.metrics_path),
+            "feature_coverage_path": str(result.feature_coverage_path),
+            "calibration": result.model.calibration_decision,
+            "validation_log_loss": validation.get("log_loss"),
+            "validation_brier": validation.get("brier_score"),
+            "test_log_loss": test.get("log_loss"),
+            "test_brier": test.get("brier_score"),
+        }
+    )
+
+
+@app.command("train-v3")
+def train_v3(
+    dataset: Path = typer.Option(..., "--dataset", help="CSV or Parquet V3 dataset."),
+    output_dir: Path = typer.Option(
+        Path("data/models/v3"),
+        "--output-dir",
+        help="Directory where V3 component and stacker artifacts are written.",
+    ),
+    v2_model_dir: Path | None = typer.Option(
+        None,
+        "--v2-model-dir",
+        help="Optional V2 model directory used as a stacker signal.",
+    ),
+    calibration: str = typer.Option(
+        "isotonic_draw,sigmoid_ndw",
+        "--calibration",
+        help="Calibration spec: isotonic_draw,sigmoid_ndw or none.",
+    ),
+    train_ratio: float = typer.Option(
+        0.60,
+        "--train-ratio",
+        help="Chronological train split ratio.",
+    ),
+    valid_ratio: float = typer.Option(
+        0.20,
+        "--valid-ratio",
+        help="Chronological validation split ratio used for stacker training.",
+    ),
+) -> None:
+    """Train the V3 Draw Risk, No-Draw Winner and stacker artifacts."""
+    if train_ratio <= 0 or valid_ratio <= 0 or train_ratio + valid_ratio >= 1:
+        raise typer.BadParameter("--train-ratio and --valid-ratio must be positive and sum < 1")
+    if not dataset.exists():
+        raise typer.BadParameter(f"Dataset not found: {dataset}")
+    if v2_model_dir is not None and not v2_model_dir.exists():
+        raise typer.BadParameter(f"V2 model path not found: {v2_model_dir}")
+
+    draw_calibration, ndw_calibration = _parse_v3_calibration(calibration)
+
+    from football_predictor.modeling.v3.training import V3TrainingConfig, train_v3_from_dataset
+
+    result = train_v3_from_dataset(
+        dataset,
+        output_dir,
+        v2_model_dir=v2_model_dir,
+        config=V3TrainingConfig(
+            draw_calibration=draw_calibration,
+            no_draw_winner_calibration=ndw_calibration,
+            train_ratio=train_ratio,
+            valid_ratio=valid_ratio,
+        ),
+    )
+    stacker_test = (result.metrics.get("stacker") or {}).get("test") or {}
+    console.print(
+        {
+            "model_version": result.model.model_version,
+            "output_dir": str(output_dir),
+            "model_path": str(result.model_path),
+            "metadata_path": str(result.metadata_path),
+            "metrics_path": str(result.metrics_path),
+            "draw_risk_model_path": str(result.draw_risk_model_path),
+            "no_draw_winner_model_path": str(result.no_draw_winner_model_path),
+            "stacker_model_path": str(result.stacker_result.model_path),
+            "stacker_decision": result.stacker_result.model.training_decision,
+            "stacker_test_log_loss": stacker_test.get("log_loss"),
+            "stacker_test_brier": stacker_test.get("brier_score"),
+        }
+    )
+
+
+def _parse_v3_calibration(value: str) -> tuple[str, str]:
+    normalized = {part.strip().casefold() for part in value.split(",") if part.strip()}
+    if not normalized or normalized == {"none"}:
+        return "none", "none"
+    allowed = {"isotonic_draw", "none_draw", "sigmoid_ndw", "none_ndw"}
+    unknown = sorted(normalized - allowed)
+    if unknown:
+        raise typer.BadParameter(
+            "--calibration must contain isotonic_draw/none_draw and sigmoid_ndw/none_ndw"
+        )
+    draw = "none" if "none_draw" in normalized else "isotonic"
+    ndw = "none" if "none_ndw" in normalized else "sigmoid"
+    return draw, ndw
+
+
+@app.command("backtest-v3")
+def backtest_v3(
+    dataset: Path = typer.Option(..., "--dataset", help="CSV or Parquet V3 dataset."),
+    model_dir: Path = typer.Option(
+        Path("data/models/v3"),
+        "--model-dir",
+        help="Directory containing V3 component artifacts.",
+    ),
+    v2_model_dir: Path | None = typer.Option(
+        None,
+        "--v2-model-dir",
+        help="Optional V2 model directory used for comparison and V3 blend signals.",
+    ),
+    output_dir: Path = typer.Option(
+        Path("reports/v3"),
+        "--output-dir",
+        "--report",
+        help="Directory where V3 comparison reports are written.",
+    ),
+    output_format: str = typer.Option(
+        "both",
+        "--format",
+        help="Report format: json, markdown, or both.",
+    ),
+    train_ratio: float = typer.Option(0.60, "--train-ratio"),
+    valid_ratio: float = typer.Option(0.20, "--valid-ratio"),
+    retrain_v3: bool = typer.Option(
+        False,
+        "--retrain-v3/--no-retrain-v3",
+        help="Retrain V3 from the dataset before evaluating the chronological test fold.",
+    ),
+) -> None:
+    """Backtest V3 against V2 and baselines on a chronological test fold."""
+    normalized_format = output_format.casefold()
+    if normalized_format not in {"json", "markdown", "both"}:
+        raise typer.BadParameter("--format must be json, markdown, or both")
+    if not dataset.exists():
+        raise typer.BadParameter(f"Dataset not found: {dataset}")
+    if v2_model_dir is not None and not v2_model_dir.exists():
+        raise typer.BadParameter(f"V2 model path not found: {v2_model_dir}")
+
+    from football_predictor.backtesting import v3_evaluator
+
+    try:
+        result = v3_evaluator.run_v3_backtest(
+            dataset,
+            model_dir,
+            v2_model_dir=v2_model_dir,
+            output_dir=output_dir,
+            config=v3_evaluator.V3BacktestConfig(
+                train_ratio=train_ratio,
+                valid_ratio=valid_ratio,
+                report_format=cast(v3_evaluator.ReportFormat, normalized_format),
+                retrain_v3=retrain_v3,
+            ),
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    primary = result.metrics_by_model.get("v3_stacker_full", {})
+    v2 = result.metrics_by_model.get("v2_existing", {})
+    console.print(
+        {
+            "test_rows": result.periods["test"].row_count,
+            "reports": {name: str(path) for name, path in result.report_paths.items()},
+            "success_status": result.success_criteria.get("status"),
+            "v3_log_loss": primary.get("log_loss"),
+            "v3_brier": primary.get("brier_score"),
+            "v2_available": v2.get("available", False),
+            "models": list(result.metrics_by_model),
+        }
+    )
+
+
 @app.command()
 def backtest(
     dataset: Path = typer.Option(..., "--dataset", help="CSV or Parquet backtest dataset."),
@@ -2553,26 +3233,23 @@ def ou_ingest_odds(
     engine, session_factory = _engine_and_session(settings)
     target_date = date_type.fromisoformat(date_str) if date_str else date_type.today()
 
-    with session_scope(session_factory) as session:
-        with _api_client_from_settings(settings) as client:
-            svc = OUOddsIngestionService(
-                session,
-                client,
-                reference=reference,
-                ou_bet_id=settings.market_ou25_bet_id,
-            )
-            if fixture is not None:
-                summary = svc.ingest_ou_odds_for_fixture(fixture)
-                console.print(json.dumps(summary.as_dict(), indent=2))
-            elif league_id:
-                for lid in league_id:
-                    summary = svc.ingest_ou_odds_by_date(
-                        target_date, league_id=lid, season=season
-                    )
-                    console.print(f"league={lid}: {json.dumps(summary.as_dict())}")
-            else:
-                summary = svc.ingest_ou_odds_by_date(target_date, season=season)
-                console.print(json.dumps(summary.as_dict(), indent=2))
+    with session_scope(session_factory) as session, _api_client_from_settings(settings) as client:
+        svc = OUOddsIngestionService(
+            session,
+            client,
+            reference=reference,
+            ou_bet_id=settings.market_ou25_bet_id,
+        )
+        if fixture is not None:
+            summary = svc.ingest_ou_odds_for_fixture(fixture)
+            console.print(json.dumps(summary.as_dict(), indent=2))
+        elif league_id:
+            for lid in league_id:
+                summary = svc.ingest_ou_odds_by_date(target_date, league_id=lid, season=season)
+                console.print(f"league={lid}: {json.dumps(summary.as_dict())}")
+        else:
+            summary = svc.ingest_ou_odds_by_date(target_date, season=season)
+            console.print(json.dumps(summary.as_dict(), indent=2))
     console.print("[green]O/U odds ingestion complete.[/green]")
 
 
@@ -2612,7 +3289,10 @@ def ou_train(
     version: str = typer.Option("ou-v1", "--version"),
 ) -> None:
     """Train OUCompositeModel from a parquet dataset and save artifacts."""
-    from football_predictor.ou_model.modeling.ou_train import OUTrainingConfig, train_ou_model_from_dataset
+    from football_predictor.ou_model.modeling.ou_train import (
+        OUTrainingConfig,
+        train_ou_model_from_dataset,
+    )
 
     result = train_ou_model_from_dataset(
         dataset,
@@ -2632,7 +3312,10 @@ def ou_backtest(
     n_splits: int = typer.Option(5, "--n-splits"),
 ) -> None:
     """Walk-forward O/U backtest and print aggregate metrics."""
-    from football_predictor.ou_model.backtesting.ou_evaluator import OUBacktestConfig, run_ou_backtest
+    from football_predictor.ou_model.backtesting.ou_evaluator import (
+        OUBacktestConfig,
+        run_ou_backtest,
+    )
 
     result = run_ou_backtest(
         dataset,
@@ -2652,8 +3335,8 @@ def ou_predict(
     no_save: bool = typer.Option(False, "--no-save"),
 ) -> None:
     """Predict O/U 2.5 for a single fixture and print the Discord-formatted result."""
-    from football_predictor.ou_model.prediction.ou_service import OUPredictionService
     from football_predictor.ou_model.discord.ou_formatter import format_ou_prediction_markdown
+    from football_predictor.ou_model.prediction.ou_service import OUPredictionService
 
     settings = get_settings()
     engine, session_factory = _engine_and_session(settings)
@@ -2673,6 +3356,11 @@ def ou_run_daily(
     league_id: list[int] = typer.Option([], "--league-id"),
     season: int | None = typer.Option(None, "--season"),
     model_dir: Path | None = typer.Option(None, "--model-dir"),
+    window: DailyPredictionWindow = typer.Option(
+        DailyPredictionWindow.LATE,
+        "--window",
+        help="Prediction window to select fixtures; late is M-30.",
+    ),
     send_discord: bool = typer.Option(False, "--send-discord"),
     dry_run: bool = typer.Option(False, "--dry-run"),
     print_only: bool = typer.Option(False, "--print-only"),
@@ -2688,12 +3376,15 @@ def ou_run_daily(
 
     discord_delivery = None
     if send_discord:
-        channels_config, webhooks_config = _load_discord_routing(settings)
-        discord_delivery = DiscordDeliveryService(
-            channels_config=channels_config, webhooks_config=webhooks_config
-        )
+        _, channels_config, webhooks_config = _load_discord_routing(settings)
 
     with session_scope(session_factory) as session:
+        if send_discord:
+            discord_delivery = DiscordDeliveryService(
+                session,
+                channels_config=channels_config,
+                webhooks_config=webhooks_config,
+            )
         summary = run_daily_ou_predictions(
             target_date,
             session=session,
@@ -2705,6 +3396,7 @@ def ou_run_daily(
             send_discord=send_discord,
             dry_run=dry_run,
             print_only=print_only,
+            window=window,
             limit=limit,
             edge_threshold=edge_threshold,
         )

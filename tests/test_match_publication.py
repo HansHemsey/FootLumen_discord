@@ -115,6 +115,7 @@ def test_publish_match_analyses_due_and_dedupe(tmp_path: Path, reference_path: P
         )
 
     assert summary.dry_run == 1
+    assert sent.channel_key == "analyses"
     assert second.duplicate_skipped == 1
 
 
@@ -166,6 +167,45 @@ def test_publish_match_analyses_respects_h6_grace_window(
     assert before.results[0].reason == "not_in_h6_grace_window"
     assert after.skipped == 1
     assert after.results[0].reason == "not_in_h6_grace_window"
+
+
+def test_publish_match_analyses_skips_insufficient_data(
+    tmp_path: Path,
+    reference_path: Path,
+) -> None:
+    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'analyses_quality.db'}")
+    session_factory = create_session_factory(engine)
+    reference = load_api_football_reference(reference_path)
+    channels = load_discord_channels_config(_channels_config(tmp_path), reference)
+    webhooks = load_discord_webhooks_config(_webhooks_config(tmp_path), reference)
+    competition = _competition()
+
+    with session_scope(session_factory) as session:
+        fixture, prediction, snapshot = _fixture_prediction_snapshot(
+            fixture_date=datetime(2026, 5, 3, 18, tzinfo=UTC),
+            prediction_time=datetime(2026, 5, 3, 12, tzinfo=UTC),
+        )
+        snapshot.features_json = {}
+        snapshot.data_quality_json = {"overall_data_quality_score": 20}
+        _persist_fixture_prediction(session, fixture, prediction, snapshot)
+        summary = publish_match_analyses(
+            session=session,
+            competitions=[competition],
+            delivery=DiscordDeliveryService(
+                session,
+                channels_config=channels,
+                webhooks_config=webhooks,
+            ),
+            reference=reference,
+            target_date=date(2026, 5, 3),
+            now=datetime(2026, 5, 3, 12, 10, tzinfo=UTC),
+            dry_run=True,
+        )
+        messages = list(session.query(models.DiscordMessage).all())
+
+    assert summary.skipped == 1
+    assert summary.results[0].reason == "insufficient_analysis_data"
+    assert messages == []
 
 
 def test_publish_match_results_uses_published_prediction(
@@ -228,6 +268,151 @@ def test_publish_match_results_uses_published_prediction(
     assert summary.dry_run == 1
     assert "Pronostic : correct" in result_message.message_markdown
     assert result_message.model_prediction_id == prediction.id
+
+
+def test_publish_match_results_does_not_use_unpublished_internal_prediction(
+    tmp_path: Path,
+    reference_path: Path,
+) -> None:
+    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'results_unpublished.db'}")
+    session_factory = create_session_factory(engine)
+    reference = load_api_football_reference(reference_path)
+    channels = load_discord_channels_config(_channels_config(tmp_path), reference)
+    webhooks = load_discord_webhooks_config(_webhooks_config(tmp_path), reference)
+    competition = _competition()
+
+    with session_scope(session_factory) as session:
+        fixture, prediction, snapshot = _fixture_prediction_snapshot(
+            fixture_date=datetime(2026, 5, 3, 18, tzinfo=UTC),
+            prediction_time=datetime(2026, 5, 3, 12, tzinfo=UTC),
+        )
+        fixture.status_short = "FT"
+        fixture.home_goals = 2
+        fixture.away_goals = 1
+        _persist_fixture_prediction(session, fixture, prediction, snapshot)
+        summary = publish_match_results(
+            session=session,
+            competitions=[competition],
+            delivery=DiscordDeliveryService(
+                session,
+                channels_config=channels,
+                webhooks_config=webhooks,
+            ),
+            target_date=date(2026, 5, 3),
+            dry_run=True,
+        )
+        result_message = (
+            session.query(models.DiscordMessage)
+            .filter(models.DiscordMessage.message_type == "result")
+            .one()
+        )
+
+    assert summary.dry_run == 1
+    assert "Choix : non disponible" in result_message.message_markdown
+    assert "aucune prédiction pré-match retrouvée" in result_message.message_markdown
+    assert result_message.model_prediction_id is None
+
+
+def test_publish_match_results_compares_published_v3_prediction(
+    tmp_path: Path,
+    reference_path: Path,
+) -> None:
+    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'results_v3.db'}")
+    session_factory = create_session_factory(engine)
+    reference = load_api_football_reference(reference_path)
+    channels = load_discord_channels_config(_channels_config(tmp_path), reference)
+    webhooks = load_discord_webhooks_config(_webhooks_config(tmp_path), reference)
+    competition = _competition()
+
+    with session_scope(session_factory) as session:
+        fixture, _prediction, _snapshot = _fixture_prediction_snapshot(
+            fixture_date=datetime(2026, 5, 3, 18, tzinfo=UTC),
+            prediction_time=datetime(2026, 5, 3, 12, tzinfo=UTC),
+        )
+        fixture.status_short = "FT"
+        fixture.home_goals = 2
+        fixture.away_goals = 1
+        session.add_all(
+            [
+                models.Team(team_id=fixture.home_team_id, name=fixture.home_team),
+                models.Team(team_id=fixture.away_team_id, name=fixture.away_team),
+                models.League(league_id=fixture.league_id, season=fixture.season, name="Ligue 1"),
+                fixture,
+            ]
+        )
+        session.flush()
+        snapshot = models.V3FeatureSnapshot(
+            fixture_id=fixture.fixture_id,
+            prediction_time=datetime(2026, 5, 3, 12, tzinfo=UTC),
+            feature_version="v3-test-result",
+            official_lineup_available_flag=False,
+            features_json={},
+            data_quality_json={},
+        )
+        session.add(snapshot)
+        session.flush()
+        prediction = models.V3ModelPrediction(
+            fixture_id=fixture.fixture_id,
+            v3_feature_snapshot_id=snapshot.id,
+            prediction_time=datetime(2026, 5, 3, 12, tzinfo=UTC),
+            model_version="synthetic-v3",
+            fusion_strategy="deterministic_fallback",
+            p_v3_final_home=0.64,
+            p_v3_final_draw=0.20,
+            p_v3_final_away=0.16,
+            p_v3_draw_risk=0.20,
+            p_v3_home_no_draw=0.80,
+            p_v3_away_no_draw=0.20,
+            confidence_score=76.0,
+            confidence_label="High",
+            predicted_result="HOME",
+            expert_probabilities_json={},
+            explanations_json=[],
+            data_quality_json={},
+            payload_json={"competition": "Ligue 1"},
+        )
+        session.add(prediction)
+        session.flush()
+        session.add(
+            models.DiscordMessage(
+                fixture_id=fixture.fixture_id,
+                model_prediction_id=None,
+                league_id=61,
+                season=2025,
+                channel_key="predictions",
+                message_type="prediction",
+                status="sent",
+                dry_run=False,
+                print_only=False,
+                webhook_hash="synthetic",
+                webhook_url_hash="synthetic",
+                message_hash="prediction-v3-message",
+                message_markdown="```md\nv3 prediction\n```",
+                payload_json={"v3_model_prediction_id": prediction.id, "daily_window": "late"},
+                route_json={},
+                response_json={},
+            )
+        )
+        summary = publish_match_results(
+            session=session,
+            competitions=[competition],
+            delivery=DiscordDeliveryService(
+                session,
+                channels_config=channels,
+                webhooks_config=webhooks,
+            ),
+            target_date=date(2026, 5, 3),
+            dry_run=True,
+        )
+        result_message = (
+            session.query(models.DiscordMessage)
+            .filter(models.DiscordMessage.message_type == "result")
+            .one()
+        )
+
+    assert summary.dry_run == 1
+    assert "Pronostic : correct" in result_message.message_markdown
+    assert result_message.model_prediction_id is None
 
 
 def test_publish_match_cli_and_scripts(repo_root: Path) -> None:

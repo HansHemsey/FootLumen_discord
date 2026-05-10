@@ -10,6 +10,7 @@
 #   CONFIG           path to competitions.yaml (default: config/competitions.yaml)
 #   MODEL_DIR        path to ou model dir (default: data/models/ou-v1)
 #   REFRESH_DATA     true/false — ingest O/U odds before predicting (default: true)
+#   WINDOW           prediction window (default: late, M-30)
 #   SEND_DISCORD     true/false — actually fire Discord webhooks (default: false)
 #   DRY_RUN          true/false — skip writes if true (default: true)
 #   PRINT_ONLY       true/false — print Discord messages without sending (default: false)
@@ -29,6 +30,7 @@ RUN_DATE="${DATE:-$(default_run_date)}"
 CONFIG_PATH="${CONFIG:-config/competitions.yaml}"
 MODEL_DIR="${MODEL_DIR:-data/models/ou-v1}"
 REFRESH_DATA="${REFRESH_DATA:-true}"
+RUN_WINDOW="${WINDOW:-late}"
 SEND_DISCORD="${SEND_DISCORD:-false}"
 DRY_RUN="${DRY_RUN:-true}"
 PRINT_ONLY="${PRINT_ONLY:-false}"
@@ -67,6 +69,7 @@ fi
 
 set -- ou run-daily \
   --date "$RUN_DATE" \
+  --window "$RUN_WINDOW" \
   --edge-threshold "$EDGE_THRESHOLD"
 
 if [ -f "$MODEL_DIR/model.joblib" ]; then

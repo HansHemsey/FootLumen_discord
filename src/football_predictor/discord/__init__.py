@@ -11,6 +11,7 @@ from football_predictor.discord.router import (
     resolve_discord_route,
 )
 from football_predictor.discord.service import DiscordDeliveryService, DiscordSendResult
+from football_predictor.discord.v3_formatter import format_prediction_v3_markdown
 from football_predictor.discord.webhook import DiscordWebhookClient
 from football_predictor.discord.weekly_score import (
     format_weekly_score_messages,
@@ -26,6 +27,7 @@ __all__ = [
     "format_match_analysis_message",
     "format_match_result_message",
     "format_prediction_markdown",
+    "format_prediction_v3_markdown",
     "format_weekly_score_messages",
     "publish_weekly_prediction_score",
     "resolve_discord_route",

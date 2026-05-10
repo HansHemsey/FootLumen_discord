@@ -16,6 +16,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -480,6 +481,69 @@ class OUModelPrediction(Base, TimestampMixin):
     confidence_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     confidence_label: Mapped[str | None] = mapped_column(String(32), nullable=True)
     expert_probabilities_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+    data_quality_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+    payload_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+
+
+class V3FeatureSnapshot(Base, TimestampMixin):
+    __tablename__ = "v3_feature_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "fixture_id", "prediction_time", "feature_version", name="uq_v3_feature_snapshot"
+        ),
+        Index("ix_v3_feature_snapshot_fixture_time", "fixture_id", "prediction_time"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    fixture_id: Mapped[int] = mapped_column(ForeignKey("fixtures.fixture_id"), index=True)
+    prediction_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    feature_version: Mapped[str] = mapped_column(String(64))
+    official_lineup_available_flag: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false()
+    )
+    features_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+    data_quality_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+
+
+class V3ModelPrediction(Base, TimestampMixin):
+    __tablename__ = "v3_model_predictions"
+    __table_args__ = (
+        Index("ix_v3_prediction_fixture_time", "fixture_id", "prediction_time"),
+        Index("ix_v3_prediction_model_version", "model_version"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    fixture_id: Mapped[int] = mapped_column(ForeignKey("fixtures.fixture_id"), index=True)
+    v3_feature_snapshot_id: Mapped[int] = mapped_column(
+        ForeignKey("v3_feature_snapshots.id"), index=True
+    )
+    prediction_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    model_version: Mapped[str] = mapped_column(String(64))
+    fusion_strategy: Mapped[str] = mapped_column(String(32))
+    p_v3_final_home: Mapped[float] = mapped_column(Float)
+    p_v3_final_draw: Mapped[float] = mapped_column(Float)
+    p_v3_final_away: Mapped[float] = mapped_column(Float)
+    p_v3_draw_risk: Mapped[float | None] = mapped_column(Float, nullable=True)
+    p_v3_home_no_draw: Mapped[float | None] = mapped_column(Float, nullable=True)
+    p_v3_away_no_draw: Mapped[float | None] = mapped_column(Float, nullable=True)
+    p_v2_home: Mapped[float | None] = mapped_column(Float, nullable=True)
+    p_v2_draw: Mapped[float | None] = mapped_column(Float, nullable=True)
+    p_v2_away: Mapped[float | None] = mapped_column(Float, nullable=True)
+    p_market_home: Mapped[float | None] = mapped_column(Float, nullable=True)
+    p_market_draw: Mapped[float | None] = mapped_column(Float, nullable=True)
+    p_market_away: Mapped[float | None] = mapped_column(Float, nullable=True)
+    p_api_home: Mapped[float | None] = mapped_column(Float, nullable=True)
+    p_api_draw: Mapped[float | None] = mapped_column(Float, nullable=True)
+    p_api_away: Mapped[float | None] = mapped_column(Float, nullable=True)
+    data_quality_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    official_lineup_available_flag: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false()
+    )
+    confidence_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    confidence_label: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    predicted_result: Mapped[str] = mapped_column(String(16))
+    expert_probabilities_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+    explanations_json: Mapped[JsonValue] = mapped_column(SAJSON, default=list)
     data_quality_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
     payload_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
 

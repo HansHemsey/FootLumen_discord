@@ -116,6 +116,12 @@ make publish-daily-discord
 # Avant match : fenetre late, lineups si disponibles, Discord en dry-run par defaut.
 make daily-late
 
+# O/U 2.5 M-30, Discord en dry-run par defaut.
+scripts/daily_ou.sh
+
+# Lundi : préparation des fixtures des 7 prochains jours.
+scripts/weekly_ingestion.sh
+
 # Backfill manuel plus lourd sur toutes les competitions enabled.
 make refresh-all-leagues
 
@@ -134,6 +140,10 @@ les cinq championnats suivis sur les saisons `2022`, `2023`, `2024` et `2025`. L
 Ainsi, les fixtures hebdomadaires ingerees via la config production enrichissent la DB une
 seule fois, puis deviennent automatiquement exploitables par les modeles car la saison
 courante est aussi incluse dans la config historique.
+
+Convention d'exploitation : `scripts/weekly_ingestion.sh` prépare les fixtures futures en
+`J+7` (date locale d'exécution incluse plus 6 jours). `DETAILS_DAYS_BACK=7` dans
+`refresh_all_leagues.sh` reste réservé aux détails récents de matchs terminés en `J-7`.
 
 Par defaut `SEND_DISCORD=false` et `DRY_RUN=true`. Un envoi Discord reel demande donc
 explicitement `SEND_DISCORD=true DRY_RUN=false`. Les publications quotidiennes alimentent
@@ -499,12 +509,24 @@ football-predictor predict-today \
   --refresh-data \
   --send-discord \
   --dry-run
+football-predictor predict-today-v3 \
+  --date YYYY-MM-DD \
+  --window late \
+  --model-dir data/models/v3 \
+  --v2-model-dir data/models/v2-late \
+  --production-mode \
+  --no-refresh-data \
+  --json
 ```
 
 Les placeholders `<league_id>` et `<fixture_id>` doivent être remplacés uniquement par des
 valeurs vérifiées dans les référentiels JSON ou dans la base locale.
 L'exemple `league 39` correspond à la Premier League 2025 et existe dans
 `docs/api_football_reference.json`; il reste à adapter selon les compétitions suivies.
+`predict-today-v3` reste en shadow mode par défaut pour les appels manuels. Ajouter
+`--production-mode` autorise le chemin production V3 ; un envoi Discord réel exige aussi
+`--send-discord` et l'absence de `--dry-run` / `--print-only`. Utiliser
+`--dry-run --print-only` pour vérifier le rendu Discord V3 sans publication.
 
 Les commandes `ingest-fixtures --league/--season`, `ingest-fixtures --date` et
 `ingest-standings --league/--season` utilisent les docs locaux par défaut. Les variantes
@@ -624,8 +646,9 @@ calculent un snapshot global, puis ajoutent la cible `HOME/DRAW/AWAY` hors
 `features_json`. La fenêtre `30m` est disponible pour entraîner un modèle aligné sur
 `daily_late`. Les exports CSV et Parquet sont supportés.
 
-Le module `modeling/` entraîne le modèle sportif. La V1 scikit-learn reste disponible,
-mais la production recommandée utilise la V2 `late` M-30 : marché calibré, Poisson
+Le module `modeling/` entraîne les modèles sportifs. La V1 scikit-learn reste disponible,
+la V2 `late` M-30 reste le rollback et un signal de la V3, et la production Discord
+`daily_late` utilise la V3 depuis Sprint 10. La V2 combine marché calibré, Poisson
 amélioré, Elo dynamique, modèle tabulaire LightGBM optionnel/fallback sklearn, puis
 stacking appris sur validation temporelle. La commande `train` exclut les colonnes de
 fuite (`target`, scores finaux, IDs naïfs, dates, statuts post-match et JSON bruts), puis
@@ -655,8 +678,9 @@ football-predictor backtest \
 ```
 
 `scripts/train_backtest_all.sh` utilise ce workflow V2 par défaut, avec
-`config/competitions_history.yaml` si le fichier existe. Le modèle de production late reste
-écrit dans `data/models/v2-late`, que `daily_late` charge automatiquement.
+`config/competitions_history.yaml` si le fichier existe. Le modèle V2 late reste écrit
+dans `data/models/v2-late` pour servir de signal V3 et de rollback
+`PREDICTION_ENGINE=v2`.
 
 Pour le modèle Over/Under 2.5, la commande dédiée utilise la même config historique et écrit
 l'artefact dans `data/models/ou-v1` :
@@ -678,11 +702,25 @@ doivent provenir de snapshots construits point-in-time.
 
 La commande `predict` prédit une fixture unique depuis la DB locale par défaut
 (`--no-refresh`). Elle construit un `FeatureSnapshot` point-in-time, charge le modèle depuis
-`--model-dir` si disponible, puis combine les sources autorisées. Si
-`data/models/v2-late/model.joblib` existe, `daily_late` l'utilise par défaut ; sinon il
+`--model-dir` si disponible, puis combine les sources autorisées. Le rollback
+`PREDICTION_ENGINE=v2` de `daily_late` utilise `data/models/v2-late` s'il existe, sinon
 revient à `data/models/v1`, puis aux fallbacks. Avec V2, les probabilités par expert sont
 persistées dans `ModelPrediction.payload_json.expert_probabilities`. Les appels API live ne
 sont faits qu'avec `--refresh-data`, jamais implicitement.
+
+Depuis Sprint 10, `scripts/daily_late.sh` publie les prédictions M-30 avec la V3 par
+défaut (`MODEL_DIR=data/models/v3`, `V2_MODEL_DIR=data/models/v2-late`). La promotion est
+volontaire malgré un backtest V3 non validé ; surveiller les premiers runs réels et la
+couverture odds/API/lineups rafraîchie à M-30. Le rollback officiel est :
+
+```bash
+PREDICTION_ENGINE=v2 SEND_DISCORD=true DRY_RUN=false scripts/daily_late.sh
+```
+
+La publication publique applique le même filtre pour V3 1X2 et O/U 2.5 : seuls les labels
+`High` et `Very High` sont envoyés dans Discord. Les prédictions `Low`, `Medium`,
+`Uncertain` ou assimilées sont persistées pour suivi interne avec le statut
+`confidence_skipped`.
 
 La commande `predict-today` automatise les prédictions d'une date sans serveur web. Elle
 peut être appelée par cron ou par une tâche planifiée. Les fenêtres filtrent les fixtures
@@ -709,14 +747,14 @@ Pour un cron local, utiliser par exemple des commandes séparées :
 # Routine matin : refresh live explicite sur les competitions enabled, sans prediction.
 scripts/daily_morning.sh
 
-# Update avant match : refresh explicite, Discord reel seulement si dry-run desactive.
+# Update avant match : V3 par defaut, refresh explicite, Discord reel seulement si dry-run desactive.
 SEND_DISCORD=true DRY_RUN=false scripts/daily_late.sh
 ```
 
-La déduplication Discord est faite par `fixture_id + model_version + window`.
-Elle n'empêche pas de créer une nouvelle `ModelPrediction`, mais évite un second envoi réel
-pour la même fenêtre. `--force` contourne cette protection ; `--dry-run` et `--print-only`
-ne bloquent jamais un futur envoi réel.
+La déduplication Discord est faite par `fixture_id + window` pour les vrais messages
+`predictions`. En V3, elle n'empêche pas de créer une nouvelle `V3ModelPrediction`, mais
+évite un second envoi réel pour la même fenêtre. `--force` contourne cette protection ;
+`--dry-run` et `--print-only` ne bloquent jamais un futur envoi réel.
 
 Le formatter Discord produit un bloc `md` ferme, en français, limite à 2000 caractères. Il
 inclut le match, la compétition, la date, les probabilités, la confiance, les facteurs clés,
@@ -770,8 +808,10 @@ football-predictor publish-weekly-score --date YYYY-MM-DD --dry-run
 SEND_DISCORD=true DRY_RUN=false scripts/publish_weekly_score.sh
 ```
 
-Il compte uniquement les prédictions `daily_late` réellement publiées dans Discord et
-dont le match est terminé. Les pronostics en attente ne sont pas affichés. Le bilan est
+Il compte uniquement les pronostics réellement publiés dans Discord et dont le match est
+terminé : V2 legacy, V3 via `payload_json["v3_model_prediction_id"]`, et O/U 2.5 via
+`payload_json["ou_model_prediction_id"]`. Les prédictions internes non publiées pour
+confiance insuffisante, `dry_run` ou `print_only` ne sont pas affichées. Le bilan est
 calculé sur la semaine ISO lundi-dimanche en Europe/Paris, puis remplace seulement le
 message du même `week_key`. Le lundi matin, il met aussi à jour la semaine précédente
 afin de capter les résultats du dimanche arrivés dans la nuit, puis crée le message de la
@@ -795,12 +835,13 @@ REFRESH_DATA=true SEND_DISCORD=true DRY_RUN=false scripts/publish_match_results.
 forme recente, classement, odds/mouvement, absences ou XI si disponibles, points
 forts/faibles, fiabilite des donnees et conclusion prudente. La prediction est construite
 avec `prediction_time = fixture.date - 6h` pour rester point-in-time. La marge d'envoi est
-configurable avec `ANALYSIS_GRACE_MINUTES`, 15 minutes par defaut.
+configurable avec `ANALYSIS_GRACE_MINUTES`, 15 minutes par defaut. Une analyse sans
+signaux suffisants est ignorée avec `insufficient_analysis_data`.
 
 `publish-match-results` publie dans `resultats` uniquement quand la DB contient un statut
 termine et un score final. Le message compare le score et le resultat 1X2 avec la derniere
-prediction pre-match envoyee sur Discord, puis avec la derniere prediction pre-match DB si
-aucun envoi n'est retrouve. Avec `REFRESH_DATA=true`, le script rafraichit les fixtures du
+prediction pre-match envoyee sur Discord. Les prédictions internes jamais publiées ne sont
+pas affichées après match. Avec `REFRESH_DATA=true`, le script rafraichit les fixtures du
 jour pour capter les scores finaux. Les deux commandes verrouillent un seul envoi reel par
 fixture ; `--force` renvoie volontairement.
 

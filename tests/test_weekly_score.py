@@ -113,6 +113,54 @@ def test_weekly_score_counts_only_late_sent_finished_predictions(tmp_path: Path)
     assert reports[0].lines[0].fixture_id == -1
 
 
+def test_weekly_score_counts_v3_and_ou_only_when_discord_was_sent(tmp_path: Path) -> None:
+    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'weekly_v3_ou.db'}")
+    session_factory = create_session_factory(engine)
+
+    with session_scope(session_factory) as session:
+        _seed_v3_prediction(
+            session,
+            fixture_id=-31,
+            kickoff=datetime(2026, 5, 3, 12, 30, tzinfo=UTC),
+            home_goals=2,
+            away_goals=1,
+            predicted="HOME",
+            published=True,
+        )
+        _seed_ou_prediction(
+            session,
+            fixture_id=-32,
+            kickoff=datetime(2026, 5, 3, 15, tzinfo=UTC),
+            home_goals=3,
+            away_goals=1,
+            p_over=0.74,
+            p_under=0.26,
+            published=True,
+        )
+        _seed_v3_prediction(
+            session,
+            fixture_id=-33,
+            kickoff=datetime(2026, 5, 3, 18, tzinfo=UTC),
+            home_goals=0,
+            away_goals=1,
+            predicted="AWAY",
+            published=False,
+        )
+        reports = build_weekly_score_reports(
+            session,
+            target_date=date(2026, 5, 3),
+            timezone_name="Europe/Paris",
+            include_previous_week_finalization=False,
+        )
+
+    assert reports[0].total_predictions == 2
+    assert reports[0].completed == 2
+    assert reports[0].correct == 2
+    families = {line.model_family for line in reports[0].lines}
+    assert families == {"1X2 V3", "O/U 2.5"}
+    assert {-31, -32} == {line.fixture_id for line in reports[0].lines}
+
+
 def test_weekly_score_replaces_only_same_week_messages(tmp_path: Path) -> None:
     requests: list[tuple[str, str]] = []
 
@@ -337,6 +385,180 @@ def _seed_prediction(
             or {"automation_window": "late", "daily_window": "late"},
             route_json={},
             response_json={},
+        )
+    )
+
+
+def _seed_v3_prediction(
+    session,
+    *,
+    fixture_id: int,
+    kickoff: datetime,
+    home_goals: int,
+    away_goals: int,
+    predicted: str,
+    published: bool,
+) -> None:
+    _seed_base_fixture(
+        session,
+        fixture_id=fixture_id,
+        kickoff=kickoff,
+        home_goals=home_goals,
+        away_goals=away_goals,
+    )
+    snapshot = models.V3FeatureSnapshot(
+        fixture_id=fixture_id,
+        prediction_time=datetime(2026, 5, 3, 12, tzinfo=UTC),
+        feature_version=f"weekly-v3-{fixture_id}",
+        official_lineup_available_flag=False,
+        features_json={},
+        data_quality_json={},
+    )
+    session.add(snapshot)
+    session.flush()
+    prediction = models.V3ModelPrediction(
+        fixture_id=fixture_id,
+        v3_feature_snapshot_id=snapshot.id,
+        prediction_time=datetime(2026, 5, 3, 12, tzinfo=UTC),
+        model_version="synthetic-v3-weekly",
+        fusion_strategy="deterministic_fallback",
+        p_v3_final_home=0.62,
+        p_v3_final_draw=0.21,
+        p_v3_final_away=0.17,
+        p_v3_draw_risk=0.21,
+        p_v3_home_no_draw=0.78,
+        p_v3_away_no_draw=0.22,
+        confidence_score=78.0,
+        confidence_label="High",
+        predicted_result=predicted,
+        expert_probabilities_json={},
+        explanations_json=[],
+        data_quality_json={},
+        payload_json={},
+    )
+    session.add(prediction)
+    session.flush()
+    if published:
+        session.add(
+            models.DiscordMessage(
+                fixture_id=fixture_id,
+                model_prediction_id=None,
+                channel_key="predictions",
+                message_type="prediction",
+                status="sent",
+                dry_run=False,
+                print_only=False,
+                webhook_hash="synthetic",
+                webhook_url_hash="synthetic",
+                message_hash=f"v3-prediction-{fixture_id}",
+                message_markdown="```md\nv3 prediction\n```",
+                payload_json={
+                    "automation_window": "late",
+                    "daily_window": "late",
+                    "model_family": "v3",
+                    "v3_model_prediction_id": prediction.id,
+                },
+                route_json={},
+                response_json={},
+            )
+        )
+
+
+def _seed_ou_prediction(
+    session,
+    *,
+    fixture_id: int,
+    kickoff: datetime,
+    home_goals: int,
+    away_goals: int,
+    p_over: float,
+    p_under: float,
+    published: bool,
+) -> None:
+    _seed_base_fixture(
+        session,
+        fixture_id=fixture_id,
+        kickoff=kickoff,
+        home_goals=home_goals,
+        away_goals=away_goals,
+    )
+    snapshot = models.OUFeatureSnapshot(
+        fixture_id=fixture_id,
+        prediction_time=datetime(2026, 5, 3, 12, tzinfo=UTC),
+        feature_version=f"weekly-ou-{fixture_id}",
+        threshold=2.5,
+        features_json={},
+        data_quality_json={},
+    )
+    session.add(snapshot)
+    session.flush()
+    prediction = models.OUModelPrediction(
+        fixture_id=fixture_id,
+        ou_feature_snapshot_id=snapshot.id,
+        prediction_time=datetime(2026, 5, 3, 12, tzinfo=UTC),
+        model_version="synthetic-ou-weekly",
+        threshold=2.5,
+        p_over=p_over,
+        p_under=p_under,
+        confidence_score=82.0,
+        confidence_label="Very High",
+        expert_probabilities_json={},
+        data_quality_json={},
+        payload_json={},
+    )
+    session.add(prediction)
+    session.flush()
+    if published:
+        session.add(
+            models.DiscordMessage(
+                fixture_id=fixture_id,
+                model_prediction_id=None,
+                channel_key="predictions",
+                message_type="ou_prediction",
+                status="sent",
+                dry_run=False,
+                print_only=False,
+                webhook_hash="synthetic",
+                webhook_url_hash="synthetic",
+                message_hash=f"ou-prediction-{fixture_id}",
+                message_markdown="```md\nou prediction\n```",
+                payload_json={
+                    "automation_window": "late",
+                    "daily_window": "late",
+                    "model_family": "ou25",
+                    "ou_model_prediction_id": prediction.id,
+                },
+                route_json={},
+                response_json={},
+            )
+        )
+
+
+def _seed_base_fixture(
+    session,
+    *,
+    fixture_id: int,
+    kickoff: datetime,
+    home_goals: int,
+    away_goals: int,
+) -> None:
+    session.merge(models.Team(team_id=-10, name="Synthetic Home", payload_json={"synthetic": True}))
+    session.merge(models.Team(team_id=-20, name="Synthetic Away", payload_json={"synthetic": True}))
+    session.add(
+        models.Fixture(
+            fixture_id=fixture_id,
+            date=kickoff,
+            league_id=-100,
+            season=2026,
+            status="FT",
+            status_short="FT",
+            home_team_id=-10,
+            away_team_id=-20,
+            home_team=f"Synthetic Home {fixture_id}",
+            away_team=f"Synthetic Away {fixture_id}",
+            home_goals=home_goals,
+            away_goals=away_goals,
+            payload_json={"synthetic": True},
         )
     )
 

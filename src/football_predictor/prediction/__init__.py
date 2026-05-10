@@ -13,6 +13,7 @@ from football_predictor.prediction.run_daily import (
     DailyPredictionSummary,
     get_fixtures_to_predict,
     run_daily_predictions,
+    run_daily_predictions_v3,
 )
 from football_predictor.prediction.scheduler import (
     DailyPredictionWindow,
@@ -32,6 +33,8 @@ __all__ = [
     "PredictionOutput",
     "PredictionRequest",
     "PredictionService",
+    "PredictionV3Output",
+    "PredictionV3Service",
     "PredictionWindow",
     "DailyFixtureResult",
     "DailyPredictionSummary",
@@ -40,4 +43,19 @@ __all__ = [
     "prediction_time_for_fixture",
     "predict_fixture",
     "run_daily_predictions",
+    "run_daily_predictions_v3",
 ]
+
+
+def __getattr__(name: str):
+    if name in {"PredictionV3Output", "PredictionV3Service"}:
+        from football_predictor.prediction.v3_service import (
+            PredictionV3Output,
+            PredictionV3Service,
+        )
+
+        return {
+            "PredictionV3Output": PredictionV3Output,
+            "PredictionV3Service": PredictionV3Service,
+        }[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

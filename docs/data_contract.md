@@ -505,6 +505,40 @@ Depuis la clarification qualité live, les lineups et stats joueurs sont aussi s
 - `lineups_available_flag` reste compatible et vaut `true` si les lineups cible ou
   l'historique lineups sont disponibles.
 
+## Feature Snapshot V3 M-30
+
+Quand `features.feature_builder.build_feature_snapshot` est appelé avec
+`feature_version="v3.0"` ou une version préfixée `v3`, le snapshot global reste
+point-in-time et ajoute des features spécialisées V3. La fenêtre recommandée est
+`prediction_time = fixture.date - 30 minutes`.
+
+Familles ajoutées :
+
+- `lineup_m30_*` / `official_lineup_*` : disponibilité des XI officiels du match cible,
+  formations, changement de formation et surprise du XI, toujours avec
+  `FixtureLineup.fetched_at <= prediction_time` ;
+- `draw_risk_*` : parité de niveau, faible total attendu, solidité défensive, faiblesse
+  offensive, taux de nul ligue/saison, signal marché draw et probabilité de nul Poisson ;
+- `ndw_*` : edge domicile/extérieur hors nul, edge attaque/défense, edge XI, edge absences,
+  et probabilités marché conditionnelles `P(Home | No Draw)` / `P(Away | No Draw)`.
+
+Flags qualité V3 :
+
+- `has_official_lineup_home`, `has_official_lineup_away`, `has_official_lineup` ;
+- `official_lineup_available_flag` vaut `true` seulement si les deux XI officiels sont
+  disponibles avant `prediction_time` ;
+- `has_odds_multi_snapshot` vaut `true` si au moins deux timestamps d'odds prematch
+  distincts existent pour la fixture avant `prediction_time` ;
+- `data_quality_score` est un alias numérique V3 de `overall_data_quality_score`.
+
+Règles anti fuite V3 :
+
+- aucune lineup officielle récupérée après `prediction_time` ne peut activer un flag ;
+- les fixtures historiques utilisées pour les taux ou formations doivent avoir
+  `Fixture.date < prediction_time` et `fixture_id != fixture_id cible` ;
+- le mouvement de cotes et `has_odds_multi_snapshot` ignorent toute odd dont
+  `fetched_at > prediction_time`.
+
 ## Dataset D'Entraînement
 
 Le dataset historique est construit uniquement depuis la DB locale via
@@ -525,6 +559,25 @@ entraîner la V2 alignée avec `daily_late`; `40m` reste accepté pour compatibi
 exports `.csv` et `.parquet` sont
 supportés. Les splits temporels utilisent `fixture_date` et ne mélangent jamais les lignes
 par défaut.
+
+### Datasets V3
+
+Le module `backtesting.v3_dataset_builder` construit les datasets V3 à partir du builder
+global avec `feature_version="v3.0"` et `prediction_offset_minutes=30` par défaut.
+
+Datasets produits :
+
+- Draw Risk : toutes les fixtures terminées, avec `outcome` et `is_draw` (`1` si
+  `outcome == "DRAW"`) ;
+- No-Draw Winner : fixtures `HOME` ou `AWAY` uniquement, avec `home_wins` (`1` si
+  `outcome == "HOME"`) ;
+- Stacker : jointure par `fixture_id` entre le fold choisi, les prédictions Draw Risk,
+  les prédictions No-Draw Winner, les probabilités V2 éventuelles, les signaux marché/API
+  point-in-time, `data_quality_score` et `official_lineup_available_flag`.
+
+Les splits V3 sont chronologiques, par défaut `60 % train / 20 % valid / 20 % test`.
+Le dataset stacker est destiné au fold validation par défaut, afin de ne pas entraîner le
+stacker sur des lignes vues par les sous-modèles.
 
 ## Dataset Modèle Et Artefact
 
@@ -735,6 +788,41 @@ Métadonnées ajoutées dans `ModelPrediction.payload_json` et, si Discord est u
 - `prediction_time` ;
 - `run_key`.
 
-La déduplication Discord automatisée s'applique à une prédiction déjà présente pour le même
-`fixture_id`, le même `model_version` et la même fenêtre. `dry_run` et `print_only` ne
-bloquent jamais un futur envoi réel. `--force` permet de renvoyer explicitement.
+### Automatisation V3
+
+`predict-today-v3` et `scripts/daily_late.sh` utilisent les mêmes fenêtres, mais écrivent
+les sorties modèle dans `V3ModelPrediction` et ne remplissent pas `ModelPrediction`.
+`scripts/daily_late.sh` lance la V3 par défaut depuis Sprint 10 avec
+`MODEL_DIR=data/models/v3` et `V2_MODEL_DIR=data/models/v2-late`.
+
+Métadonnées ajoutées dans `V3ModelPrediction.payload_json` :
+
+- `model_family="v3"` ;
+- `shadow_mode` (`true` par défaut pour les appels manuels, `false` en production) ;
+- `daily_window` et `automation_window` ;
+- `automation_date` ;
+- `prediction_time` ;
+- `run_key` ;
+- `refresh_warnings`.
+
+Quand un message Discord V3 est créé, `DiscordMessage.model_prediction_id` reste `null`
+car la FK pointe vers les prédictions V2. Le lien V3 est porté par
+`DiscordMessage.payload_json` :
+
+- `v3_model_prediction_id` pour les prédictions V3 1X2 publiées ;
+- `v3_feature_snapshot_id` pour les prédictions V3 1X2 publiées ;
+- `ou_model_prediction_id` pour les prédictions O/U 2.5 publiées ;
+- `model_family` (`v3` ou `ou25`) ;
+- `shadow_mode` pour V3 ;
+- `daily_window` / `automation_window` ;
+- `automation_date` ;
+- `run_key`.
+
+Les prédictions V3 et O/U à confiance insuffisante sont persistées mais ne créent pas de
+message Discord réel. Le statut opérationnel est `confidence_skipped` avec la raison
+`confidence_below_publish_threshold`; ces lignes ne sont pas éligibles au score public
+hebdomadaire.
+
+Les vrais messages `predictions` sont dédupliqués par `fixture_id + window` pour éviter un
+second envoi réel V2 ou V3 sur la même fenêtre. `dry_run` et `print_only` ne bloquent
+jamais un futur envoi réel. `--force` permet de renvoyer explicitement.

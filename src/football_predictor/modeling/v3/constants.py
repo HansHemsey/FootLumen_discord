@@ -1,0 +1,17 @@
+"""Constants for V3 binary sub-models."""
+
+from __future__ import annotations
+
+NOT_DRAW_CLASS = 0
+DRAW_CLASS = 1
+DRAW_RISK_CLASSES = ["NOT_DRAW", "DRAW"]
+DRAW_RISK_TARGET = "is_draw"
+AWAY_CLASS = 0
+HOME_CLASS = 1
+NO_DRAW_WINNER_CLASSES = ["AWAY", "HOME"]
+NO_DRAW_WINNER_TARGET = "home_wins"
+OUTCOME_COLUMN = "outcome"
+DEFAULT_DRAW_RISK_MODEL_VERSION = "v3.0-draw-risk"
+DEFAULT_NO_DRAW_WINNER_MODEL_VERSION = "v3.0-no-draw-winner"
+DEFAULT_V3_STACKER_MODEL_VERSION = "v3.0-stacker"
+DEFAULT_V3_FINAL_MODEL_VERSION = "v3.0-final"

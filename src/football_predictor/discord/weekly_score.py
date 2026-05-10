@@ -35,6 +35,7 @@ class WeeklyScoreLine:
     confidence_score: float | None
     status: str
     correct: bool | None
+    model_family: str = "1X2"
 
 
 @dataclass(frozen=True)
@@ -263,52 +264,89 @@ def _weekly_lines(
     start_utc = datetime.combine(week_start, time.min, tzinfo=timezone).astimezone(UTC)
     end_utc = datetime.combine(week_end, time.min, tzinfo=timezone).astimezone(UTC)
     rows = session.execute(
-        select(models.Fixture, models.ModelPrediction, models.DiscordMessage)
-        .join(
-            models.ModelPrediction,
-            models.ModelPrediction.fixture_id == models.Fixture.fixture_id,
-        )
+        select(models.Fixture, models.DiscordMessage)
         .join(
             models.DiscordMessage,
-            models.DiscordMessage.model_prediction_id == models.ModelPrediction.id,
+            models.DiscordMessage.fixture_id == models.Fixture.fixture_id,
         )
         .where(
             models.Fixture.date.is_not(None),
             models.Fixture.date >= start_utc,
             models.Fixture.date < end_utc,
-            models.ModelPrediction.prediction_time < models.Fixture.date,
-            models.DiscordMessage.message_type == "prediction",
+            models.DiscordMessage.message_type.in_(("prediction", "ou_prediction")),
             models.DiscordMessage.status == "sent",
             models.DiscordMessage.dry_run.is_(False),
             models.DiscordMessage.print_only.is_(False),
         )
         .order_by(
             models.Fixture.fixture_id.asc(),
-            models.ModelPrediction.prediction_time.desc(),
             models.DiscordMessage.sent_at.desc(),
+            models.DiscordMessage.created_at.desc(),
         )
     ).all()
-    latest_by_fixture: dict[int, tuple[models.Fixture, models.ModelPrediction]] = {}
-    for fixture, prediction, message in rows:
+    latest_by_key: dict[tuple[str, int], WeeklyScoreLine] = {}
+    for fixture, message in rows:
         if not _is_late_prediction_message(message):
             continue
-        if _actual_outcome(fixture) is None:
+        line = _line_from_message(session, fixture, message)
+        if line is None:
             continue
-        latest_by_fixture.setdefault(fixture.fixture_id, (fixture, prediction))
-    return [
-        _score_line(fixture, prediction)
-        for fixture, prediction in sorted(
-            latest_by_fixture.values(),
-            key=lambda item: (item[0].date or datetime.min, item[0].fixture_id),
+        latest_by_key.setdefault((line.model_family, fixture.fixture_id), line)
+    return sorted(
+        latest_by_key.values(),
+        key=lambda line: (
+            _aware_datetime(line.fixture_date)
+            if line.fixture_date is not None
+            else datetime.min.replace(tzinfo=UTC),
+            line.model_family,
+            line.fixture_id,
+        ),
+    )
+
+
+def _line_from_message(
+    session: Session,
+    fixture: models.Fixture,
+    message: models.DiscordMessage,
+) -> WeeklyScoreLine | None:
+    payload = message.payload_json if isinstance(message.payload_json, dict) else {}
+    if message.message_type == "ou_prediction" or payload.get("model_family") == "ou25":
+        ou_prediction_id = _payload_int(payload, "ou_model_prediction_id")
+        prediction = (
+            session.get(models.OUModelPrediction, ou_prediction_id)
+            if ou_prediction_id is not None
+            else None
         )
-    ]
+        if prediction is None:
+            return None
+        if ensure_before_kickoff(prediction.prediction_time, fixture.date) is False:
+            return None
+        return _score_line_ou(fixture, prediction)
+    v3_prediction_id = _payload_int(payload, "v3_model_prediction_id")
+    if v3_prediction_id is not None:
+        prediction = session.get(models.V3ModelPrediction, v3_prediction_id)
+        if prediction is None:
+            return None
+        if ensure_before_kickoff(prediction.prediction_time, fixture.date) is False:
+            return None
+        return _score_line_v3(fixture, prediction)
+    if message.model_prediction_id is None:
+        return None
+    prediction = session.get(models.ModelPrediction, message.model_prediction_id)
+    if prediction is None:
+        return None
+    if ensure_before_kickoff(prediction.prediction_time, fixture.date) is False:
+        return None
+    return _score_line_v2(fixture, prediction)
 
 
-def _score_line(
+def _score_line_v2(
     fixture: models.Fixture,
     prediction: models.ModelPrediction,
-) -> WeeklyScoreLine:
+) -> WeeklyScoreLine | None:
     actual = _actual_outcome(fixture)
+    if actual is None:
+        return None
     predicted = prediction.predicted_result or prediction.predicted_outcome
     correct = actual == predicted if actual is not None and predicted else None
     return WeeklyScoreLine(
@@ -322,6 +360,55 @@ def _score_line(
         confidence_score=prediction.confidence_score,
         status=(fixture.status_short or fixture.status or "").upper(),
         correct=correct,
+        model_family="1X2 V2",
+    )
+
+
+def _score_line_v3(
+    fixture: models.Fixture,
+    prediction: models.V3ModelPrediction,
+) -> WeeklyScoreLine | None:
+    actual = _actual_outcome(fixture)
+    if actual is None:
+        return None
+    predicted = prediction.predicted_result
+    correct = actual == predicted if predicted else None
+    return WeeklyScoreLine(
+        fixture_id=fixture.fixture_id,
+        fixture_date=fixture.date,
+        match_label=f"{fixture.home_team} - {fixture.away_team}",
+        predicted=_outcome_label(predicted),
+        actual=_outcome_label(actual),
+        score_label=_score_label(fixture),
+        confidence_label=prediction.confidence_label or "n.d.",
+        confidence_score=prediction.confidence_score,
+        status=(fixture.status_short or fixture.status or "").upper(),
+        correct=correct,
+        model_family="1X2 V3",
+    )
+
+
+def _score_line_ou(
+    fixture: models.Fixture,
+    prediction: models.OUModelPrediction,
+) -> WeeklyScoreLine | None:
+    actual = _actual_ou(fixture, prediction.threshold)
+    if actual is None:
+        return None
+    predicted = "OVER" if prediction.p_over >= prediction.p_under else "UNDER"
+    correct = actual == predicted
+    return WeeklyScoreLine(
+        fixture_id=fixture.fixture_id,
+        fixture_date=fixture.date,
+        match_label=f"{fixture.home_team} - {fixture.away_team}",
+        predicted=_ou_label(predicted, prediction.threshold),
+        actual=_ou_label(actual, prediction.threshold),
+        score_label=_score_label(fixture),
+        confidence_label=prediction.confidence_label or "n.d.",
+        confidence_score=prediction.confidence_score,
+        status=(fixture.status_short or fixture.status or "").upper(),
+        correct=correct,
+        model_family="O/U 2.5",
     )
 
 
@@ -333,7 +420,7 @@ def _header_lines(report: WeeklyScoreReport) -> list[str]:
         f"{(report.week_end - timedelta(days=1)).isoformat()}",
         "",
         "Résumé :",
-        "- Base : prédictions M-30 daily_late envoyées, matchs terminés uniquement",
+        "- Base : prédictions M-30 publiées, matchs terminés uniquement",
         f"- Pronostics terminés : {report.completed}",
         f"- Corrects : {report.correct}",
         f"- Incorrects : {report.incorrect}",
@@ -357,7 +444,7 @@ def _detail_line(line: WeeklyScoreLine, timezone_name: str) -> str:
     )
     actual = line.actual or "en attente"
     return (
-        f"- {date_label} | {line.match_label} | prono {line.predicted} | "
+        f"- {date_label} | [{line.model_family}] {line.match_label} | prono {line.predicted} | "
         f"score {line.score_label} | réel {actual} | {verdict} | {confidence}"
     )
 
@@ -440,6 +527,17 @@ def _actual_outcome(fixture: models.Fixture) -> str | None:
     return "DRAW"
 
 
+def _actual_ou(fixture: models.Fixture, threshold: float) -> str | None:
+    status = (fixture.status_short or fixture.status or "").upper()
+    if status not in FINISHED_STATUSES:
+        return None
+    home = _goals_home(fixture)
+    away = _goals_away(fixture)
+    if home is None or away is None:
+        return None
+    return "OVER" if home + away > threshold else "UNDER"
+
+
 def _goals_home(fixture: models.Fixture) -> int | None:
     return fixture.home_goals if fixture.home_goals is not None else fixture.goals_home
 
@@ -463,10 +561,35 @@ def _outcome_label(value: str | None) -> str:
     return labels.get(str(value).upper(), str(value).lower())
 
 
+def _ou_label(value: str | None, threshold: float) -> str:
+    if value is None:
+        return "en attente"
+    side = str(value).upper()
+    if side == "OVER":
+        return f"plus de {threshold:g}"
+    if side == "UNDER":
+        return f"moins de {threshold:g}"
+    return side.lower()
+
+
 def _is_late_prediction_message(message: models.DiscordMessage) -> bool:
     payload = message.payload_json if isinstance(message.payload_json, dict) else {}
     window = payload.get("automation_window") or payload.get("daily_window")
     return window == "late"
+
+
+def _payload_int(payload: JsonDict, key: str) -> int | None:
+    value = payload.get(key)
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def ensure_before_kickoff(prediction_time: datetime | None, kickoff: datetime | None) -> bool:
+    if prediction_time is None or kickoff is None:
+        return False
+    return _aware_datetime(prediction_time) < _aware_datetime(kickoff)
 
 
 def _week_start(value: date) -> date:

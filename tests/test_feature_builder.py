@@ -95,6 +95,55 @@ def test_feature_builder_ignores_target_lineups_after_prediction_time(tmp_path) 
     assert result.data_quality_json["target_lineups_available_flag"] is False
 
 
+def test_feature_builder_v3_adds_m30_features_and_quality_flags(tmp_path) -> None:
+    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'feature_builder_v3.db'}")
+    session_factory = create_session_factory(engine)
+
+    with session_scope(session_factory) as session:
+        _seed_base(session)
+        _seed_point_in_time_sources(session)
+        session.add_all(
+            [
+                _lineup(-900, -10, "4-3-3", _home_starting_ids(), PREDICTION_TIME),
+                _lineup(-900, -20, "4-2-3-1", list(range(-201, -212)), PREDICTION_TIME),
+                models.OddsSnapshot(
+                    fixture_id=-900,
+                    league_id=-100,
+                    season=2026,
+                    bookmaker_id=-2,
+                    bookmaker_name="Synthetic Book 2",
+                    bet_id=-1,
+                    bet_name="Match Winner",
+                    odd_home=2.1,
+                    odd_draw=3.4,
+                    odd_away=3.8,
+                    values_json=[],
+                    fetched_at=datetime(2026, 5, 2, 10, tzinfo=UTC),
+                    payload_json={"synthetic": True},
+                ),
+            ]
+        )
+        result = build_feature_snapshot(session, -900, PREDICTION_TIME, feature_version="v3.0")
+
+    features = result.features_json
+    quality = result.data_quality_json
+    assert result.snapshot.feature_version == "v3.0"
+    assert features["official_lineup_available_flag"] == 1
+    assert features["has_official_lineup_home"] is True
+    assert features["has_official_lineup_away"] is True
+    assert features["has_odds_multi_snapshot"] == 1
+    assert "draw_risk_score" in features
+    assert "draw_risk_league_draw_rate" in features
+    assert features["ndw_odds_home_prob"] is not None
+    assert features["ndw_odds_away_prob"] is not None
+    assert 0 <= features["data_quality_score"] <= 100
+    assert quality["has_official_lineup_home"] is True
+    assert quality["has_official_lineup_away"] is True
+    assert quality["official_lineup_available_flag"] is True
+    assert quality["has_odds_multi_snapshot"] is True
+    assert quality["v3_feature_version"] == "v3.0"
+
+
 def _seed_point_in_time_sources(session) -> None:
     session.add_all(
         [

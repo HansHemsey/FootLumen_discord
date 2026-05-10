@@ -74,6 +74,46 @@ REFRESH_DATA=true WINDOW=late DRY_RUN=true scripts/run_predict_today.sh
 
 Passe `SEND_DISCORD=true` seulement apres validation des webhooks et des routes.
 
+### Production V3 Discord
+
+Depuis Sprint 10, `scripts/daily_late.sh` utilise la V3 par defaut pour le channel
+`predictions`. Les appels manuels de `predict-today-v3` restent en shadow mode par defaut ;
+ajouter `--production-mode` pour autoriser le chemin production.
+
+```bash
+football-predictor predict-today-v3 \
+  --window late \
+  --model-dir data/models/v3 \
+  --v2-model-dir data/models/v2-late \
+  --production-mode \
+  --no-refresh-data \
+  --json
+```
+
+Envoi reel V3 via la routine late :
+
+```bash
+SEND_DISCORD=true DRY_RUN=false scripts/daily_late.sh
+```
+
+Rollback V2 :
+
+```bash
+PREDICTION_ENGINE=v2 SEND_DISCORD=true DRY_RUN=false scripts/daily_late.sh
+```
+
+La V3 est activee en production malgre un backtest non valide. Surveiller les premiers
+runs reels, la calibration des probabilites et la couverture odds/API/lineups issue du
+refresh live M-30. Pour verifier le rendu Discord V3 sans publier :
+
+Règle de publication publique : V3 1X2 et O/U 2.5 ne publient dans Discord que les
+pronostics `High` ou `Very High`. Les labels `Low`, `Medium`, `Uncertain` et assimilés
+sont persistés en base mais retournent `confidence_skipped`.
+
+```bash
+football-predictor predict-today-v3 --window late --dry-run --print-only
+```
+
 ## Automatisation Quotidienne Multi-Ligues
 
 Les scripts quotidiens utilisent `config/competitions.yaml` et le binaire local `.venv` si
@@ -85,6 +125,12 @@ scripts/daily_morning.sh
 
 # Avant match : window late, refresh odds/injuries/API predictions/lineups si disponibles.
 scripts/daily_late.sh
+
+# O/U 2.5 M-30 : pipeline séparé, même logique de publication sélective.
+scripts/daily_ou.sh
+
+# Lundi : préparation des fixtures des 7 prochains jours.
+scripts/weekly_ingestion.sh
 
 # Publication seule : classement, prochaine journee et matchs du jour.
 scripts/publish_daily_discord.sh
@@ -102,7 +148,9 @@ Variables utiles :
 DATE=YYYY-MM-DD
 WINDOW=now|early|mid|late|all
 CONFIG=config/competitions.yaml
-MODEL_DIR=data/models/v1
+PREDICTION_ENGINE=v3
+MODEL_DIR=data/models/v3
+V2_MODEL_DIR=data/models/v2-late
 SEND_DISCORD=false
 DRY_RUN=true
 FORCE=false
@@ -136,8 +184,10 @@ REPLACE_PREVIOUS=false scripts/publish_daily_discord.sh
 Les channels `analyses` et `resultats` ont leurs propres scripts. Ils publient un seul
 message par match et gardent l'historique :
 
-Le score hebdomadaire compte uniquement les predictions `daily_late` réellement envoyées
-dans Discord et dont le match est terminé. Les matchs en attente ne sont pas affichés.
+Le score hebdomadaire compte uniquement les predictions réellement envoyées dans Discord
+et dont le match est terminé : V2 legacy, V3 via `v3_model_prediction_id`, et O/U 2.5 via
+`ou_model_prediction_id`. Les prédictions internes non publiées, `dry_run`, `print_only`
+et `confidence_skipped` ne sont jamais incluses.
 Il est remplace par `week_key` : une relance dans la même semaine met a jour le message
 de cette semaine, mais ne supprime pas les autres semaines. Le lundi, `daily_morning.sh`
 publie aussi une finalisation de la semaine précédente pour inclure les matchs du dimanche
@@ -156,6 +206,8 @@ REFRESH_DATA=true SEND_DISCORD=true DRY_RUN=false scripts/publish_match_results.
 `prediction_time = fixture.date - 6h`. La marge d'envoi est `ANALYSIS_GRACE_MINUTES=15`
 par defaut. Le message contient le contexte, la forme recente, le classement, les odds, les
 absences/XI si disponibles, les points forts/faibles et une conclusion prudente.
+Une analyse trop pauvre est ignorée avec `reason=insufficient_analysis_data` afin d'éviter
+les messages génériques remplis de champs non disponibles.
 `publish_match_results.sh` appelle `publish-match-results` uniquement pour les fixtures
 `FT/AET/PEN` avec score final, puis compare le resultat a la prediction pre-match publiee
 si elle existe. Avec `REFRESH_DATA=true`, il rafraichit les fixtures du jour pour capter
@@ -173,6 +225,19 @@ fixture. Pour un backfill progressif :
 
 ```bash
 REFRESH_DETAILS=true DETAILS_LIMIT=5 DETAILS_DELAY_SECONDS=2 scripts/refresh_all_leagues.sh
+```
+
+Convention d'exploitation :
+
+- fixtures futures de la semaine courante : `scripts/weekly_ingestion.sh`, convention `J+7`
+  incluant la date d'exécution locale puis les 6 dates suivantes ;
+- détails récents de matchs terminés : `refresh_all_leagues.sh` avec `DETAILS_DAYS_BACK`,
+  convention `J-7`.
+
+Exemple lundi :
+
+```bash
+scripts/weekly_ingestion.sh
 ```
 
 Routine hebdomadaire recommandee pour les details des matchs termines :

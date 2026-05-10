@@ -217,6 +217,22 @@ def publish_match_analyses(
                 raise PredictionError("H-6 prediction was not persisted")
             snapshot = session.get(models.FeatureSnapshot, prediction.feature_snapshot_id)
             features = snapshot.features_json if snapshot is not None else {}
+            data_quality = snapshot.data_quality_json if snapshot is not None else {}
+            if not _analysis_is_publishable(
+                features if isinstance(features, dict) else {},
+                data_quality if isinstance(data_quality, dict) else {},
+            ):
+                results.append(
+                    MatchDiscordPublishResult(
+                        fixture_id=fixture.fixture_id,
+                        channel_key="analyses",
+                        message_type="analysis",
+                        status="skipped",
+                        model_prediction_id=prediction.id,
+                        reason="insufficient_analysis_data",
+                    )
+                )
+                continue
             markdown = format_match_analysis_message(
                 fixture=fixture,
                 prediction=prediction,
@@ -475,39 +491,109 @@ def _prediction_at_time(
 def _published_prediction_before_match(
     session: Session,
     fixture: models.Fixture,
-) -> models.ModelPrediction | None:
+) -> Any | None:
+    session.flush()
     cutoff = ensure_aware_utc(fixture.date) if fixture.date is not None else utc_now()
-    published = session.execute(
-        select(models.ModelPrediction)
-        .join(
-            models.DiscordMessage,
-            models.DiscordMessage.model_prediction_id == models.ModelPrediction.id,
-        )
+    published_messages = session.execute(
+        select(models.DiscordMessage)
         .where(
-            models.ModelPrediction.fixture_id == fixture.fixture_id,
-            models.ModelPrediction.prediction_time < cutoff,
+            models.DiscordMessage.fixture_id == fixture.fixture_id,
             models.DiscordMessage.message_type == "prediction",
             models.DiscordMessage.status == "sent",
             models.DiscordMessage.dry_run.is_(False),
             models.DiscordMessage.print_only.is_(False),
         )
-        .order_by(
-            models.ModelPrediction.prediction_time.desc(),
-            models.DiscordMessage.sent_at.desc(),
+        .order_by(models.DiscordMessage.sent_at.desc(), models.DiscordMessage.created_at.desc())
+    ).scalars()
+    for message in published_messages:
+        if message.model_prediction_id is not None:
+            prediction = session.get(models.ModelPrediction, message.model_prediction_id)
+            if (
+                prediction is not None
+                and ensure_aware_utc(prediction.prediction_time) < cutoff
+            ):
+                return prediction
+        payload = message.payload_json if isinstance(message.payload_json, dict) else {}
+        v3_prediction_id = _payload_int(payload, "v3_model_prediction_id")
+        if v3_prediction_id is None:
+            continue
+        v3_prediction = session.get(models.V3ModelPrediction, v3_prediction_id)
+        if (
+            v3_prediction is None
+            or ensure_aware_utc(v3_prediction.prediction_time) >= cutoff
+        ):
+            continue
+        return _v3_as_result_prediction(v3_prediction)
+    return None
+
+
+def _analysis_is_publishable(features: JsonDict, data_quality: JsonDict) -> bool:
+    """Avoid publishing H-6 analysis messages built from empty/generic inputs."""
+    quality = _float_value(data_quality.get("overall_data_quality_score"))
+    if quality is None:
+        quality = _float_value(features.get("overall_data_quality_score"))
+    useful_families = 0
+    if any(key in features for key in ("home_team_global_last5_ppg", "away_team_global_last5_ppg")):
+        useful_families += 1
+    if any(key in features for key in ("rank_diff", "points_diff", "home_rank", "away_rank")):
+        useful_families += 1
+    if any(key in features for key in ("market_home", "market_draw", "market_away")):
+        useful_families += 1
+    if any(
+        key in features
+        for key in (
+            "home_team_availability_score",
+            "away_team_availability_score",
+            "home_team_key_absences_json",
+            "away_team_key_absences_json",
+            "home_team_probable_formation",
+            "away_team_probable_formation",
         )
-        .limit(1)
-    ).scalar_one_or_none()
-    if published is not None:
-        return published
-    return session.execute(
-        select(models.ModelPrediction)
-        .where(
-            models.ModelPrediction.fixture_id == fixture.fixture_id,
-            models.ModelPrediction.prediction_time < cutoff,
-        )
-        .order_by(models.ModelPrediction.prediction_time.desc())
-        .limit(1)
-    ).scalar_one_or_none()
+    ):
+        useful_families += 1
+    if quality is not None and quality >= 50:
+        useful_families += 1
+    if useful_families >= 2:
+        return True
+    return bool(quality is not None and quality >= 35 and useful_families >= 1)
+
+
+def _float_value(value: Any) -> float | None:
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _payload_int(payload: JsonDict, key: str) -> int | None:
+    value = payload.get(key)
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _v3_as_result_prediction(prediction: models.V3ModelPrediction) -> Any:
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        id=None,
+        predicted_result=prediction.predicted_result,
+        predicted_outcome=prediction.predicted_result,
+        p_home=prediction.p_v3_final_home,
+        p_draw=prediction.p_v3_final_draw,
+        p_away=prediction.p_v3_final_away,
+        confidence_label=prediction.confidence_label,
+        confidence_score=prediction.confidence_score,
+        confidence=prediction.confidence_score,
+        payload_json={
+            **(prediction.payload_json if isinstance(prediction.payload_json, dict) else {}),
+            "model_family": "v3",
+            "v3_model_prediction_id": prediction.id,
+        },
+    )
 
 
 def _already_sent(

@@ -10,6 +10,8 @@ AUTOMATION_SCRIPTS = (
     "scripts/football_predictor_cli.sh",
     "scripts/daily_morning.sh",
     "scripts/daily_late.sh",
+    "scripts/daily_ou.sh",
+    "scripts/weekly_ingestion.sh",
     "scripts/publish_daily_discord.sh",
     "scripts/publish_weekly_score.sh",
     "scripts/refresh_all_leagues.sh",
@@ -54,8 +56,12 @@ def test_daily_scripts_default_to_safe_discord_behavior(repo_root: Path) -> None
         assert ".venv/bin/football-predictor" not in text
     assert "predict-today" not in morning
     assert "--json-output" in late
+    assert 'PREDICTION_ENGINE="${PREDICTION_ENGINE:-v3}"' in late
+    assert "predict-today-v3" in late
+    assert "--production-mode" in late
     assert "predict-today" in late
     assert "data/models/v2-late" in late
+    assert "data/models/v3" in late
     assert "data/models/v1" in late
     assert 'REPLACE_PREVIOUS="${REPLACE_PREVIOUS:-true}"' in morning
     assert "scripts/publish_weekly_score.sh" in morning
@@ -68,6 +74,132 @@ def test_daily_scripts_default_to_safe_discord_behavior(repo_root: Path) -> None
         in weekly
     )
     assert 'DRY_RUN="${DRY_RUN:-true}"' in weekly
+    daily_ou = (repo_root / "scripts/daily_ou.sh").read_text(encoding="utf-8")
+    assert 'RUN_WINDOW="${WINDOW:-late}"' in daily_ou
+    assert "--window" in daily_ou
+
+
+def test_weekly_ingestion_echo_generates_seven_future_dates(
+    repo_root: Path,
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "competitions.yaml"
+    config_path.write_text(
+        """
+competitions:
+  - key: synthetic_league
+    league_id: -100
+    season: 2026
+    name: Synthetic League
+    enabled: true
+  - key: disabled_league
+    league_id: -200
+    season: 2026
+    name: Disabled League
+    enabled: false
+""".strip(),
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        ["scripts/weekly_ingestion.sh"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        env={
+            "FOOTBALL_PREDICTOR_BIN": "echo",
+            "PYTHON_BIN": sys.executable,
+            "DATE": "2026-05-04",
+            "CONFIG": str(config_path),
+            "PATH": "/usr/bin:/bin",
+        },
+        text=True,
+    )
+
+    output = result.stdout
+    assert "Weekly fixture ingestion J+7 from date=2026-05-04" in output
+    assert output.count("ingest-fixtures --date") == 7
+    assert "--date 2026-05-04 --league -100 --season 2026 --refresh-api" in output
+    assert "--date 2026-05-10 --league -100 --season 2026 --refresh-api" in output
+    assert "--league -200" not in output
+
+
+def test_daily_ou_echo_uses_late_window(repo_root: Path) -> None:
+    result = subprocess.run(
+        ["scripts/daily_ou.sh"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        env={
+            "FOOTBALL_PREDICTOR_BIN": "echo",
+            "PYTHON_BIN": sys.executable,
+            "DATE": "2026-05-02",
+            "REFRESH_DATA": "false",
+            "DRY_RUN": "true",
+            "PATH": "/usr/bin:/bin",
+        },
+        text=True,
+    )
+
+    output = result.stdout
+    assert "ou run-daily --date 2026-05-02 --window late" in output
+    assert "--dry-run" in output
+
+
+def test_daily_late_echo_defaults_to_v3_production_command(repo_root: Path) -> None:
+    result = subprocess.run(
+        ["scripts/daily_late.sh"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        env={
+            "FOOTBALL_PREDICTOR_BIN": "echo",
+            "PYTHON_BIN": sys.executable,
+            "DATE": "2026-05-02",
+            "WINDOW": "late",
+            "REFRESH_DATA": "false",
+            "DRY_RUN": "true",
+            "PATH": "/usr/bin:/bin",
+        },
+        text=True,
+    )
+
+    output = result.stdout
+    assert "predict-today-v3 --date 2026-05-02 --window late" in output
+    assert "--model-dir data/models/v3" in output
+    assert "--v2-model-dir data/models/v2-late" in output
+    assert "--production-mode" in output
+    assert "--json-output reports/daily/2026-05-02_late_v3_summary.json" in output
+    assert "--no-refresh-data" in output
+    assert "--dry-run" in output
+    assert "Daily late summary written to reports/daily/2026-05-02_late_v3_summary.json" in output
+
+
+def test_daily_late_echo_uses_v2_rollback_command(repo_root: Path) -> None:
+    result = subprocess.run(
+        ["scripts/daily_late.sh"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        env={
+            "FOOTBALL_PREDICTOR_BIN": "echo",
+            "PYTHON_BIN": sys.executable,
+            "PREDICTION_ENGINE": "v2",
+            "DATE": "2026-05-02",
+            "WINDOW": "late",
+            "REFRESH_DATA": "false",
+            "DRY_RUN": "true",
+            "PATH": "/usr/bin:/bin",
+        },
+        text=True,
+    )
+
+    output = result.stdout
+    assert "predict-today --date 2026-05-02 --window late" in output
+    assert "predict-today-v3" not in output
+    assert "--production-mode" not in output
+    assert "--json-output reports/daily/2026-05-02_late_summary.json" in output
+    assert "--no-refresh-data" in output
+    assert "--dry-run" in output
 
 
 def test_refresh_and_training_scripts_use_competitions_config(repo_root: Path) -> None:

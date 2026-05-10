@@ -312,10 +312,10 @@ Exports V1 :
 
 ## Modélisation V2 Late M-30
 
-La V2 est pensée pour la production Discord `daily_late`, donc pour les prédictions
-faites environ 30 minutes avant le coup d'envoi. Elle ne cherche pas à remplacer le marché
-avec un seul gros modèle : elle combine plusieurs experts, puis apprend un meta-modèle sur
-validation temporelle.
+La V2 est pensée pour les prédictions `late` M-30 et reste le rollback officiel de
+`daily_late` ainsi qu'un signal consommé par la V3. Elle ne cherche pas à remplacer le
+marché avec un seul gros modèle : elle combine plusieurs experts, puis apprend un
+meta-modèle sur validation temporelle.
 
 Experts V2 :
 
@@ -360,6 +360,237 @@ Le script `scripts/train_backtest_all.sh` utilise ces paramètres par défaut. L
 avec `--retrain-v2-model-version` réentraîne un modèle V2 uniquement sur le split train,
 calibre/choisit le meta-modèle sur validation, puis évalue le test. C'est le rapport à
 utiliser pour juger la V2.
+
+## Modélisation V3 Draw Risk
+
+La V3 démarre par un sous-modèle binaire isolé : `DRAW` contre `NOT_DRAW`. Il consomme le
+dataset V3 M-30 produit par `backtesting.v3_dataset_builder` et ne modifie pas les chemins
+de production V1/V2. Le modèle sert uniquement de candidat pour le futur stacker V3.
+
+Commande :
+
+```bash
+football-predictor train-v3-draw-risk \
+  --dataset data/processed/training_v3_m30.parquet \
+  --output-dir data/models/v3/draw_risk \
+  --model-version v3.0-draw-risk \
+  --calibration isotonic \
+  --train-ratio 0.6 \
+  --valid-ratio 0.2
+```
+
+Le split est chronologique par `fixture_date`. La sélection de features conserve les
+colonnes numériques point-in-time utiles au nul (`draw_risk_*`, marché/API, lineups,
+qualité des données) et exclut les targets, IDs, dates, scores finaux, JSON/payloads et
+sorties d'autres modèles destinées au stacker.
+
+Artefacts écrits dans `data/models/v3/draw_risk/` :
+
+- `model.joblib` ;
+- `metadata.json` ;
+- `feature_names.json` ;
+- `feature_coverage.json` ;
+- `metrics.json`.
+
+Les métriques couvrent train, validation et test quand les splits existent : accuracy
+binaire, log loss, Brier, ROC-AUC/PR-AUC si calculables, calibration bins, ECE, baseline
+taux de nul prior et baseline probabilité marché du nul quand disponible. La calibration
+isotonic est appliquée seulement si le volume est suffisant ; sinon la décision de skip est
+consignée dans les métadonnées.
+
+### V3 No-Draw Winner
+
+Le second sous-modèle V3 est binaire : `HOME` contre `AWAY`, uniquement sur les matchs non
+nuls. Il estime `P(Home | NoDraw)` et laisse `P(Away | NoDraw) = 1 - P(Home | NoDraw)`.
+Les lignes `DRAW` sont exclues avant le split chronologique.
+
+Commande :
+
+```bash
+football-predictor train-v3-no-draw-winner \
+  --dataset data/processed/training_v3_m30.parquet \
+  --output-dir data/models/v3/no_draw_winner \
+  --model-version v3.0-no-draw-winner \
+  --calibration sigmoid \
+  --train-ratio 0.6 \
+  --valid-ratio 0.2
+```
+
+La sélection de features conserve les signaux numériques point-in-time utiles au choix
+Home-vs-Away hors nul (`ndw_*`, edge home/away, marché/API home-away, lineups, absences et
+qualité des données) et exclut les targets, scores finaux, dates, IDs, payloads et sorties
+d'autres modèles.
+
+Les artefacts sont écrits dans `data/models/v3/no_draw_winner/` avec le même format que
+Draw Risk : `model.joblib`, `metadata.json`, `feature_names.json`,
+`feature_coverage.json` et `metrics.json`. Les métriques incluent les baselines taux home
+hors nul et probabilité marché `p_market_home / (p_market_home + p_market_away)` quand
+elle est disponible. La calibration sigmoid est sautée et documentée si le volume est
+insuffisant.
+
+### V3 Stacker Et Fusion
+
+Le sprint stacker assemble Draw Risk, No-Draw Winner, V2, marché, API et qualité data en
+probabilités finales `HOME/DRAW/AWAY`. Les sous-modèles sont entraînés sur le fold train ;
+le stacker est entraîné uniquement sur le fold validation pour éviter d'apprendre sur les
+lignes vues par les sous-modèles.
+
+Commande :
+
+```bash
+football-predictor train-v3 \
+  --dataset data/processed/training_v3_m30.parquet \
+  --output-dir data/models/v3 \
+  --v2-model-dir data/models/v2-late \
+  --calibration isotonic_draw,sigmoid_ndw \
+  --train-ratio 0.6 \
+  --valid-ratio 0.2
+```
+
+Si le fold validation est trop faible ou ne contient pas les trois classes, le stacker
+écrit quand même un artefact en mode fallback déterministe :
+
+```text
+p_draw = Draw Risk
+p_home = (1 - p_draw) * P(Home | NoDraw)
+p_away = (1 - p_draw) * P(Away | NoDraw)
+```
+
+Ce vecteur V3 est ensuite mélangé avec V2 et le marché quand ils sont disponibles, puis
+normalisé. L'artefact racine `data/models/v3/model.joblib` charge les trois composants et
+`predict_proba(frame)` retourne toujours des lignes `[P(Home), P(Draw), P(Away)]`
+normalisées.
+
+### V3 Backtest Et Comparaison
+
+Le backtest V3 compare le composite complet, ses variantes et les baselines sur le fold
+test chronologique du dataset V3 M-30. Il n'appelle aucune API live et n'utilise pas les
+résultats du fold test pour entraîner le modèle. Par défaut, la commande évalue les
+artefacts déjà présents dans `data/models/v3`. Pour un backtest reproductible depuis le
+dataset, utiliser `--retrain-v3`, ce qui entraîne les sous-modèles sur train, le stacker
+sur validation, puis évalue uniquement test.
+
+Commande :
+
+```bash
+football-predictor backtest-v3 \
+  --dataset data/processed/training_v3_m30.parquet \
+  --model-dir data/models/v3 \
+  --v2-model-dir data/models/v2-late \
+  --output-dir reports/v3 \
+  --format both \
+  --retrain-v3
+```
+
+Rapports écrits :
+
+- `reports/v3/v3_backtest_report.json` : payload complet, métriques et critères ;
+- `reports/v3/comparison_vs_v2.md` : tableau lisible V3 vs V2 vs baselines.
+
+Modèles reportés : `odds_only`, `api_prediction_only`, `poisson_baseline`,
+`v2_existing`, `v3_draw_risk_only`, `v3_no_draw_winner_only` (reporter conditionnel),
+`v3_deterministic_fusion`, `v3_stacker_full` et `v3_blend_v2`.
+
+Les métriques principales sont l'accuracy 1X2, log loss, Brier multiclass, calibration,
+ECE draw, précision/rappel/F1 du nul, AUC draw quand calculable, métriques Home-vs-Away
+conditionnelles hors nul, confidence gap et découpes par ligue, saison, qualité data,
+confiance et disponibilité de la lineup officielle.
+
+La V3 reste candidate tant que tous les critères de succès ne sont pas validés contre une
+baseline V2 réelle : log loss améliorée d'au moins `0.005`, Brier amélioré d'au moins
+`0.003`, aucune régression de log loss `> 0.005` sur les ligues avec au moins 100 matchs
+test, ECE draw amélioré d'au moins `0.01` et pas de régression du confidence gap. Si le
+modèle V2 ou les colonnes `p_v2_*` sont absents, le rapport marque ces critères comme
+`not_evaluable`.
+
+### V3 Inférence Fixture Unique
+
+Le sprint inférence ajoute un chemin fixture unique isolé de la production V2 :
+
+```bash
+football-predictor predict-v3 \
+  --fixture 123456 \
+  --model-dir data/models/v3 \
+  --v2-model-dir data/models/v2-late \
+  --no-refresh \
+  --json
+```
+
+La commande construit les features avec `feature_version="v3.0"`, persiste un
+`V3FeatureSnapshot`, charge le composite V3, puis écrit une ligne `V3ModelPrediction` avec
+les probabilités finales et les sorties intermédiaires Draw Risk, No-Draw Winner, V2,
+marché et API. Si `--v2-model-dir` est absent, le composite garde un prior uniforme pour
+le signal V2 et la prédiction ne doit pas échouer.
+
+Discord est optionnel et désactivé par défaut :
+
+```bash
+football-predictor predict-v3 \
+  --fixture 123456 \
+  --model-dir data/models/v3 \
+  --send-discord \
+  --dry-run
+```
+
+Le message utilise le formatter V3 dédié, reste routé vers `message_type="prediction"` et
+stocke `v3_model_prediction_id` dans `DiscordMessage.payload_json` plutôt que dans
+`model_prediction_id`, car cette FK reste réservée aux prédictions V2.
+
+### V3 Quotidien Et Production Discord
+
+La commande quotidienne V3 sélectionne les fixtures comme `predict-today`, calcule les
+prédictions V3 et persiste `V3ModelPrediction` avec les métadonnées de fenêtre quotidienne.
+Depuis Sprint 10, `scripts/daily_late.sh` utilise la V3 par défaut pour publier dans le
+channel Discord `predictions`.
+
+Commande manuelle production M-30 :
+
+```bash
+football-predictor predict-today-v3 \
+  --date 2026-05-08 \
+  --window late \
+  --model-dir data/models/v3 \
+  --v2-model-dir data/models/v2-late \
+  --production-mode \
+  --no-refresh-data \
+  --json
+```
+
+Le statut de résultat est `shadow_logged` quand Discord est désactivé. Les champs
+`payload_json["shadow_mode"]`, `payload_json["daily_window"]`,
+`payload_json["automation_date"]` et `payload_json["run_key"]` permettent de comparer les
+prédictions live V2/V3. En production, `shadow_mode=false`, les prédictions sans Discord
+sont `predicted` et les vrais envois Discord sont `sent`.
+
+Routine production et rollback :
+
+```bash
+SEND_DISCORD=true DRY_RUN=false scripts/daily_late.sh
+PREDICTION_ENGINE=v2 SEND_DISCORD=true DRY_RUN=false scripts/daily_late.sh
+```
+
+La promotion V3 est volontaire malgré un backtest non validé. Les probabilités et le taux
+de réussite doivent donc être surveillés après activation, avec une attention particulière
+aux sources live M-30 : odds, prédictions API, lineups et blessures.
+
+La publication Discord n'est pas automatique pour toutes les prédictions calculées. La
+règle métier commune V3 1X2 et O/U 2.5 est : publier uniquement les confiances `High` et
+`Very High`. Les prédictions `Medium`, `Low`, `Uncertain` ou non normalisables restent
+stockées en base avec `confidence_skipped` et ne sont pas prises en compte dans le score
+public hebdomadaire.
+
+Pour valider le rendu Discord V3 sans envoi réel :
+
+```bash
+football-predictor predict-today-v3 \
+  --window late \
+  --dry-run \
+  --print-only
+```
+
+Un envoi Discord V3 réel depuis la CLI exige `--production-mode --send-discord` et
+`--dry-run=false` / `--print-only=false`. Sans `--production-mode`, `predict-today-v3`
+reste bloqué pour les envois live.
 
 ## Règles Anti Data Leakage
 

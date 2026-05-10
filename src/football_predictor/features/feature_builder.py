@@ -12,6 +12,9 @@ from sqlalchemy.orm import Session
 from football_predictor.db import models
 from football_predictor.db.repositories import upsert_by_fields
 from football_predictor.features.data_quality import feature_quality_payload
+from football_predictor.features.draw_risk_features import build_draw_risk_features
+from football_predictor.features.lineup_m30_features import build_lineup_m30_features
+from football_predictor.features.no_draw_winner_features import build_no_draw_winner_features
 from football_predictor.features.odds_features import (
     compute_market_consensus,
     compute_odds_movement,
@@ -73,6 +76,8 @@ def build_feature_snapshot(
         "away_team_id": fixture.away_team_id,
         "feature_version": feature_version,
     }
+    if _is_v3_feature_version(feature_version):
+        features.update(_v3_feature_payload(session, fixture_id, cutoff, features))
     _remove_target_leakage_fields(features)
 
     data_quality = _data_quality_payload(
@@ -86,7 +91,18 @@ def build_feature_snapshot(
         reference_docs_available=players_reference is not None or api_reference is not None,
         feature_version=feature_version,
     )
+    if _is_v3_feature_version(feature_version):
+        _add_v3_data_quality_flags(
+            session=session,
+            fixture_id=fixture_id,
+            prediction_time=cutoff,
+            features=features,
+            data_quality=data_quality,
+        )
     features["overall_data_quality_score"] = data_quality["overall_data_quality_score"]
+    if _is_v3_feature_version(feature_version):
+        features["data_quality_score"] = data_quality["overall_data_quality_score"]
+        features["has_odds_multi_snapshot"] = int(data_quality["has_odds_multi_snapshot"])
     snapshot = upsert_by_fields(
         session,
         models.FeatureSnapshot,
@@ -106,6 +122,82 @@ def build_feature_snapshot(
         features_json=features,
         data_quality_json=data_quality,
     )
+
+
+def _is_v3_feature_version(feature_version: str) -> bool:
+    return feature_version.casefold().startswith("v3")
+
+
+def _v3_feature_payload(
+    session: Session,
+    fixture_id: int,
+    prediction_time: datetime,
+    base_features: JsonDict,
+) -> JsonDict:
+    lineup_features = build_lineup_m30_features(session, fixture_id, prediction_time)
+    features_with_lineup = {**base_features, **lineup_features}
+    draw_risk_features = build_draw_risk_features(
+        features_with_lineup,
+        session=session,
+        fixture_id=fixture_id,
+        prediction_time=prediction_time,
+    )
+    no_draw_winner_features = build_no_draw_winner_features(features_with_lineup)
+    official_home = bool(lineup_features.get("official_lineup_home_available_flag"))
+    official_away = bool(lineup_features.get("official_lineup_away_available_flag"))
+    return {
+        **lineup_features,
+        **draw_risk_features,
+        **no_draw_winner_features,
+        "has_official_lineup_home": official_home,
+        "has_official_lineup_away": official_away,
+        "has_official_lineup": official_home and official_away,
+    }
+
+
+def _add_v3_data_quality_flags(
+    *,
+    session: Session,
+    fixture_id: int,
+    prediction_time: datetime,
+    features: JsonDict,
+    data_quality: JsonDict,
+) -> None:
+    home_available = bool(features.get("official_lineup_home_available_flag"))
+    away_available = bool(features.get("official_lineup_away_available_flag"))
+    data_quality.update(
+        {
+            "has_official_lineup_home": home_available,
+            "has_official_lineup_away": away_available,
+            "has_official_lineup": home_available and away_available,
+            "official_lineup_available_flag": home_available and away_available,
+            "has_odds_multi_snapshot": _has_odds_multi_snapshot(
+                session, fixture_id, prediction_time
+            ),
+            "v3_feature_version": features.get("feature_version"),
+        }
+    )
+
+
+def _has_odds_multi_snapshot(
+    session: Session,
+    fixture_id: int,
+    prediction_time: datetime,
+) -> bool:
+    rows = session.execute(
+        select(models.OddsSnapshot.fetched_at)
+        .where(
+            models.OddsSnapshot.fixture_id == fixture_id,
+            models.OddsSnapshot.is_live.is_(False),
+            models.OddsSnapshot.fetched_at <= prediction_time,
+            models.OddsSnapshot.odd_home.is_not(None),
+            models.OddsSnapshot.odd_draw.is_not(None),
+            models.OddsSnapshot.odd_away.is_not(None),
+        )
+        .distinct()
+        .limit(2)
+    ).all()
+    return len(rows) >= 2
 
 
 def _latest_api_prediction(

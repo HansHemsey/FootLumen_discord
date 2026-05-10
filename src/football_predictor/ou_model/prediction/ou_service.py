@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -14,8 +14,6 @@ from football_predictor.config.settings import Settings
 from football_predictor.db import models
 from football_predictor.db.repositories import upsert_by_fields
 from football_predictor.ou_model.constants import (
-    CONFIDENCE_HIGH_THRESHOLD,
-    CONFIDENCE_MEDIUM_THRESHOLD,
     FEATURE_VERSION,
     OU_THRESHOLD,
 )
@@ -64,6 +62,7 @@ class OUPredictionOutput:
     # Expert breakdown
     expert_probabilities: dict[str, float] = field(default_factory=dict)
     data_quality_json: JsonDict = field(default_factory=dict)
+    ou_model_prediction_id: int | None = None
 
 
 def _ou_confidence_score(p_over: float, edge: float | None) -> float:
@@ -75,11 +74,15 @@ def _ou_confidence_score(p_over: float, edge: float | None) -> float:
 
 
 def _ou_confidence_label(score: float) -> str:
+    if score >= 85:
+        return "Very High"
     if score >= 70:
-        return "HIGH"
+        return "High"
     if score >= 45:
-        return "MEDIUM"
-    return "LOW"
+        return "Medium"
+    if score >= 20:
+        return "Low"
+    return "Uncertain"
 
 
 def _compute_market_p_over(odd_over: float, odd_under: float) -> float:
@@ -178,7 +181,12 @@ class OUPredictionService:
         ev_over: float | None = None
         ev_under: float | None = None
 
-        if odd_over_f is not None and odd_under_f is not None and odd_over_f > 1 and odd_under_f > 1:
+        if (
+            odd_over_f is not None
+            and odd_under_f is not None
+            and odd_over_f > 1
+            and odd_under_f > 1
+        ):
             market_p_over = _compute_market_p_over(odd_over_f, odd_under_f)
             market_p_under = 1.0 - market_p_over
             edge_over = p_over - market_p_over
@@ -219,7 +227,9 @@ class OUPredictionService:
         )
 
         if save_to_db:
-            self._save_prediction(output, builder_result)
+            record = self._save_prediction(output, builder_result)
+            if record is not None:
+                output = replace(output, ou_model_prediction_id=record.id)
 
         return output
 
@@ -260,44 +270,50 @@ class OUPredictionService:
         self,
         output: OUPredictionOutput,
         builder_result: OUFeatureBuilderResult,
-    ) -> None:
+    ) -> models.OUModelPrediction | None:
         try:
             snapshot_id = (
                 builder_result.snapshot.id
                 if hasattr(builder_result.snapshot, "id") and builder_result.snapshot.id
                 else None
             )
-            record = models.OUModelPrediction(
-                fixture_id=output.fixture_id,
-                ou_feature_snapshot_id=snapshot_id,
-                prediction_time=output.prediction_time,
-                model_version=output.model_version,
-                threshold=output.threshold,
-                p_over=output.p_over,
-                p_under=output.p_under,
-                xg_home=output.xg_home,
-                xg_away=output.xg_away,
-                xg_total=output.xg_total,
-                market_p_over=output.market_p_over,
-                market_p_under=output.market_p_under,
-                edge_over=output.edge_over,
-                edge_under=output.edge_under,
-                ev_over=output.ev_over,
-                ev_under=output.ev_under,
-                market_odd_over=output.market_odd_over,
-                market_odd_under=output.market_odd_under,
-                confidence_score=output.confidence_score,
-                confidence_label=output.confidence_label,
-                expert_probabilities_json=output.expert_probabilities,
-                data_quality_json=output.data_quality_json,
-                payload_json={},
-            )
-            upsert_by_fields(
+            record = upsert_by_fields(
                 self.session,
                 models.OUModelPrediction,
-                record,
-                ["fixture_id", "prediction_time", "model_version"],
+                {
+                    "fixture_id": output.fixture_id,
+                    "prediction_time": output.prediction_time,
+                    "model_version": output.model_version,
+                },
+                {
+                    "ou_feature_snapshot_id": snapshot_id,
+                    "threshold": output.threshold,
+                    "p_over": output.p_over,
+                    "p_under": output.p_under,
+                    "xg_home": output.xg_home,
+                    "xg_away": output.xg_away,
+                    "xg_total": output.xg_total,
+                    "market_p_over": output.market_p_over,
+                    "market_p_under": output.market_p_under,
+                    "edge_over": output.edge_over,
+                    "edge_under": output.edge_under,
+                    "ev_over": output.ev_over,
+                    "ev_under": output.ev_under,
+                    "market_odd_over": output.market_odd_over,
+                    "market_odd_under": output.market_odd_under,
+                    "confidence_score": output.confidence_score,
+                    "confidence_label": output.confidence_label,
+                    "expert_probabilities_json": output.expert_probabilities,
+                    "data_quality_json": output.data_quality_json,
+                    "payload_json": {},
+                },
             )
             self.session.flush()
+            return record
         except Exception as exc:
-            logger.warning("Could not save O/U prediction for fixture %d: %s", output.fixture_id, exc)
+            logger.warning(
+                "Could not save O/U prediction for fixture %d: %s",
+                output.fixture_id,
+                exc,
+            )
+            return None

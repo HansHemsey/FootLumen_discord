@@ -7,11 +7,12 @@ Discord delivery service without any network access.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import or_, select
@@ -21,9 +22,15 @@ from football_predictor.config.competitions import CompetitionConfig
 from football_predictor.db import models
 from football_predictor.discord.formatter import format_prediction_markdown
 from football_predictor.discord.service import DiscordDeliveryService, DiscordSendResult
+from football_predictor.discord.v3_formatter import format_prediction_v3_markdown
 from football_predictor.ingestion.fixtures import FixtureIngestionService
 from football_predictor.ingestion.ingest_match_details import FixtureDetailsIngestionService
 from football_predictor.ingestion.ingest_odds import OddsIngestionService
+from football_predictor.prediction.publication_policy import (
+    CONFIDENCE_SKIP_REASON,
+    is_publishable_confidence,
+    normalize_confidence_label,
+)
 from football_predictor.prediction.scheduler import (
     DailyPredictionWindow,
     daily_run_key,
@@ -40,8 +47,12 @@ from football_predictor.reference.lookups import ApiFootballReference, PlayersRe
 from football_predictor.utils.exceptions import PredictionError
 from football_predictor.utils.time import ensure_aware_utc, utc_now
 
+if TYPE_CHECKING:
+    from football_predictor.prediction.v3_service import PredictionV3Output
+
 UPCOMING_STATUSES = {"", "NS", "TBD"}
 JsonDict = dict[str, Any]
+logger = logging.getLogger(__name__)
 
 
 class PredictionServiceLike(Protocol):
@@ -61,6 +72,24 @@ class PredictionServiceLike(Protocol):
 PredictionServiceFactory = Callable[[Session], PredictionServiceLike]
 
 
+class PredictionV3ServiceLike(Protocol):
+    def predict_fixture_v3(
+        self,
+        fixture_id: int,
+        prediction_time: datetime | None = None,
+        *,
+        model_dir: Path | str | None = None,
+        v2_model_dir: Path | str | None = None,
+        refresh_data: bool = False,
+        save_raw: bool = False,
+        api_client: ApiFootballPayloadClient | None = None,
+    ) -> PredictionV3Output:
+        ...
+
+
+PredictionV3ServiceFactory = Callable[[Session], PredictionV3ServiceLike]
+
+
 @dataclass(frozen=True)
 class DailyFixtureResult:
     fixture_id: int
@@ -70,6 +99,8 @@ class DailyFixtureResult:
     league_id: int | None = None
     season: int | None = None
     model_prediction_id: int | None = None
+    v3_model_prediction_id: int | None = None
+    v3_feature_snapshot_id: int | None = None
     discord_message_id: int | None = None
     reason: str | None = None
     error: str | None = None
@@ -85,6 +116,8 @@ class DailyFixtureResult:
             "league_id": self.league_id,
             "season": self.season,
             "model_prediction_id": self.model_prediction_id,
+            "v3_model_prediction_id": self.v3_model_prediction_id,
+            "v3_feature_snapshot_id": self.v3_feature_snapshot_id,
             "discord_message_id": self.discord_message_id,
             "reason": self.reason,
             "error": self.error,
@@ -100,6 +133,8 @@ class DailyPredictionSummary:
     season: int | None
     refresh_data: bool
     send_discord: bool
+    mode: str = "v2"
+    shadow_mode: bool = False
     results: list[DailyFixtureResult] = field(default_factory=list)
 
     @property
@@ -116,6 +151,7 @@ class DailyPredictionSummary:
             1
             for result in self.results
             if result.status in {"predicted", "sent", "dry_run", "print_only"}
+            or result.status in {"shadow_logged", "confidence_skipped"}
         )
 
     @property
@@ -135,12 +171,16 @@ class DailyPredictionSummary:
         return sum(
             1
             for result in self.results
-            if result.status in {"skipped", "duplicate_skipped"}
+            if result.status in {"skipped", "duplicate_skipped", "confidence_skipped"}
         )
 
     @property
     def duplicate_skipped(self) -> int:
         return sum(1 for result in self.results if result.status == "duplicate_skipped")
+
+    @property
+    def confidence_skipped(self) -> int:
+        return sum(1 for result in self.results if result.status == "confidence_skipped")
 
     def as_dict(self) -> JsonDict:
         return {
@@ -152,6 +192,8 @@ class DailyPredictionSummary:
             "season": self.season,
             "refresh_data": self.refresh_data,
             "send_discord": self.send_discord,
+            "mode": self.mode,
+            "shadow_mode": self.shadow_mode,
             "total": self.total,
             "found": self.total,
             "success": self.success,
@@ -160,6 +202,7 @@ class DailyPredictionSummary:
             "sent": self.sent,
             "skipped": self.skipped,
             "duplicate_skipped": self.duplicate_skipped,
+            "confidence_skipped": self.confidence_skipped,
             "results": [result.as_dict() for result in self.results],
         }
 
@@ -382,6 +425,225 @@ def run_daily_predictions(
         season=season,
         refresh_data=refresh_data,
         send_discord=send_discord,
+        mode="v2",
+        shadow_mode=False,
+        results=results,
+    )
+
+
+def run_daily_predictions_v3(
+    fixture_date: date | None = None,
+    league_ids: Sequence[int] | None = None,
+    window: DailyPredictionWindow | str = DailyPredictionWindow.LATE,
+    send_discord: bool = False,
+    refresh_data: bool = True,
+    dry_run: bool = False,
+    *,
+    session: Session,
+    reference: ApiFootballReference,
+    players_reference: PlayersReference | None = None,
+    competitions: Sequence[CompetitionConfig] = (),
+    season: int | None = None,
+    model_dir: Path | str | None = Path("data/models/v3"),
+    v2_model_dir: Path | str | None = None,
+    api_client: ApiFootballPayloadClient | None = None,
+    discord_delivery: DiscordDeliveryService | None = None,
+    prediction_service_factory: PredictionV3ServiceFactory | None = None,
+    timezone_name: str = "Europe/Paris",
+    force: bool = False,
+    print_only: bool = False,
+    save_raw: bool = False,
+    limit: int | None = None,
+    now: datetime | None = None,
+    shadow_mode: bool = True,
+) -> DailyPredictionSummary:
+    """Run V3 daily predictions in shadow mode by default.
+
+    Shadow mode computes and persists V3 predictions without publishing them to
+    Discord. `dry_run` and `print_only` are still accepted with `send_discord`
+    to validate routing and formatting without a real webhook send. Set
+    `shadow_mode=False` for the production path, including live Discord sends.
+    """
+    resolved_window = parse_daily_window(window)
+    current_time = ensure_aware_utc(now or utc_now())
+    local_timezone = ZoneInfo(timezone_name)
+    target_date = fixture_date or current_time.astimezone(local_timezone).date()
+    resolved_leagues = tuple(league_ids or _enabled_competition_leagues(competitions))
+    run_key = daily_run_key(target_date.isoformat(), resolved_window, resolved_leagues, season)
+
+    if refresh_data and api_client is None:
+        raise PredictionError("refresh_data=True requires an API-Football client")
+    if send_discord and discord_delivery is None:
+        raise PredictionError("send_discord=True requires a DiscordDeliveryService")
+    if shadow_mode and send_discord and not dry_run and not print_only:
+        raise PredictionError(
+            "V3 shadow mode does not allow live Discord sends; use dry_run or print_only"
+        )
+
+    if refresh_data and api_client is not None:
+        _refresh_fixtures_for_date(
+            session,
+            api_client,
+            target_date,
+            league_ids=resolved_leagues,
+            season=season,
+            competitions=competitions,
+            reference=reference,
+            save_raw=save_raw,
+        )
+
+    fixtures = get_fixtures_to_predict(
+        target_date,
+        resolved_leagues or None,
+        season,
+        session=session,
+        competitions=competitions,
+        reference=reference if resolved_leagues else None,
+        timezone_name=timezone_name,
+    )
+    fixtures = [
+        fixture
+        for fixture in fixtures
+        if fixture_matches_window(fixture.date, resolved_window, current_time)
+    ]
+    if limit is not None:
+        fixtures = fixtures[:limit]
+
+    prediction_service = _prediction_v3_service(
+        session,
+        reference,
+        players_reference,
+        prediction_service_factory,
+    )
+    results: list[DailyFixtureResult] = []
+    for fixture in fixtures:
+        prediction_time = prediction_time_for_fixture(
+            fixture.date or current_time,
+            resolved_window,
+            now=current_time,
+        )
+        try:
+            if (
+                send_discord
+                and not dry_run
+                and not print_only
+                and not force
+                and _has_sent_prediction_window(session, fixture.fixture_id, resolved_window)
+            ):
+                results.append(
+                    _result(
+                        fixture,
+                        "duplicate_skipped",
+                        prediction_time,
+                        reason="sent_prediction_window",
+                    )
+                )
+                continue
+            refresh_warnings: list[str] = []
+            if refresh_data and api_client is not None:
+                refresh_warnings = _refresh_fixture_inputs(
+                    session,
+                    fixture,
+                    api_client,
+                    reference=reference,
+                    players_reference=players_reference,
+                    window=resolved_window,
+                    save_raw=save_raw,
+                )
+                if _uses_live_prediction_time(resolved_window):
+                    prediction_time = prediction_time_for_fixture(
+                        fixture.date or utc_now(),
+                        resolved_window,
+                        now=utc_now(),
+                    )
+            output = prediction_service.predict_fixture_v3(
+                fixture.fixture_id,
+                prediction_time,
+                model_dir=model_dir,
+                v2_model_dir=v2_model_dir,
+                refresh_data=False,
+                save_raw=save_raw,
+            )
+            metadata = {
+                "daily_window": resolved_window.value,
+                "automation_window": resolved_window.value,
+                "automation_date": target_date.isoformat(),
+                "prediction_time": prediction_time.isoformat(),
+                "run_key": run_key,
+                "refresh_warnings": refresh_warnings,
+                "model_family": "v3",
+                "shadow_mode": shadow_mode,
+            }
+            _annotate_v3_model_prediction(session, output.v3_model_prediction_id, metadata)
+            if send_discord:
+                if (
+                    not dry_run
+                    and not print_only
+                    and not is_publishable_confidence(output.confidence_label)
+                ):
+                    logger.info(
+                        "V3 Discord publication skipped: fixture_id=%s confidence_label=%s "
+                        "confidence_score=%s expected=%s window=%s",
+                        fixture.fixture_id,
+                        normalize_confidence_label(output.confidence_label),
+                        output.confidence_score,
+                        "High|Very High",
+                        resolved_window.value,
+                    )
+                    results.append(
+                        _result(
+                            fixture,
+                            "confidence_skipped",
+                            prediction_time,
+                            v3_model_prediction_id=output.v3_model_prediction_id,
+                            v3_feature_snapshot_id=output.v3_feature_snapshot_id,
+                            reason=CONFIDENCE_SKIP_REASON,
+                        )
+                    )
+                    continue
+                send_result = _send_prediction_v3(
+                    discord_delivery,
+                    output,
+                    fixture,
+                    dry_run=dry_run,
+                    print_only=print_only,
+                    force=force,
+                    metadata=metadata,
+                    timezone_name=timezone_name,
+                )
+                results.append(
+                    _result(
+                        fixture,
+                        send_result.status,
+                        prediction_time,
+                        v3_model_prediction_id=output.v3_model_prediction_id,
+                        v3_feature_snapshot_id=output.v3_feature_snapshot_id,
+                        discord_message_id=send_result.discord_message_id,
+                    )
+                )
+            else:
+                results.append(
+                    _result(
+                        fixture,
+                        "shadow_logged" if shadow_mode else "predicted",
+                        prediction_time,
+                        v3_model_prediction_id=output.v3_model_prediction_id,
+                        v3_feature_snapshot_id=output.v3_feature_snapshot_id,
+                    )
+                )
+        except Exception as exc:
+            results.append(_result(fixture, "failed", prediction_time, error=str(exc)))
+
+    return DailyPredictionSummary(
+        target_date=target_date,
+        window=resolved_window,
+        run_key=run_key,
+        league_ids=resolved_leagues,
+        season=season,
+        refresh_data=refresh_data,
+        send_discord=send_discord,
+        mode="v3",
+        shadow_mode=shadow_mode,
         results=results,
     )
 
@@ -403,6 +665,19 @@ def _prediction_service(
     if factory is not None:
         return factory(session)
     return PredictionService(reference, session, players_reference=players_reference)
+
+
+def _prediction_v3_service(
+    session: Session,
+    reference: ApiFootballReference,
+    players_reference: PlayersReference | None,
+    factory: PredictionV3ServiceFactory | None,
+) -> PredictionV3ServiceLike:
+    if factory is not None:
+        return factory(session)
+    from football_predictor.prediction.v3_service import PredictionV3Service
+
+    return PredictionV3Service(reference, session, players_reference=players_reference)
 
 
 def _refresh_fixtures_for_date(
@@ -535,6 +810,39 @@ def _send_prediction(
     return result
 
 
+def _send_prediction_v3(
+    delivery: DiscordDeliveryService | None,
+    output: PredictionV3Output,
+    fixture: models.Fixture,
+    *,
+    dry_run: bool,
+    print_only: bool,
+    force: bool,
+    metadata: JsonDict,
+    timezone_name: str,
+) -> DiscordSendResult:
+    if delivery is None:
+        raise PredictionError("send_discord=True requires a DiscordDeliveryService")
+    payload_metadata = {
+        **metadata,
+        "v3_model_prediction_id": output.v3_model_prediction_id,
+        "v3_feature_snapshot_id": output.v3_feature_snapshot_id,
+    }
+    return delivery.send_markdown(
+        format_prediction_v3_markdown(output, timezone_name=timezone_name),
+        league_id=fixture.league_id,
+        season=fixture.season,
+        channel_key="predictions",
+        message_type="prediction",
+        fixture_id=fixture.fixture_id,
+        model_prediction_id=None,
+        dry_run=dry_run,
+        print_only=print_only,
+        force=force,
+        payload_metadata=payload_metadata,
+    )
+
+
 def _annotate_model_prediction(
     session: Session,
     model_prediction_id: int | None,
@@ -543,6 +851,22 @@ def _annotate_model_prediction(
     if model_prediction_id is None:
         return
     prediction = session.get(models.ModelPrediction, model_prediction_id)
+    if prediction is None:
+        return
+    payload = dict(prediction.payload_json) if isinstance(prediction.payload_json, dict) else {}
+    payload.update(metadata)
+    prediction.payload_json = payload
+    session.flush()
+
+
+def _annotate_v3_model_prediction(
+    session: Session,
+    v3_model_prediction_id: int | None,
+    metadata: JsonDict,
+) -> None:
+    if v3_model_prediction_id is None:
+        return
+    prediction = session.get(models.V3ModelPrediction, v3_model_prediction_id)
     if prediction is None:
         return
     payload = dict(prediction.payload_json) if isinstance(prediction.payload_json, dict) else {}
@@ -581,6 +905,8 @@ def _result(
     prediction_time: datetime,
     *,
     model_prediction_id: int | None = None,
+    v3_model_prediction_id: int | None = None,
+    v3_feature_snapshot_id: int | None = None,
     discord_message_id: int | None = None,
     reason: str | None = None,
     error: str | None = None,
@@ -593,6 +919,8 @@ def _result(
         league_id=fixture.league_id,
         season=fixture.season,
         model_prediction_id=model_prediction_id,
+        v3_model_prediction_id=v3_model_prediction_id,
+        v3_feature_snapshot_id=v3_feature_snapshot_id,
         discord_message_id=discord_message_id,
         reason=reason,
         error=error,

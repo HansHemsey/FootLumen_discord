@@ -30,11 +30,19 @@ def build_training_dataset(
     *,
     limit: int | None = None,
     feature_version: str = "v1",
+    prediction_offset_minutes: int | None = None,
 ) -> pd.DataFrame:
-    """Build a point-in-time training dataset from local DB snapshots."""
+    """Build a point-in-time training dataset from local DB snapshots.
+
+    prediction_offset_minutes takes precedence over prediction_offset_hours when provided.
+    Pass prediction_offset_minutes=30 for M-30 V3 datasets.
+    """
     session.flush()
     rows: list[JsonDict] = []
-    offset = timedelta(hours=prediction_offset_hours)
+    if prediction_offset_minutes is not None:
+        offset = timedelta(minutes=prediction_offset_minutes)
+    else:
+        offset = timedelta(hours=prediction_offset_hours)
     for fixture in _finished_fixtures(session, league_ids, seasons, limit=limit):
         if fixture.date is None:
             continue

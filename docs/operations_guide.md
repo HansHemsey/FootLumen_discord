@@ -110,6 +110,10 @@ Règle de publication publique : V3 1X2 et O/U 2.5 ne publient dans Discord que 
 pronostics `High` ou `Very High`. Les labels `Low`, `Medium`, `Uncertain` et assimilés
 sont persistés en base mais retournent `confidence_skipped`.
 
+Les messages V3 1X2 et O/U 2.5 utilisent un rendu compact oriente parieur : pick,
+probabilites modele/marche, ecart de value, facteurs traduits et qualite data. Ce rendu
+ne modifie pas les modeles, les crons, le routage ni le filtre de publication.
+
 ```bash
 football-predictor predict-today-v3 --window late --dry-run --print-only
 ```

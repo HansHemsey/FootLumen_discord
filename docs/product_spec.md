@@ -56,44 +56,42 @@ Le message Discord doit être court, clair, en français et dans un bloc markdow
 
 ````md
 ```md
-🏟️ PRÉDICTION FOOTBALL
+🏟️ FOOT — PRÉDICTION V3 | M-30
+Équipe domicile vs Équipe extérieur · Compétition
+DD/MM/YYYY · HH:mm Europe/Paris
 
-Match : Équipe domicile vs Équipe extérieur
-Compétition : Nom de compétition
-Date : YYYY-MM-DD HH:mm Europe/Paris
+🎯 PICK PRINCIPAL
+▶ Équipe gagne / Match nul
+Confiance : HIGH / VERY HIGH · Score : XX/100
 
-Résultat prédit : victoire domicile / match nul / victoire extérieur
-Confiance : High / Medium / Low / Uncertain
-Score de confiance : XX.X pts
-Écart de confiance : XX.X pts
+📊 PROBABILITÉS
+              Modèle   Marché   Écart
+Domicile      XX.X%    XX.X%   +/-X.X pts
+Nul           XX.X%    XX.X%   +/-X.X pts
+Extérieur     XX.X%    XX.X%   +/-X.X pts
 
-Probabilités modèle :
-- Domicile  : XX.X%
-- Nul       : XX.X%
-- Extérieur : XX.X%
+💡 LECTURE PARIEUR
+• Lecture value en phrase simple.
+• Risque de nul et avantage hors nul en langage naturel.
 
-Probabilités marché :
-- Domicile  : XX.X%
-- Nul       : XX.X%
-- Extérieur : XX.X%
+🔁 CONFIRMATION V2 → V3
+Domicile : XX.X% → XX.X%  (+/-X.X pts)
+Nul      : XX.X% → XX.X%  (+/-X.X pts)
 
-Facteurs clés :
-1. ...
-2. ...
-3. ...
+🧠 FACTEURS CLÉS
+• Facteurs traduits en français, sans noms de features techniques.
 
-Absences clés :
-- Équipe A : ...
-- Équipe B : ...
+👥 XI / ABSENCES
+XI : officiel utilisé / probable, lineups officielles indisponibles
+Équipe A : Joueur 1, Joueur 2
+Équipe B : Joueur 3, Joueur 4
 
-Qualité des données :
-- Score global : XX/100
-- Odds : oui/non
-- Blessures : oui/non
-- Lineups officielles : oui/non
-- Stats joueurs : oui/non
+✅ QUALITÉ DATA
+Score : XX/100
+Odds : oui · Blessures : oui · Stats joueurs : oui
+Lineups officielles : oui/non
 
-Note : prédiction probabiliste, pas une certitude.
+⚠️ Modèle probabiliste à M-30, pas une certitude.
 ```
 ````
 
@@ -101,6 +99,10 @@ Si le marché n'est pas disponible avant `prediction_time`, afficher
 `Probabilités marché : non disponible`. Si aucune absence exploitable n'est disponible
 avant `prediction_time`, afficher une mention explicite `non disponible` plutôt que
 d'inventer un joueur ou une blessure.
+
+Les noms de features internes (`draw_risk_*`, `ndw_*`, experts ML, etc.) ne doivent pas
+apparaître dans Discord. Ils doivent être traduits en phrases parieur simples :
+`faiblesse offensive`, `dynamique globale`, `appui des cotes`, `risque de nul moyen`.
 
 La limite Discord doit être respectée. Le formatter vise 1900 caractères par défaut pour
 rester sous la limite Discord de 2000 caractères. Toute troncature doit éviter de couper au

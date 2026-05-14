@@ -114,10 +114,13 @@ Passe `SEND_DISCORD=true` seulement apres validation des webhooks et des routes.
 ### Production V3 Discord
 
 Depuis Sprint 10, `scripts/daily_late.sh` utilise la V3 par defaut pour le channel
-`predictions`. Les appels manuels de `predict-today-v3` restent en shadow mode par defaut ;
-ajouter `--production-mode` pour autoriser le chemin production. Le répertoire modèle doit
-contenir `confidence_thresholds.json` avec `production_approved=true`, sinon le runner
-refuse le mode production avant prédiction.
+`predictions`. Le script ajoute `--production-mode` uniquement pour un vrai envoi live :
+`SEND_DISCORD=true`, `DRY_RUN=false` et `PRINT_ONLY=false`. Les appels manuels de
+`predict-today-v3` restent en shadow mode par defaut ; ajouter `--production-mode` pour
+autoriser le chemin production. Le répertoire modèle doit contenir
+`confidence_thresholds.json` avec `production_approved=true`, sinon le runner refuse le mode
+production avant prédiction. Le shadow mode, les dry-runs et les print-only restent utilisables
+sans artefact approuvé pour observer V3 localement.
 
 ```bash
 football-predictor predict-today-v3 \
@@ -149,17 +152,20 @@ documentés.
 Le fichier d'approbation est généré par les backtests de calibration. Pour promouvoir un
 nouveau modèle, copier l'artefact approuvé dans le répertoire modèle actif, par exemple
 `data/models/v3/confidence_thresholds.json` ou
-`data/models/ou-v1/confidence_thresholds.json`. Si l'artefact manque, est invalide ou n'est
-pas approuvé, le log indique `Production mode refused` avec le modèle, le chemin attendu et
-la raison, sans afficher de secret. Pour verifier le rendu Discord V3 sans publier :
+`data/models/ou-v1/confidence_thresholds.json`. L'artefact porte aussi `approved_labels` :
+si seul `Very High` est approuvé, les prédictions `High` restent internes même si leur score
+qualité est suffisant. Si l'artefact manque, est invalide ou n'est pas approuvé, le log
+indique `Production mode refused` avec le modèle, le chemin attendu et la raison, sans
+afficher de secret. Pour verifier le rendu Discord V3 sans publier :
 
 Règle de publication publique : V2, V3 1X2 et O/U 2.5 ne publient dans Discord que les
 pronostics `High` ou `Very High` avec une qualité de données suffisante
-(`PUBLICATION_MIN_DATA_QUALITY_SCORE=60` par défaut). Les labels `Low`, `Medium`,
-`Uncertain`, les scores qualité absents et les scores qualité sous le seuil sont persistés
-en base mais retournent `confidence_skipped` avec une raison normalisée. Si
-`data_quality_json.publication_blockers` est non vide, la publication réelle est aussi bloquée
-avec `data_quality_blocker_present`.
+(`PUBLICATION_MIN_DATA_QUALITY_SCORE=60` par défaut). Pour V3/O-U en production, le label
+utilisé par la policy est le label calibré depuis `confidence_score` et l'artefact approuvé.
+Les labels `Low`, `Medium`, `Uncertain`, les labels non approuvés, les scores qualité absents
+et les scores qualité sous le seuil sont persistés en base mais retournent
+`confidence_skipped` avec une raison normalisée. Si `data_quality_json.publication_blockers`
+est non vide, la publication réelle est aussi bloquée avec `data_quality_blocker_present`.
 
 Les messages V3 1X2 et O/U 2.5 utilisent un rendu compact oriente parieur : pick,
 probabilites modele/marche, ecart de value, facteurs traduits et qualite data. Ce rendu
@@ -408,9 +414,9 @@ football-predictor backtest-production-like \
   --format both
 ```
 
-Promouvoir un modèle uniquement si le rapport published-only valide les critères et si
-`confidence_thresholds.json` porte `production_approved=true`. Conserver l'artefact précédent
-pour rollback.
+Promouvoir un modèle uniquement si le rapport published-only valide les critères, si
+`confidence_thresholds.json` porte `production_approved=true` et si `approved_labels` contient
+au moins un label publiable. Conserver l'artefact précédent pour rollback.
 
 ## Refresh Live Et Quota API
 
@@ -446,6 +452,30 @@ Ce fichier active explicitement `SEND_DISCORD=true DRY_RUN=false` pour les publi
 Discord, garde des verrous `lockf` par routine, et écrit les logs dans `logs/cron/`.
 `lockf` est un verrou BSD/macOS : sur VPS Linux, ne pas installer cette crontab telle quelle
 sans adaptation `flock` ou systemd timer.
+
+Pour Ubuntu/VPS, utiliser `config/prod_linux.crontab`. Cette version pointe vers
+`/opt/football-predictor/app`, utilise `flock`, crée les dossiers de logs/cache et laisse
+V3/O-U en shadow par défaut tant que les artefacts
+`data/models/v3/confidence_thresholds.json` et
+`data/models/ou-v1/confidence_thresholds.json` ne sont pas approuvés. Les routines
+classements, calendriers, matchs du jour, analyses, résultats et score hebdo publient
+réellement avec `SEND_DISCORD=true DRY_RUN=false`.
+
+Installation VPS recommandée :
+
+```bash
+cd /opt/football-predictor/app
+source .venv/bin/activate
+pip install -U pip
+pip install -e ".[ml]"
+mkdir -p logs/cron .cache/matplotlib
+crontab config/prod_linux.crontab
+crontab -l
+```
+
+Après approbation backtest d'un modèle, modifier uniquement les deux lignes shadow V3/O-U
+dans la crontab Linux pour passer `SEND_DISCORD=true DRY_RUN=false`, puis recharger avec
+`crontab config/prod_linux.crontab`.
 
 Exemple local sans refresh, uniquement pour test manuel :
 

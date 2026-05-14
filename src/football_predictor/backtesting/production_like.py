@@ -381,6 +381,7 @@ def _v3_report_payload(result: Any) -> JsonDict:
         "status": "completed",
         "periods": payload.get("periods", {}),
         "metrics": payload.get("metrics", {}),
+        "confidence_thresholds": payload.get("confidence_thresholds", {}),
         "comparisons": payload.get("published_only_report", {}).get("comparisons", {}),
         "published_only_report": payload.get("published_only_report", {}),
         "report_paths": {

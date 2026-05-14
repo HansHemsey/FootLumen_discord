@@ -34,7 +34,7 @@ un layout `src/`, `typer`, `pydantic-settings`, `pytest`, `ruff` et `mypy`.
 ```bash
 python -m venv .venv
 . .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev,ml]"
 cp .env.example .env
 ```
 
@@ -303,7 +303,7 @@ Flux recommande sans consommer de quota API :
 ```bash
 python -m venv .venv
 . .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev,ml]"
 cp .env.example .env
 football-predictor init-db
 football-predictor seed-reference-from-docs \
@@ -549,10 +549,11 @@ L'exemple `league 39` correspond à la Premier League 2025 et existe dans
 `predict-today-v3` reste en shadow mode par défaut pour les appels manuels. Ajouter
 `--production-mode` autorise le chemin production V3 seulement si
 `data/models/v3/confidence_thresholds.json` est un artefact backtest approuvé
-(`production_approved=true`) ; un envoi Discord réel exige aussi `--send-discord` et
-l'absence de `--dry-run` / `--print-only`. Utiliser `--dry-run --print-only` pour vérifier
-le rendu Discord V3 sans publication. Le pipeline O/U applique la même règle avec
-`data/models/ou-v1/confidence_thresholds.json` et `ou run-daily --production-mode`.
+(`production_approved=true`) avec au moins un label dans `approved_labels` ; un envoi
+Discord réel exige aussi `--send-discord` et l'absence de `--dry-run` / `--print-only`.
+Utiliser `--dry-run --print-only` pour vérifier le rendu Discord V3 sans publication. Le
+pipeline O/U applique la même règle avec `data/models/ou-v1/confidence_thresholds.json` et
+`ou run-daily --production-mode`.
 
 Les commandes `ingest-fixtures --league/--season`, `ingest-fixtures --date` et
 `ingest-standings --league/--season` utilisent les docs locaux par défaut. Les variantes
@@ -737,20 +738,23 @@ persistées dans `ModelPrediction.payload_json.expert_probabilities`. Les appels
 sont faits qu'avec `--refresh-data`, jamais implicitement.
 
 Depuis Sprint 10, `scripts/daily_late.sh` utilise la V3 par défaut
-(`MODEL_DIR=data/models/v3`, `V2_MODEL_DIR=data/models/v2-late`). Un envoi live V3 exige
-un artefact `data/models/v3/confidence_thresholds.json` approuvé par backtest
-(`production_approved=true`) ; sans cet artefact, le mode production est refusé avant
-prédiction. Le shadow mode, `--dry-run` et `--print-only` restent autorisés pour vérifier
-le rendu et la persistance locale. Le rollback officiel est :
+(`MODEL_DIR=data/models/v3`, `V2_MODEL_DIR=data/models/v2-late`). Le script n'ajoute
+`--production-mode` que pour un vrai envoi live (`SEND_DISCORD=true`, `DRY_RUN=false`,
+`PRINT_ONLY=false`). Un envoi live V3 exige un artefact
+`data/models/v3/confidence_thresholds.json` approuvé par backtest (`production_approved=true`) ;
+sans cet artefact, le mode production est refusé avant prédiction. Le shadow mode,
+`--dry-run` et `--print-only` restent autorisés pour vérifier le rendu, collecter des
+prédictions internes et auditer la persistance locale. Le rollback officiel est :
 
 ```bash
 PREDICTION_ENGINE=v2 SEND_DISCORD=true DRY_RUN=false scripts/daily_late.sh
 ```
 
 La publication publique applique le même filtre pour V3 1X2 et O/U 2.5 : seuls les labels
-`High` et `Very High` sont envoyés dans Discord avec un
-`publication_data_quality_score >= PUBLICATION_MIN_DATA_QUALITY_SCORE`. Les prédictions
-`Low`, `Medium`, `Uncertain`, les scores qualité insuffisants ou les
+calibrés et approuvés `High` ou `Very High` peuvent être envoyés dans Discord, avec un
+`publication_data_quality_score >= PUBLICATION_MIN_DATA_QUALITY_SCORE`. Si l'artefact
+n'approuve que `Very High`, les prédictions `High` restent internes. Les prédictions `Low`,
+`Medium`, `Uncertain`, les scores qualité insuffisants, les labels non approuvés ou les
 `publication_blockers` sont persistés pour suivi interne avec le statut
 `confidence_skipped`.
 

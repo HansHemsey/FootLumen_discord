@@ -26,7 +26,10 @@ from football_predictor.discord.v3_formatter import format_prediction_v3_markdow
 from football_predictor.ingestion.fixtures import FixtureIngestionService
 from football_predictor.ingestion.ingest_match_details import FixtureDetailsIngestionService
 from football_predictor.ingestion.ingest_odds import OddsIngestionService
-from football_predictor.prediction.model_approval import require_production_model_approval
+from football_predictor.prediction.model_approval import (
+    load_runtime_confidence_thresholds,
+    require_production_model_approval,
+)
 from football_predictor.prediction.publication_flow import (
     CandidatePrediction,
     StoredPredictionRef,
@@ -513,6 +516,10 @@ def run_daily_predictions_v3(
         )
     if not shadow_mode:
         require_production_model_approval(model_dir, model_family="v3_1x2")
+    runtime_thresholds = load_runtime_confidence_thresholds(
+        model_dir,
+        model_family="v3_1x2",
+    )
     if refresh_data and api_client is None:
         raise PredictionError("refresh_data=True requires an API-Football client")
     if send_discord and discord_delivery is None:
@@ -602,6 +609,11 @@ def run_daily_predictions_v3(
                 refresh_data=False,
                 save_raw=save_raw,
             )
+            raw_confidence_label = output.confidence_label
+            calibrated_confidence_label = runtime_thresholds.label_for_score(
+                output.confidence_score,
+                raw_confidence_label,
+            )
             metadata = {
                 "daily_window": resolved_window.value,
                 "automation_window": resolved_window.value,
@@ -611,13 +623,16 @@ def run_daily_predictions_v3(
                 "refresh_warnings": refresh_warnings,
                 "model_family": "v3",
                 "shadow_mode": shadow_mode,
+                "raw_confidence_label": raw_confidence_label,
+                "calibrated_confidence_label": calibrated_confidence_label,
+                **runtime_thresholds.as_metadata(),
             }
             candidate = CandidatePrediction(
                 model_family="v3",
                 fixture_id=fixture.fixture_id,
                 league_id=fixture.league_id,
                 season=fixture.season,
-                confidence_label=output.confidence_label,
+                confidence_label=calibrated_confidence_label,
                 confidence_score=output.confidence_score,
                 data_quality_json=output.data_quality_json,
                 prediction_time=prediction_time,
@@ -628,6 +643,7 @@ def run_daily_predictions_v3(
                 ),
                 model_prediction_id=None,
                 v3_model_prediction_id=output.v3_model_prediction_id,
+                approved_labels=runtime_thresholds.approved_labels,
                 payload_metadata=metadata,
                 discord_payload_metadata={
                     "v3_model_prediction_id": output.v3_model_prediction_id,

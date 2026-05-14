@@ -162,7 +162,15 @@ def test_run_daily_v3_shadow_logs_v3_without_discord_or_v2_prediction(tmp_path: 
     assert all(row.payload_json["shadow_mode"] is True for row in v3_predictions)
     assert all(row.payload_json["daily_window"] == "now" for row in v3_predictions)
     assert all(
-        row.payload_json["publication_decision"]["allowed"] is True
+        row.payload_json["threshold_artifact_status"] == "approval_artifact_missing"
+        for row in v3_predictions
+    )
+    assert all(
+        row.payload_json["publication_decision"]["allowed"] is False
+        for row in v3_predictions
+    )
+    assert all(
+        row.payload_json["non_publication_reason"] == "confidence_label_not_approved"
         for row in v3_predictions
     )
 
@@ -241,7 +249,9 @@ def test_run_daily_v3_dry_run_persists_discord_metadata_without_http_send(
     assert message.payload_json["model_family"] == "v3"
     assert message.payload_json["v3_model_prediction_id"] is not None
     assert message.payload_json["shadow_mode"] is True
-    assert message.payload_json["publication_decision"]["allowed"] is True
+    assert message.payload_json["threshold_artifact_status"] == "approval_artifact_missing"
+    assert message.payload_json["publication_decision"]["allowed"] is False
+    assert message.payload_json["non_publication_reason"] == "confidence_label_not_approved"
 
 
 def test_run_daily_v3_production_sends_real_discord_and_v3_metadata(

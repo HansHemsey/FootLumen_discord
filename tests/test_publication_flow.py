@@ -15,6 +15,7 @@ from football_predictor.prediction.publication_flow import (
     persist_publication_metadata,
 )
 from football_predictor.prediction.publication_policy import (
+    CONFIDENCE_LABEL_NOT_APPROVED_REASON,
     CONFIDENCE_SKIP_REASON,
     DATA_QUALITY_SKIP_REASON,
 )
@@ -82,6 +83,32 @@ def test_deliver_candidate_blocks_low_quality_live_and_persists_reason(tmp_path)
     assert result.non_publication_reason == DATA_QUALITY_SKIP_REASON
     assert prediction is not None
     assert prediction.payload_json["non_publication_reason"] == DATA_QUALITY_SKIP_REASON
+
+
+def test_deliver_candidate_blocks_unapproved_calibrated_label(tmp_path) -> None:
+    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'publication_flow_labels.db'}")
+    session_factory = create_session_factory(engine)
+
+    with session_scope(session_factory) as session:
+        ids = _seed_predictions(session)
+        candidate = _candidate(
+            model_family="v3",
+            prediction_id=ids["v3"],
+            confidence_label="High",
+            quality_score=95,
+            v3_model_prediction_id=ids["v3"],
+            approved_labels=("Very High",),
+        )
+
+        result = deliver_candidate_prediction(session, FakeDelivery(), candidate)
+        prediction = session.get(models.V3ModelPrediction, ids["v3"])
+
+    assert result.status == "confidence_skipped"
+    assert result.non_publication_reason == CONFIDENCE_LABEL_NOT_APPROVED_REASON
+    assert prediction is not None
+    assert prediction.payload_json["non_publication_reason"] == (
+        CONFIDENCE_LABEL_NOT_APPROVED_REASON
+    )
 
 
 def test_deliver_candidate_allows_high_quality_and_passes_ids_to_delivery(tmp_path) -> None:
@@ -186,6 +213,7 @@ def _candidate(
     v3_model_prediction_id: int | None = None,
     ou_model_prediction_id: int | None = None,
     dedupe_key: str | None = None,
+    approved_labels: tuple[str, ...] | None = None,
     discord_payload_metadata: dict[str, Any] | None = None,
 ) -> CandidatePrediction:
     return CandidatePrediction(
@@ -206,6 +234,7 @@ def _candidate(
         v3_model_prediction_id=v3_model_prediction_id,
         ou_model_prediction_id=ou_model_prediction_id,
         dedupe_key=dedupe_key,
+        approved_labels=approved_labels,
         payload_metadata={"synthetic": True},
         discord_payload_metadata=discord_payload_metadata or {},
     )

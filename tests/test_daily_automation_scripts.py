@@ -247,7 +247,7 @@ def test_daily_ou_propagates_runner_failure_after_tee(
     )
 
 
-def test_daily_late_echo_defaults_to_v3_production_command(repo_root: Path) -> None:
+def test_daily_late_echo_defaults_to_v3_shadow_dry_run_command(repo_root: Path) -> None:
     result = subprocess.run(
         ["scripts/daily_late.sh"],
         cwd=repo_root,
@@ -269,11 +269,37 @@ def test_daily_late_echo_defaults_to_v3_production_command(repo_root: Path) -> N
     assert "predict-today-v3 --date 2026-05-02 --window late" in output
     assert "--model-dir data/models/v3" in output
     assert "--v2-model-dir data/models/v2-late" in output
-    assert "--production-mode" in output
+    assert "--production-mode" not in output
     assert "--json-output reports/daily/2026-05-02_late_v3_summary.json" in output
     assert "--no-refresh-data" in output
     assert "--dry-run" in output
     assert "Daily late summary written to reports/daily/2026-05-02_late_v3_summary.json" in output
+
+
+def test_daily_late_echo_live_v3_uses_production_mode(repo_root: Path) -> None:
+    result = subprocess.run(
+        ["scripts/daily_late.sh"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        env={
+            "FOOTBALL_PREDICTOR_BIN": "echo",
+            "PYTHON_BIN": sys.executable,
+            "DATE": "2026-05-02",
+            "WINDOW": "late",
+            "REFRESH_DATA": "false",
+            "SEND_DISCORD": "true",
+            "DRY_RUN": "false",
+            "PATH": "/usr/bin:/bin",
+        },
+        text=True,
+    )
+
+    output = result.stdout
+    assert "predict-today-v3 --date 2026-05-02 --window late" in output
+    assert "--send-discord" in output
+    assert "--production-mode" in output
+    assert "--dry-run" not in output
 
 
 def test_daily_late_echo_uses_v2_rollback_command(repo_root: Path) -> None:

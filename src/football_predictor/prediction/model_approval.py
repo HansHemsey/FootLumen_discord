@@ -10,8 +10,15 @@ from pathlib import Path
 from typing import Any
 
 from football_predictor.backtesting.confidence_calibration import (
+    THRESHOLD_VERSION,
     ModelFamily,
+    confidence_label_for_score,
     is_production_approved_artifact,
+)
+from football_predictor.prediction.publication_policy import (
+    PUBLISHABLE_CONFIDENCE_LABELS,
+    normalize_approved_labels,
+    normalize_confidence_label,
 )
 from football_predictor.utils.exceptions import PredictionError
 
@@ -37,6 +44,38 @@ class ProductionApprovalResult:
             "artifact_path": str(self.artifact_path) if self.artifact_path is not None else None,
             "approved": self.approved,
             "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True)
+class RuntimeConfidenceThresholds:
+    """Runtime view of calibrated confidence thresholds for prediction publication."""
+
+    model_family: ModelFamily
+    artifact_path: Path | None
+    status: str
+    threshold_version: str | None = None
+    thresholds: dict[str, float] | None = None
+    approved_labels: tuple[str, ...] = ()
+    production_approved: bool = False
+
+    @property
+    def usable_thresholds(self) -> bool:
+        return self.thresholds is not None
+
+    def label_for_score(self, score: float | int | None, fallback_label: str | None) -> str:
+        """Return the calibrated label when thresholds are available."""
+        if self.thresholds is None:
+            return normalize_confidence_label(fallback_label)
+        return confidence_label_for_score(score, self.thresholds)
+
+    def as_metadata(self) -> dict[str, Any]:
+        return {
+            "threshold_artifact_status": self.status,
+            "confidence_threshold_version": self.threshold_version,
+            "confidence_thresholds": self.thresholds,
+            "approved_labels": list(self.approved_labels),
+            "production_approved": self.production_approved,
         }
 
 
@@ -111,6 +150,71 @@ def check_production_model_approval(
     )
 
 
+def load_runtime_confidence_thresholds(
+    model_dir: Path | str | None,
+    *,
+    model_family: ModelFamily,
+) -> RuntimeConfidenceThresholds:
+    """Load calibrated thresholds for runtime labeling without mutating state."""
+    path = approval_artifact_path(model_dir)
+    if path is None:
+        return RuntimeConfidenceThresholds(
+            model_family=model_family,
+            artifact_path=None,
+            status="model_dir_missing",
+        )
+    if not path.exists():
+        return RuntimeConfidenceThresholds(
+            model_family=model_family,
+            artifact_path=path,
+            status="approval_artifact_missing",
+        )
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return RuntimeConfidenceThresholds(
+            model_family=model_family,
+            artifact_path=path,
+            status="approval_artifact_invalid_json",
+        )
+    except OSError:
+        return RuntimeConfidenceThresholds(
+            model_family=model_family,
+            artifact_path=path,
+            status="approval_artifact_unreadable",
+        )
+    if not isinstance(payload, Mapping):
+        return RuntimeConfidenceThresholds(
+            model_family=model_family,
+            artifact_path=path,
+            status="approval_artifact_invalid_shape",
+        )
+    if payload.get("threshold_version") != THRESHOLD_VERSION:
+        return RuntimeConfidenceThresholds(
+            model_family=model_family,
+            artifact_path=path,
+            status="approval_artifact_wrong_version",
+        )
+    if payload.get("model_family") != model_family:
+        return RuntimeConfidenceThresholds(
+            model_family=model_family,
+            artifact_path=path,
+            status="approval_artifact_wrong_model_family",
+        )
+    thresholds = _global_thresholds(payload)
+    approved = is_production_approved_artifact(payload, model_family=model_family)
+    approved_labels = _approved_labels(payload, approved=approved)
+    return RuntimeConfidenceThresholds(
+        model_family=model_family,
+        artifact_path=path,
+        status="approved" if approved else "approval_artifact_not_approved",
+        threshold_version=str(payload.get("threshold_version")),
+        thresholds=thresholds,
+        approved_labels=approved_labels,
+        production_approved=approved,
+    )
+
+
 def require_production_model_approval(
     model_dir: Path | str | None,
     *,
@@ -134,3 +238,29 @@ def require_production_model_approval(
         f"artifact={result.artifact_path or APPROVAL_ARTIFACT_FILENAME} "
         f"reason={result.reason}"
     )
+
+
+def _global_thresholds(payload: Mapping[str, Any]) -> dict[str, float] | None:
+    thresholds = payload.get("thresholds")
+    if not isinstance(thresholds, Mapping):
+        return None
+    global_thresholds = thresholds.get("global")
+    if not isinstance(global_thresholds, Mapping):
+        return None
+    try:
+        high = float(global_thresholds["high"])
+        very_high = float(global_thresholds["very_high"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if high >= very_high:
+        return None
+    return {"high": high, "very_high": very_high}
+
+
+def _approved_labels(payload: Mapping[str, Any], *, approved: bool) -> tuple[str, ...]:
+    if not approved:
+        return ()
+    labels = payload.get("approved_labels")
+    if labels is None:
+        return tuple(sorted(PUBLISHABLE_CONFIDENCE_LABELS))
+    return tuple(sorted(normalize_approved_labels(labels)))

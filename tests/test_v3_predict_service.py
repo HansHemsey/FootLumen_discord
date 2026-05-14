@@ -201,6 +201,7 @@ def test_predict_v3_cli_discord_dry_run_persists_v3_metadata(tmp_path: Path) -> 
         message = session.scalar(select(models.DiscordMessage))
     assert message is not None
     assert message.model_prediction_id is None
+    assert message.v3_model_prediction_id == payload["v3_model_prediction_id"]
     assert message.payload_json["model_family"] == "v3"
     assert message.payload_json["v3_model_prediction_id"] == payload["v3_model_prediction_id"]
     assert message.payload_json["publication_decision"]["allowed"] is False

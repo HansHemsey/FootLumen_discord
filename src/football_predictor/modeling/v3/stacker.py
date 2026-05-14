@@ -157,7 +157,11 @@ def train_v3_stacker_from_frame(
         }
     else:
         prepared = build_stacker_feature_frame(train)
-        estimator = LogisticRegression(max_iter=2000, random_state=resolved_config.random_state)
+        estimator = LogisticRegression(
+            max_iter=2000,
+            class_weight="balanced",
+            random_state=resolved_config.random_state,
+        )
         estimator.fit(prepared, y_train)
         training_decision = {
             "method": "logistic_regression",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import replace
 from datetime import date as date_type
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -77,8 +78,17 @@ from football_predictor.prediction import (
     run_daily_predictions,
     run_daily_predictions_v3,
 )
-from football_predictor.prediction.model_approval import require_production_model_approval
-from football_predictor.prediction.publication_flow import publication_metadata
+from football_predictor.prediction.model_approval import (
+    load_runtime_confidence_thresholds,
+    require_production_model_approval,
+)
+from football_predictor.prediction.publication_flow import (
+    CandidatePrediction,
+    StoredPredictionRef,
+    deliver_candidate_prediction,
+    evaluate_and_persist_candidate,
+    publication_metadata,
+)
 from football_predictor.prediction.publication_policy import (
     PublicationDecision,
     evaluate_publication,
@@ -1232,6 +1242,10 @@ def predict_v3(
         )
     if not shadow_mode:
         require_production_model_approval(model_dir, model_family="v3_1x2")
+    runtime_thresholds = load_runtime_confidence_thresholds(
+        model_dir,
+        model_family="v3_1x2",
+    )
     if send_discord or dry_run or print_only:
         reference, channels_config, webhooks_config = _load_discord_routing(
             settings,
@@ -1279,23 +1293,50 @@ def predict_v3(
                 refresh_data=False,
                 save_raw=save_raw,
             )
-        publication_decision = evaluate_publication(
-            prediction.confidence_label,
-            prediction.data_quality_json,
-            min_data_quality_score=settings.publication_min_data_quality_score,
+        raw_confidence_label = prediction.confidence_label
+        calibrated_confidence_label = runtime_thresholds.label_for_score(
+            prediction.confidence_score,
+            raw_confidence_label,
         )
-        publication_metadata = _publication_metadata(publication_decision)
-        _annotate_v3_publication(
-            session,
-            prediction.v3_model_prediction_id,
-            publication_metadata,
+        rendered_markdown: str | None = None
+
+        def render_markdown() -> str:
+            nonlocal rendered_markdown
+            if rendered_markdown is None:
+                rendered_markdown = format_prediction_v3_markdown(
+                    prediction,
+                    timezone_name=settings.app_timezone,
+                )
+            return rendered_markdown
+
+        candidate = CandidatePrediction(
+            model_family="v3",
+            fixture_id=fixture,
+            league_id=None,
+            season=None,
+            confidence_label=calibrated_confidence_label,
+            confidence_score=prediction.confidence_score,
+            data_quality_json=prediction.data_quality_json,
+            prediction_time=prediction.prediction_time,
+            stored_prediction=StoredPredictionRef("v3", prediction.v3_model_prediction_id),
+            render_markdown=render_markdown,
+            model_prediction_id=None,
+            v3_model_prediction_id=prediction.v3_model_prediction_id,
+            approved_labels=runtime_thresholds.approved_labels,
+            payload_metadata={
+                "model_family": "v3",
+                "v3_model_prediction_id": prediction.v3_model_prediction_id,
+                "v3_feature_snapshot_id": prediction.v3_feature_snapshot_id,
+                "shadow_mode": shadow_mode,
+                "raw_confidence_label": raw_confidence_label,
+                "calibrated_confidence_label": calibrated_confidence_label,
+                **runtime_thresholds.as_metadata(),
+            },
+            discord_payload_metadata={
+                "v3_model_prediction_id": prediction.v3_model_prediction_id,
+                "v3_feature_snapshot_id": prediction.v3_feature_snapshot_id,
+            },
         )
-        markdown = format_prediction_v3_markdown(
-            prediction,
-            timezone_name=settings.app_timezone,
-        )
-        if print_only and not json_output:
-            console.print(markdown)
         if send_discord or dry_run or print_only:
             fixture_row = session.get(Fixture, fixture)
             competition_key = _competition_key_from_fixture(reference, fixture_row, None)
@@ -1319,54 +1360,51 @@ def predict_v3(
                 legacy_webhook_url=settings.discord_webhook_url,
                 timeout=settings.discord_timeout_seconds,
             )
-            payload_metadata = {
-                **publication_metadata,
+            candidate = replace(
+                candidate,
+                competition_key=competition_key,
+                league_id=route_league_id,
+                season=route_season,
+            )
+            if print_only and not json_output:
+                console.print(render_markdown())
+            delivery_result = deliver_candidate_prediction(
+                session,
+                delivery,
+                candidate,
+                dry_run=dry_run,
+                print_only=print_only,
+                force=force,
+                min_data_quality_score=settings.publication_min_data_quality_score,
+            )
+            send_result = delivery_result.send_result
+            discord_payload = {
+                "status": delivery_result.status,
+                "discord_message_id": delivery_result.discord_message_id,
+                "webhook_hash": send_result.webhook_hash if send_result is not None else None,
+                "channel": (
+                    send_result.route.channel_key if send_result is not None else "predictions"
+                ),
+                "reason": delivery_result.non_publication_reason,
+                "publication_decision": publication_decision_payload(
+                    delivery_result.decision
+                ),
                 "model_family": "v3",
                 "v3_model_prediction_id": prediction.v3_model_prediction_id,
                 "v3_feature_snapshot_id": prediction.v3_feature_snapshot_id,
-                "shadow_mode": shadow_mode,
             }
-            if send_discord and not dry_run and not print_only and not publication_decision.allowed:
-                discord_payload = {
-                    "status": "confidence_skipped",
-                    "discord_message_id": None,
-                    "webhook_hash": None,
-                    "channel": "predictions",
-                    "reason": publication_decision.reason,
-                    "publication_decision": publication_decision_payload(publication_decision),
-                }
-            else:
-                result = delivery.send_markdown(
-                    markdown,
-                    competition_key=competition_key,
-                    league_id=route_league_id,
-                    season=route_season,
-                    channel_key="predictions",
-                    message_type="prediction",
-                    fixture_id=fixture,
-                    model_prediction_id=None,
-                    dry_run=dry_run,
-                    print_only=print_only,
-                    force=force,
-                    payload_metadata=payload_metadata,
-                )
-                discord_payload = {
-                    "status": result.status,
-                    "discord_message_id": result.discord_message_id,
-                    "webhook_hash": result.webhook_hash,
-                    "channel": result.route.channel_key,
-                    "publication_decision": publication_decision_payload(publication_decision),
-                }
-            if discord_payload.get("status") != "confidence_skipped":
-                discord_payload.update(
-                    {
-                        "model_family": "v3",
-                        "v3_model_prediction_id": prediction.v3_model_prediction_id,
-                        "v3_feature_snapshot_id": prediction.v3_feature_snapshot_id,
-                    }
-                )
+        else:
+            evaluate_and_persist_candidate(
+                session,
+                candidate,
+                min_data_quality_score=settings.publication_min_data_quality_score,
+            )
 
     payload = prediction.to_dict()
+    payload["raw_confidence_label"] = raw_confidence_label
+    payload["calibrated_confidence_label"] = calibrated_confidence_label
+    payload["threshold_artifact_status"] = runtime_thresholds.status
+    payload["approved_labels"] = list(runtime_thresholds.approved_labels)
     if discord_payload is not None:
         payload["discord"] = discord_payload
     if json_output:

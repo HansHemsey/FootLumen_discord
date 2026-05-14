@@ -1,4 +1,5 @@
 from football_predictor.prediction.publication_policy import (
+    CONFIDENCE_LABEL_NOT_APPROVED_REASON,
     CONFIDENCE_SKIP_REASON,
     DATA_QUALITY_BLOCKER_REASON,
     DATA_QUALITY_MISSING_REASON,
@@ -48,6 +49,18 @@ def test_evaluate_publication_rejects_non_publishable_confidence_even_with_quali
     assert decision.allowed is False
     assert decision.reason == CONFIDENCE_SKIP_REASON
     assert decision.data_quality_score == 90
+
+
+def test_evaluate_publication_rejects_publishable_label_not_approved() -> None:
+    decision = evaluate_publication(
+        "High",
+        {"overall_data_quality_score": 90},
+        approved_labels=("Very High",),
+    )
+
+    assert decision.allowed is False
+    assert decision.reason == CONFIDENCE_LABEL_NOT_APPROVED_REASON
+    assert decision.confidence_label == "High"
 
 
 def test_evaluate_publication_rejects_missing_quality_score() -> None:

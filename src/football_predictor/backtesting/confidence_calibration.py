@@ -31,8 +31,8 @@ class ConfidenceThresholdConfig:
     min_data_quality_score: float = DEFAULT_MIN_DATA_QUALITY_SCORE
     high_candidates: tuple[float, ...] = (45, 50, 55, 60, 65, 70, 75, 80)
     very_high_candidates: tuple[float, ...] = (70, 75, 80, 85, 90, 95)
-    min_label_rows: int = 1
-    min_published_rows: int = 1
+    min_label_rows: int = 30
+    min_published_rows: int = 30
     min_league_validation_rows: int = 200
     min_league_publishable_rows: int = 40
     max_ou_test_roi_drawdown: float = -0.05
@@ -71,6 +71,7 @@ def build_confidence_threshold_artifact(
             "test": test_report,
         },
         "approval_checks": approval["checks"],
+        "approved_labels": approval["approved_labels"],
         "production_approved": approval["approved"],
         "config": asdict(config),
     }
@@ -106,8 +107,11 @@ def evaluate_thresholds(
         "labels": {label: _metrics(rows) for label, rows in label_groups.items()},
         "eligible_high": _metrics(eligible_high),
         "eligible_very_high": _metrics(eligible_very_high),
+        "baseline_eligible_high": _baseline_metrics(eligible_high),
+        "baseline_eligible_very_high": _baseline_metrics(eligible_very_high),
         "published_only": _metrics(published_only),
         "baseline_on_published": _baseline_metrics(published_only),
+        "publication_funnel": _publication_funnel(labeled),
         "by_league": _group_metrics(labeled, group_key="league_id"),
         "by_season": _group_metrics(labeled, group_key="season"),
         "by_data_quality_bin": _group_metrics(labeled, group_key="data_quality_bin"),
@@ -119,9 +123,18 @@ def apply_publication_policy_records(
     thresholds: Mapping[str, float],
     *,
     config: ConfidenceThresholdConfig,
+    approved_labels: Any | None = None,
 ) -> list[JsonDict]:
     """Return records enriched with calibrated label and production publication policy."""
-    return [_record_with_decision(record, thresholds, config) for record in records]
+    return [
+        _record_with_decision(
+            record,
+            thresholds,
+            config,
+            approved_labels=approved_labels,
+        )
+        for record in records
+    ]
 
 
 def confidence_label_for_score(
@@ -165,6 +178,13 @@ def is_production_approved_artifact(
     very_high = _optional_float(global_thresholds.get("very_high"))
     if high is None or very_high is None or high >= very_high:
         return False
+    approved_labels = payload.get("approved_labels")
+    if approved_labels is not None:
+        if not isinstance(approved_labels, list | tuple | set):
+            return False
+        normalized = {str(label) for label in approved_labels}
+        if not normalized & set(PUBLISHABLE_LABELS):
+            return False
     return payload.get("production_approved") is True
 
 
@@ -189,6 +209,7 @@ def _select_thresholds(
             loss_delta = _delta(published.get("log_loss"), baseline.get("log_loss"))
             sort_key = (
                 checks["passed"],
+                len(checks.get("approved_labels", [])),
                 _none_safe(accuracy_delta),
                 -_none_safe(loss_delta),
                 int(published.get("row_count") or 0),
@@ -221,24 +242,85 @@ def _validation_candidate_checks(
     high = report["eligible_high"]
     very_high = report["eligible_very_high"]
     baseline = report["baseline_on_published"]
+    label_checks = _label_approval_checks(report, model_family=model_family, config=config)
+    approved_labels = [
+        label for label, payload in label_checks.items() if payload.get("passed")
+    ]
     has_volume = (
         int(published.get("row_count") or 0) >= config.min_published_rows
-        and int(high.get("row_count") or 0) >= config.min_label_rows
-        and int(very_high.get("row_count") or 0) >= config.min_label_rows
+        and bool(approved_labels)
     )
-    monotonic = _monotonic_labels(high, very_high, model_family=model_family)
+    monotonic = (
+        _monotonic_labels(high, very_high, model_family=model_family)
+        if {"High", "Very High"}.issubset(set(approved_labels))
+        else True
+    )
     if model_family == "v3_1x2":
         beats_baseline = _beats_accuracy_or_loss(published, baseline)
     else:
         beats_baseline = _beats_loss_or_brier(published, baseline)
         beats_baseline = beats_baseline and _metric_at_least(published.get("roi"), 0.0)
-    passed = has_volume and monotonic and beats_baseline
+    passed = has_volume and monotonic and bool(approved_labels)
     return {
         "passed": passed,
         "has_volume": has_volume,
         "monotonic_labels": monotonic,
         "beats_baseline": beats_baseline,
+        "approved_labels": approved_labels,
+        "label_checks": label_checks,
     }
+
+
+def _label_approval_checks(
+    report: JsonDict,
+    *,
+    model_family: ModelFamily,
+    config: ConfidenceThresholdConfig,
+) -> JsonDict:
+    output: JsonDict = {}
+    for label, metrics_key, baseline_key in (
+        ("High", "eligible_high", "baseline_eligible_high"),
+        ("Very High", "eligible_very_high", "baseline_eligible_very_high"),
+    ):
+        metrics = report.get(metrics_key, {})
+        baseline = report.get(baseline_key, {})
+        row_count = int(metrics.get("row_count") or 0)
+        volume_passed = row_count >= config.min_label_rows
+        if model_family == "v3_1x2":
+            performance_passed = _beats_accuracy_or_loss(metrics, baseline)
+        else:
+            performance_passed = _beats_loss_or_brier(metrics, baseline)
+            performance_passed = performance_passed and _metric_at_least(
+                metrics.get("roi"),
+                0.0,
+            )
+        output[label] = {
+            "passed": volume_passed and performance_passed,
+            "row_count": row_count,
+            "min_rows": config.min_label_rows,
+            "volume_passed": volume_passed,
+            "performance_passed": performance_passed,
+            "accuracy": metrics.get("accuracy"),
+            "baseline_accuracy": baseline.get("accuracy"),
+            "log_loss": metrics.get("log_loss"),
+            "baseline_log_loss": baseline.get("log_loss"),
+            "brier_score": metrics.get("brier_score"),
+            "baseline_brier_score": baseline.get("brier_score"),
+            "roi": metrics.get("roi"),
+        }
+    return output
+
+
+def _approved_label_row_count(report: JsonDict, labels: list[str]) -> int:
+    key_by_label = {
+        "High": "eligible_high",
+        "Very High": "eligible_very_high",
+    }
+    return sum(
+        int(report.get(key_by_label[label], {}).get("row_count") or 0)
+        for label in labels
+        if label in key_by_label
+    )
 
 
 def _approval_checks(
@@ -249,6 +331,18 @@ def _approval_checks(
     config: ConfidenceThresholdConfig,
 ) -> JsonDict:
     validation_checks = _validation_candidate_checks(validation_report, model_family, config)
+    validation_labels = set(validation_checks.get("approved_labels") or [])
+    test_label_checks = _label_approval_checks(
+        test_report,
+        model_family=model_family,
+        config=config,
+    )
+    test_labels = {
+        label for label, payload in test_label_checks.items() if payload.get("passed")
+    }
+    approved_labels = [
+        label for label in PUBLISHABLE_LABELS if label in validation_labels and label in test_labels
+    ]
     published = test_report["published_only"]
     internal = test_report["internal_all"]
     baseline = test_report["baseline_on_published"]
@@ -257,21 +351,32 @@ def _approval_checks(
     checks: JsonDict = {
         "validation_passed": validation_checks,
         "published_volume": {
-            "passed": int(published.get("row_count") or 0) >= config.min_published_rows,
+            "passed": (
+                _approved_label_row_count(test_report, approved_labels)
+                >= config.min_published_rows
+            ),
             "row_count": published.get("row_count"),
+            "approved_label_rows": _approved_label_row_count(test_report, approved_labels),
             "min_rows": config.min_published_rows,
         },
         "label_volume": {
-            "passed": (
-                int(high.get("row_count") or 0) >= config.min_label_rows
-                and int(very_high.get("row_count") or 0) >= config.min_label_rows
-            ),
+            "passed": bool(approved_labels),
             "high_rows": high.get("row_count"),
             "very_high_rows": very_high.get("row_count"),
             "min_rows": config.min_label_rows,
+            "approved_labels": approved_labels,
+        },
+        "label_approval": {
+            "passed": bool(approved_labels),
+            "approved_labels": approved_labels,
+            "labels": test_label_checks,
         },
         "monotonic_labels": {
-            "passed": _monotonic_labels(high, very_high, model_family=model_family),
+            "passed": (
+                _monotonic_labels(high, very_high, model_family=model_family)
+                if {"High", "Very High"}.issubset(set(approved_labels))
+                else True
+            ),
         },
     }
     if model_family == "v3_1x2":
@@ -340,11 +445,26 @@ def _approval_checks(
                 },
             }
         )
-    approved = all(
-        _passed(payload)
-        for payload in checks.values()
+    required_check_names = {
+        "validation_passed",
+        "published_volume",
+        "label_volume",
+        "label_approval",
+        "monotonic_labels",
+    }
+    if model_family == "v3_1x2":
+        required_check_names.add("league_no_regression")
+    else:
+        required_check_names.update(
+            {
+                "validation_roi_non_negative",
+                "test_roi_not_catastrophic",
+            }
+        )
+    approved = bool(approved_labels) and all(
+        _passed(checks[name]) for name in required_check_names if name in checks
     )
-    return {"approved": approved, "checks": checks}
+    return {"approved": approved, "approved_labels": approved_labels, "checks": checks}
 
 
 def _league_overrides(
@@ -403,6 +523,8 @@ def _record_with_decision(
     record: JsonDict,
     thresholds: Mapping[str, float],
     config: ConfidenceThresholdConfig,
+    *,
+    approved_labels: Any | None = None,
 ) -> JsonDict:
     score = _optional_float(record.get("confidence_score"))
     label = confidence_label_for_score(score, thresholds)
@@ -413,6 +535,7 @@ def _record_with_decision(
         label,
         data_quality,
         min_data_quality_score=config.min_data_quality_score,
+        approved_labels=approved_labels,
     )
     enriched = dict(record)
     enriched["calibrated_label"] = label
@@ -458,6 +581,51 @@ def _metrics(records: list[JsonDict]) -> JsonDict:
         "avg_p_max": _mean_numeric(record.get("p_max") for record in records),
         "avg_gap": _mean_numeric(record.get("gap") for record in records),
         "avg_edge_abs": _mean_numeric(record.get("edge_abs") for record in records),
+    }
+
+
+def _publication_funnel(records: list[JsonDict]) -> JsonDict:
+    labels: JsonDict = {}
+    reasons: JsonDict = {}
+    reasons_by_league: JsonDict = {}
+    pre_policy_publishable = 0
+    published = 0
+    blocked_data_quality = 0
+    blocked_blockers = 0
+    for record in records:
+        label = str(record.get("calibrated_label") or "Uncertain")
+        labels[label] = labels.get(label, 0) + 1
+        if label in PUBLISHABLE_LABELS:
+            pre_policy_publishable += 1
+        if record.get("publication_allowed"):
+            published += 1
+            continue
+        decision = record.get("publication_decision")
+        reason = None
+        if isinstance(decision, Mapping):
+            reason = decision.get("reason")
+        reason = str(reason or "unknown")
+        reasons[reason] = reasons.get(reason, 0) + 1
+        league_id = (
+            str(record.get("league_id"))
+            if record.get("league_id") is not None
+            else "unknown"
+        )
+        league_reasons = reasons_by_league.setdefault(league_id, {})
+        league_reasons[reason] = league_reasons.get(reason, 0) + 1
+        if reason in {"data_quality_score_missing", "data_quality_below_publish_threshold"}:
+            blocked_data_quality += 1
+        if reason == "data_quality_blocker_present":
+            blocked_blockers += 1
+    return {
+        "total_rows": len(records),
+        "labels_before_data_quality": labels,
+        "pre_policy_publishable_rows": pre_policy_publishable,
+        "blocked_by_data_quality": blocked_data_quality,
+        "blocked_by_blockers": blocked_blockers,
+        "published_rows": published,
+        "blocked_reasons": reasons,
+        "blocked_reasons_by_league": reasons_by_league,
     }
 
 

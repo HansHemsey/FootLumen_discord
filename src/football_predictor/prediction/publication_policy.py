@@ -13,6 +13,7 @@ CONFIDENCE_SKIP_REASON: Final[str] = "confidence_below_publish_threshold"
 DATA_QUALITY_MISSING_REASON: Final[str] = "data_quality_score_missing"
 DATA_QUALITY_SKIP_REASON: Final[str] = "data_quality_below_publish_threshold"
 DATA_QUALITY_BLOCKER_REASON: Final[str] = "data_quality_blocker_present"
+CONFIDENCE_LABEL_NOT_APPROVED_REASON: Final[str] = "confidence_label_not_approved"
 DATA_QUALITY_SCORE_KEYS: Final[tuple[str, ...]] = (
     "publication_data_quality_score",
     "overall_data_quality_score",
@@ -62,6 +63,26 @@ def is_publishable_confidence(label: str | None) -> bool:
     return normalize_confidence_label(label) in PUBLISHABLE_CONFIDENCE_LABELS
 
 
+def normalize_approved_labels(labels: Any | None) -> frozenset[str]:
+    """Return approved publishable labels, defaulting to all public labels."""
+    if labels is None:
+        return PUBLISHABLE_CONFIDENCE_LABELS
+    if isinstance(labels, str):
+        candidates = [labels]
+    else:
+        try:
+            candidates = list(labels)
+        except TypeError:
+            candidates = []
+    normalized = {
+        normalize_confidence_label(str(label))
+        for label in candidates
+        if str(label).strip()
+    }
+    approved = normalized & set(PUBLISHABLE_CONFIDENCE_LABELS)
+    return frozenset(approved)
+
+
 def extract_data_quality_score(payload: Mapping[str, Any] | None) -> float | None:
     """Return the first usable public quality score from a prediction payload."""
     if payload is None:
@@ -94,15 +115,26 @@ def evaluate_publication(
     data_quality: Mapping[str, Any] | None,
     *,
     min_data_quality_score: float = DEFAULT_MIN_DATA_QUALITY_SCORE,
+    approved_labels: Any | None = None,
 ) -> PublicationDecision:
     """Evaluate the common public Discord publication gate."""
     normalized_label = normalize_confidence_label(confidence_label)
+    resolved_approved_labels = normalize_approved_labels(approved_labels)
     score = extract_data_quality_score(data_quality)
     blockers = extract_publication_blockers(data_quality)
     if normalized_label not in PUBLISHABLE_CONFIDENCE_LABELS:
         return PublicationDecision(
             allowed=False,
             reason=CONFIDENCE_SKIP_REASON,
+            confidence_label=normalized_label,
+            data_quality_score=score,
+            min_data_quality_score=float(min_data_quality_score),
+            data_quality_blockers=blockers,
+        )
+    if normalized_label not in resolved_approved_labels:
+        return PublicationDecision(
+            allowed=False,
+            reason=CONFIDENCE_LABEL_NOT_APPROVED_REASON,
             confidence_label=normalized_label,
             data_quality_score=score,
             min_data_quality_score=float(min_data_quality_score),

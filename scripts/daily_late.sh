@@ -54,7 +54,6 @@ if [ "$PREDICTION_ENGINE" = "v3" ]; then
     --config "$CONFIG_PATH" \
     --model-dir "$MODEL_DIR" \
     --v2-model-dir "$V2_MODEL_DIR" \
-    --production-mode \
     --json \
     --json-output "$SUMMARY_PATH"
 elif [ "$PREDICTION_ENGINE" = "v2" ]; then
@@ -82,6 +81,10 @@ fi
 
 if bool_flag "$SEND_DISCORD"; then
   set -- "$@" --send-discord
+fi
+
+if bool_flag "$SEND_DISCORD" && ! bool_flag "$DRY_RUN" && ! bool_flag "$PRINT_ONLY"; then
+  set -- "$@" --production-mode
 fi
 
 if bool_flag "$DRY_RUN"; then

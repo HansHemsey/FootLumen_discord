@@ -56,6 +56,7 @@ class CandidatePrediction:
     v3_model_prediction_id: int | None = None
     ou_model_prediction_id: int | None = None
     dedupe_key: str | None = None
+    approved_labels: tuple[str, ...] | None = None
     payload_metadata: JsonDict = field(default_factory=dict)
     discord_payload_metadata: JsonDict = field(default_factory=dict)
 
@@ -95,6 +96,7 @@ def evaluate_candidate(
         candidate.confidence_label,
         candidate.data_quality_json,
         min_data_quality_score=min_data_quality_score,
+        approved_labels=candidate.approved_labels,
     )
 
 

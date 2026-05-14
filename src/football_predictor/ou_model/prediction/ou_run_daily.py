@@ -243,7 +243,7 @@ def run_daily_ou_predictions(
             prediction: OUPredictionOutput = resolved_service.predict_fixture_ou(
                 fixture.fixture_id,
                 prediction_time,
-                save_to_db=not dry_run,
+                save_to_db=True,
             )
             payload_metadata = {
                 "model_family": "ou25",

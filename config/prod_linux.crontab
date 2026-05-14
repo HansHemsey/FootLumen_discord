@@ -1,0 +1,32 @@
+SHELL=/bin/bash
+PATH=/opt/football-predictor/app/.venv/bin:/usr/local/bin:/usr/bin:/bin
+APP_TIMEZONE=Europe/Paris
+PROJECT=/opt/football-predictor/app
+LOGDIR=/opt/football-predictor/app/logs/cron
+MPLCONFIGDIR=/opt/football-predictor/app/.cache/matplotlib
+LOKY_MAX_CPU_COUNT=2
+
+# Fixtures semaine J+7, chaque lundi matin.
+15 5 * * 1 cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_weekly_ingestion.lock env SAVE_RAW=true DRY_RUN=false scripts/weekly_ingestion.sh >> "$LOGDIR/weekly_ingestion.log" 2>&1
+
+# Routine matin : init, refs, standings, odds du jour, classements, calendriers,
+# matchs du jour et score hebdo. Publication Discord réelle.
+30 6 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_daily_morning.lock env REFRESH_DATA=true SEND_DISCORD=true DRY_RUN=false PUBLISH_DISCORD=true SAVE_RAW=true scripts/daily_morning.sh >> "$LOGDIR/daily_morning.log" 2>&1
+
+# Analyses H-6 : toutes les 15 minutes de 06h à 23h.
+*/15 6-23 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_match_analyses.lock env MODEL_DIR=data/models/v2-late REFRESH_DATA=false SEND_DISCORD=true DRY_RUN=false scripts/publish_match_analyses.sh >> "$LOGDIR/match_analyses.log" 2>&1
+
+# V3 1X2 M-30 : shadow par défaut tant que data/models/v3/confidence_thresholds.json
+# n'est pas approuvé. Pour publier après approbation, passer SEND_DISCORD=true DRY_RUN=false.
+1,11,21,31,41,51 7-23 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_daily_late.lock env PREDICTION_ENGINE=v3 WINDOW=late REFRESH_DATA=true SEND_DISCORD=false DRY_RUN=true SAVE_RAW=true scripts/daily_late.sh >> "$LOGDIR/daily_late_v3.log" 2>&1
+
+# O/U 2.5 M-30 : shadow par défaut tant que data/models/ou-v1/confidence_thresholds.json
+# n'est pas approuvé. Pour publier après approbation, passer SEND_DISCORD=true DRY_RUN=false.
+3,13,23,33,43,53 7-23 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_daily_ou.lock env WINDOW=late REFRESH_DATA=true SEND_DISCORD=false DRY_RUN=true SAVE_RAW=true scripts/daily_ou.sh >> "$LOGDIR/daily_ou.log" 2>&1
+
+# Résultats post-match : refresh scores + publication.
+20,50 12-23 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_match_results.lock env REFRESH_DATA=true SEND_DISCORD=true DRY_RUN=false SAVE_RAW=true scripts/publish_match_results.sh >> "$LOGDIR/match_results.log" 2>&1
+
+# Score public hebdo : mises à jour après les résultats.
+10 8,12,18 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_weekly_score.lock env DRY_RUN=false scripts/publish_weekly_score.sh >> "$LOGDIR/weekly_score.log" 2>&1
+55 23 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_weekly_score.lock env DRY_RUN=false scripts/publish_weekly_score.sh >> "$LOGDIR/weekly_score.log" 2>&1

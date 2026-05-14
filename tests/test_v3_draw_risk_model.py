@@ -88,6 +88,10 @@ def test_train_draw_risk_from_dataset_writes_artifacts_and_metrics(tmp_path) -> 
     assert metrics["validation"]["brier_score"] is not None
     assert "roc_auc" in metrics["validation"]
     assert "pr_auc" in metrics["validation"]
+    assert "precision_draw" in metrics["validation"]
+    assert "recall_draw" in metrics["validation"]
+    assert "actual_draw_rate" in metrics["validation"]
+    assert "predicted_draw_rate" in metrics["validation"]
     assert metrics["validation"]["baselines"]["prior_draw_rate"] is not None
 
 

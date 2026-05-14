@@ -723,8 +723,12 @@ Le JSON expose au minimum :
 
 - `internal_all` : toutes les prédictions évaluées ;
 - `published_only` : sous-ensemble autorisé par la même policy que la production ;
+- `publication_funnel` : volumes totaux, labels `High` / `Very High` avant gate qualité,
+  lignes bloquées par data quality, blockers, raisons normalisées et synthèse par ligue ;
 - métriques groupées par modèle, ligue, saison, label de confiance et tranche de data
   quality ;
+- `confidence_thresholds.approved_labels` et `data_quality_contract` quand le rapport sert à
+  approuver un artefact production ;
 - comparaisons V3 vs V2, odds-only, API prediction et Poisson ;
 - comparaison O/U vs baseline marché ;
 - `leakage_checks` avec cutoff M-30, snapshots futurs ignorés, fixtures exclues et raisons
@@ -827,9 +831,21 @@ Chaque prédiction évaluée pour publication conserve dans `payload_json` :
 Raisons normalisées :
 
 - `confidence_below_publish_threshold` ;
+- `confidence_label_not_approved` ;
 - `data_quality_score_missing` ;
 - `data_quality_below_publish_threshold` ;
 - `data_quality_blocker_present`.
+
+Pour V3/O-U en production, le label utilisé par la policy peut être recalculé depuis
+`confidence_score` et l'artefact `confidence_thresholds.json`. Les payloads V3 conservent
+alors aussi :
+
+- `raw_confidence_label` ;
+- `calibrated_confidence_label` ;
+- `confidence_threshold_version` ;
+- `confidence_thresholds` ;
+- `approved_labels` ;
+- `threshold_artifact_status`.
 
 ## Prédiction Fixture Unique
 

@@ -162,6 +162,7 @@ def run_v3_backtest(
         periods={name: asdict(period) for name, period in periods.items()},
     )
     confidence_thresholds["baseline_model"] = baseline_name
+    _apply_data_quality_contract(confidence_thresholds, frame)
     published_only_report = _published_only_report(
         splits.test,
         test_predictions,
@@ -339,6 +340,8 @@ def _metrics_for_predictions(
     metrics["avg_confidence_gap"] = _average_confidence_gap(covered_predictions)
     draw_metrics = _draw_metrics(covered_true, covered_predictions, config=config)
     metrics["draw_metrics"] = draw_metrics
+    metrics["draw_behavior"] = _draw_behavior(covered_true, covered_predictions, draw_metrics)
+    metrics["log_loss_by_class"] = _log_loss_by_class(covered_true, covered_predictions)
     metrics["draw_ece"] = draw_metrics.get("ece")
     metrics["no_draw_metrics"] = _no_draw_metrics(covered_true, covered_predictions)
     return metrics
@@ -407,6 +410,49 @@ def _draw_metrics(
         ),
         "ece": _binary_ece(y_binary, p_draw, n_bins=config.calibration_bins),
     }
+
+
+def _draw_behavior(
+    y_true: list[str],
+    predictions: list[ProbabilityTriple],
+    draw_metrics: JsonDict,
+) -> JsonDict:
+    predicted_draw_count = sum(
+        1 for prediction in predictions if prediction.predicted_result() == "DRAW"
+    )
+    actual_draw_count = sum(1 for label in y_true if label == "DRAW")
+    row_count = len(y_true)
+    return {
+        "row_count": row_count,
+        "actual_draw_count": actual_draw_count,
+        "predicted_draw_count": predicted_draw_count,
+        "actual_draw_rate": actual_draw_count / row_count if row_count else None,
+        "predicted_draw_rate": predicted_draw_count / row_count if row_count else None,
+        "draw_precision": draw_metrics.get("precision"),
+        "draw_recall": draw_metrics.get("recall"),
+        "draw_f1": draw_metrics.get("f1"),
+        "draw_roc_auc": draw_metrics.get("roc_auc"),
+        "draw_pr_auc": draw_metrics.get("pr_auc"),
+        "draw_ece": draw_metrics.get("ece"),
+    }
+
+
+def _log_loss_by_class(
+    y_true: list[str],
+    predictions: list[ProbabilityTriple],
+) -> JsonDict:
+    output: JsonDict = {}
+    for label in CLASSES:
+        losses = [
+            _row_log_loss(actual, prediction)
+            for actual, prediction in zip(y_true, predictions, strict=True)
+            if actual == label
+        ]
+        output[label] = {
+            "row_count": len(losses),
+            "log_loss": _mean_numeric(losses),
+        }
+    return output
 
 
 def _no_draw_metrics(y_true: list[str], predictions: list[ProbabilityTriple]) -> JsonDict:
@@ -595,6 +641,59 @@ def _calibration_baseline_name(
     if any(prediction is not None for prediction in v2_predictions):
         return V2_MODEL_NAME
     return "odds_only"
+
+
+def _apply_data_quality_contract(artifact: JsonDict, frame: pd.DataFrame) -> None:
+    contract = _data_quality_contract(frame)
+    artifact["data_quality_contract"] = contract
+    checks = artifact.setdefault("approval_checks", {})
+    checks["data_quality_contract"] = {
+        "passed": contract["approval_eligible"],
+        **contract,
+    }
+    if not contract["approval_eligible"]:
+        artifact["production_approved"] = False
+        artifact["approved_labels"] = []
+
+
+def _data_quality_contract(frame: pd.DataFrame) -> JsonDict:
+    row_count = int(len(frame))
+    has_publication_score = "publication_data_quality_score" in frame.columns
+    has_version = "data_quality_version" in frame.columns
+    dq_v2_rows = 0
+    publication_score_rows = 0
+    if has_version:
+        versions = frame["data_quality_version"].dropna().astype(str)
+        dq_v2_rows = int((versions == "dq_v2").sum())
+    if has_publication_score:
+        publication_score_rows = int(
+            pd.to_numeric(
+                frame["publication_data_quality_score"],
+                errors="coerce",
+            ).notna().sum()
+        )
+    approval_eligible = (
+        row_count > 0
+        and has_publication_score
+        and has_version
+        and publication_score_rows == row_count
+        and dq_v2_rows == row_count
+    )
+    missing: list[str] = []
+    if not has_publication_score:
+        missing.append("publication_data_quality_score")
+    if not has_version:
+        missing.append("data_quality_version")
+    return {
+        "approval_eligible": approval_eligible,
+        "row_count": row_count,
+        "has_publication_data_quality_score": has_publication_score,
+        "publication_data_quality_score_rows": publication_score_rows,
+        "has_data_quality_version": has_version,
+        "dq_v2_rows": dq_v2_rows,
+        "missing_columns": missing,
+        "required_version": "dq_v2",
+    }
 
 
 def _confidence_records(
@@ -801,6 +900,15 @@ def _optional_float(value: Any) -> float | None:
     return resolved
 
 
+def _mean_numeric(values: Any) -> float | None:
+    items = [
+        value
+        for value in (_optional_float(item) for item in values)
+        if value is not None
+    ]
+    return float(sum(items) / len(items)) if items else None
+
+
 def _published_only_report(
     frame: pd.DataFrame,
     predictions_by_model: dict[str, list[ProbabilityTriple | None]],
@@ -811,10 +919,12 @@ def _published_only_report(
     thresholds = confidence_thresholds.get("thresholds", {}).get("global", {})
     if not isinstance(thresholds, dict):
         thresholds = {}
+    baseline_name = str(confidence_thresholds.get("baseline_model") or "odds_only")
+    approved_labels = tuple(confidence_thresholds.get("approved_labels") or ())
     primary_records = _confidence_records(
         frame,
         predictions_by_model.get(V3_PRIMARY_MODEL_NAME, []),
-        predictions_by_model.get("odds_only", []),
+        predictions_by_model.get(baseline_name, []),
     )
     policy_records = apply_publication_policy_records(
         primary_records,
@@ -823,6 +933,7 @@ def _published_only_report(
             model_family="v3_1x2",
             min_data_quality_score=config.min_data_quality_score,
         ),
+        approved_labels=approved_labels,
     )
     internal_indexes = [
         int(record["position"]) for record in policy_records if "position" in record
@@ -838,6 +949,9 @@ def _published_only_report(
             "threshold_version": confidence_thresholds.get("threshold_version"),
             "min_data_quality_score": confidence_thresholds.get("min_data_quality_score"),
             "thresholds": thresholds,
+            "baseline_model": baseline_name,
+            "production_approved": confidence_thresholds.get("production_approved"),
+            "approved_labels": list(approved_labels),
         },
         "scopes": {
             "internal_all": _model_metrics_for_indexes(

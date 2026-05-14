@@ -308,6 +308,31 @@ def test_daily_ou_shadow_mode_allows_internal_run_without_approval(tmp_path: Pat
     assert service.calls == [-501]
 
 
+def test_daily_ou_dry_run_persists_internal_prediction(tmp_path: Path) -> None:
+    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'ou_daily_dry_run.db'}")
+    session_factory = create_session_factory(engine)
+    with session_scope(session_factory) as session:
+        _seed_ou_fixtures(session)
+        service = FakeOUService(session)
+        summary = run_daily_ou_predictions(
+            TARGET_DATE,
+            session=session,
+            ou_service=service,  # type: ignore[arg-type]
+            send_discord=False,
+            dry_run=True,
+            model_dir=tmp_path / "missing-ou-approval",
+            window="late",
+            now=NOW,
+        )
+        predictions = list(session.execute(select(models.OUModelPrediction)).scalars())
+
+    assert summary.success == 1
+    assert summary.results[0].status == "dry_run"
+    assert summary.results[0].ou_model_prediction_id is not None
+    assert len(predictions) == 1
+    assert predictions[0].payload_json["publication_decision"]["allowed"] is True
+
+
 def test_daily_ou_medium_confidence_is_not_published(tmp_path: Path) -> None:
     calls = 0
 

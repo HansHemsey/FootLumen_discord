@@ -266,6 +266,64 @@ def test_run_daily_no_refresh_does_not_call_api_and_dry_run_does_not_send(
     assert calls == 0
 
 
+def test_run_daily_v2_rollback_late_publication_regression(tmp_path: Path) -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(204)
+
+    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'daily_v2_rollback_late.db'}")
+    session_factory = create_session_factory(engine)
+    fake_service = FakePredictionService(None)  # type: ignore[arg-type]
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler)) as http_client,
+        session_scope(session_factory) as session,
+    ):
+        fake_service.session = session
+        session.merge(
+            models.Team(team_id=-10, name="Synthetic Home", payload_json={"synthetic": True})
+        )
+        session.merge(
+            models.Team(team_id=-20, name="Synthetic Away", payload_json={"synthetic": True})
+        )
+        _fixture(session, -21, datetime(2026, 5, 2, 10, 30, tzinfo=UTC), -100, 2026, "NS")
+        summary = run_daily_predictions(
+            TARGET_DATE,
+            league_ids=(-100,),
+            window="late",
+            send_discord=True,
+            refresh_data=False,
+            dry_run=False,
+            session=session,
+            reference=ApiFootballReference({"competitions": [], "references": {}}),
+            discord_delivery=DiscordDeliveryService(
+                session,
+                legacy_webhook_url="https://example.invalid/daily",
+                http_client=http_client,
+            ),
+            prediction_service_factory=lambda _session: fake_service,
+            now=NOW,
+        )
+        message = session.scalar(select(models.DiscordMessage))
+        prediction = session.scalar(select(models.ModelPrediction))
+
+    assert summary.mode == "v2"
+    assert summary.total == 1
+    assert summary.sent == 1
+    assert calls == 1
+    assert fake_service.calls == [(-21, NOW)]
+    assert prediction is not None
+    assert message is not None
+    assert message.status == "sent"
+    assert message.model_prediction_id == prediction.id
+    assert message.v3_model_prediction_id is None
+    assert message.ou_model_prediction_id is None
+    assert message.payload_json["daily_window"] == "late"
+    assert message.payload_json["publication_decision"]["allowed"] is True
+
+
 def test_run_daily_filters_fixtures_by_window(tmp_path: Path) -> None:
     engine = create_db_and_tables(f"sqlite:///{tmp_path / 'daily_windows.db'}")
     session_factory = create_session_factory(engine)

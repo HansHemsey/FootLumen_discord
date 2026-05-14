@@ -18,6 +18,7 @@ from football_predictor.discord.exceptions import DiscordWebhookError
 from football_predictor.discord.formatter import format_prediction_markdown
 from football_predictor.discord.router import DiscordRoute, resolve_discord_route
 from football_predictor.discord.webhook import DiscordWebhookClient
+from football_predictor.prediction.publication_flow import publication_metadata
 from football_predictor.prediction.publication_policy import (
     DEFAULT_MIN_DATA_QUALITY_SCORE,
     PublicationDecision,
@@ -560,13 +561,7 @@ def send_prediction_to_discord(
 
 
 def _publication_metadata(decision: PublicationDecision) -> dict[str, Any]:
-    payload = {
-        "publication_decision": publication_decision_payload(decision),
-        "publication_policy_version": decision.policy_version,
-    }
-    if decision.reason is not None:
-        payload["non_publication_reason"] = decision.reason
-    return payload
+    return publication_metadata(decision)
 
 
 def _annotate_prediction_publication(

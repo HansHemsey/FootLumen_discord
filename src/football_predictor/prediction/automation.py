@@ -18,11 +18,11 @@ from football_predictor.db import models
 from football_predictor.discord.formatter import format_prediction_markdown
 from football_predictor.discord.service import DiscordDeliveryService, DiscordSendResult
 from football_predictor.ingestion.fixtures import FixtureIngestionService
+from football_predictor.prediction.publication_flow import publication_metadata
 from football_predictor.prediction.publication_policy import (
     DEFAULT_MIN_DATA_QUALITY_SCORE,
     PublicationDecision,
     evaluate_publication,
-    publication_decision_payload,
 )
 from football_predictor.prediction.service import (
     ApiFootballPayloadClient,
@@ -533,13 +533,7 @@ def _skip_reason(
 
 
 def _publication_metadata(decision: PublicationDecision) -> JsonDict:
-    payload = {
-        "publication_decision": publication_decision_payload(decision),
-        "publication_policy_version": decision.policy_version,
-    }
-    if decision.reason is not None:
-        payload["non_publication_reason"] = decision.reason
-    return payload
+    return publication_metadata(decision)
 
 
 def _window_matches(delta: timedelta, window: PredictionWindow) -> bool:

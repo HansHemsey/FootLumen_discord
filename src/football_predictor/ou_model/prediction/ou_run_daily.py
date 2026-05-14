@@ -25,12 +25,14 @@ from football_predictor.ou_model.prediction.ou_service import (
     OUPredictionService,
 )
 from football_predictor.prediction.model_approval import require_production_model_approval
+from football_predictor.prediction.publication_flow import (
+    CandidatePrediction,
+    StoredPredictionRef,
+    deliver_candidate_prediction,
+    evaluate_and_persist_candidate,
+)
 from football_predictor.prediction.publication_policy import (
     DEFAULT_MIN_DATA_QUALITY_SCORE,
-    PublicationDecision,
-    evaluate_publication,
-    normalize_confidence_label,
-    publication_decision_payload,
 )
 from football_predictor.prediction.scheduler import (
     DailyPredictionWindow,
@@ -252,83 +254,91 @@ def run_daily_ou_predictions(
                 "prediction_time": prediction_time.isoformat(),
                 "shadow_mode": shadow_mode,
             }
-            publication_decision = evaluate_publication(
-                prediction.confidence_label,
-                prediction.data_quality_json,
-                min_data_quality_score=min_data_quality_score,
-            )
-            payload_metadata.update(_publication_metadata(publication_decision))
-            _annotate_ou_model_prediction(
-                session,
-                prediction.ou_model_prediction_id,
-                payload_metadata,
+            rendered_markdown: str | None = None
+
+            def render_markdown(
+                prediction: OUPredictionOutput = prediction,
+                fixture: models.Fixture = fixture,
+            ) -> str:
+                nonlocal rendered_markdown
+                if rendered_markdown is None:
+                    rendered_markdown = format_ou_prediction_markdown(
+                        prediction,
+                        fixture,
+                        timezone_name=timezone_name,
+                        edge_display_threshold=edge_threshold,
+                    )
+                return rendered_markdown
+
+            candidate = CandidatePrediction(
+                model_family="ou25",
+                fixture_id=fixture.fixture_id,
+                league_id=fixture.league_id,
+                season=fixture.season,
+                confidence_label=prediction.confidence_label,
+                confidence_score=prediction.confidence_score,
+                data_quality_json=prediction.data_quality_json,
+                prediction_time=prediction_time,
+                stored_prediction=StoredPredictionRef("ou25", prediction.ou_model_prediction_id),
+                render_markdown=render_markdown,
+                message_type="ou_prediction",
+                model_prediction_id=None,
+                ou_model_prediction_id=prediction.ou_model_prediction_id,
+                dedupe_key=_ou_dedupe_key(
+                    fixture.fixture_id,
+                    resolved_window,
+                    prediction.model_version,
+                ),
+                payload_metadata=payload_metadata,
             )
 
             status = "predicted"
             if send_discord and discord_delivery is not None:
-                if not dry_run and not print_only and not publication_decision.allowed:
-                    logger.info(
-                        "O/U Discord publication skipped: fixture_id=%s "
-                        "confidence_label=%s confidence_score=%s data_quality_score=%s "
-                        "min_data_quality_score=%s reason=%s expected=%s window=%s",
-                        fixture.fixture_id,
-                        normalize_confidence_label(prediction.confidence_label),
-                        prediction.confidence_score,
-                        publication_decision.data_quality_score,
-                        publication_decision.min_data_quality_score,
-                        publication_decision.reason,
-                        "High|Very High",
-                        resolved_window.value,
+                try:
+                    if print_only:
+                        print(render_markdown())
+                    delivery_result = deliver_candidate_prediction(
+                        session,
+                        discord_delivery,
+                        candidate,
+                        dry_run=dry_run,
+                        print_only=print_only,
+                        min_data_quality_score=min_data_quality_score,
                     )
-                    status = "confidence_skipped"
-                    reason = publication_decision.reason
-                else:
-                    try:
-                        md = format_ou_prediction_markdown(
-                            prediction,
-                            fixture,
-                            timezone_name=timezone_name,
-                            edge_display_threshold=edge_threshold,
-                        )
-                        if print_only:
-                            print(md)
-                        send_result = discord_delivery.send_markdown(
-                            md,
-                            league_id=fixture.league_id,
-                            season=fixture.season,
-                            channel_key="predictions",
-                            message_type="ou_prediction",
-                            fixture_id=fixture.fixture_id,
-                            model_prediction_id=None,
-                            ou_model_prediction_id=prediction.ou_model_prediction_id,
-                            dedupe_key=_ou_dedupe_key(
-                                fixture.fixture_id,
-                                resolved_window,
-                                prediction.model_version,
-                            ),
-                            dry_run=dry_run,
-                            print_only=print_only,
-                            payload_metadata=payload_metadata,
-                        )
-                        discord_sent = send_result.status == "sent"
-                        discord_message_id = send_result.discord_message_id
-                        status = send_result.status
-                    except Exception as exc:
-                        logger.warning(
-                            "Discord send failed for fixture %d: %s",
-                            fixture.fixture_id, exc,
-                        )
+                    discord_sent = delivery_result.discord_sent
+                    discord_message_id = delivery_result.discord_message_id
+                    status = delivery_result.status
+                    reason = (
+                        delivery_result.non_publication_reason
+                        if delivery_result.status == "confidence_skipped"
+                        else None
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Discord send failed for fixture %d: %s",
+                        fixture.fixture_id, exc,
+                    )
             elif print_only:
-                md = format_ou_prediction_markdown(
-                    prediction,
-                    fixture,
-                    timezone_name=timezone_name,
-                    edge_display_threshold=edge_threshold,
+                evaluate_and_persist_candidate(
+                    session,
+                    candidate,
+                    min_data_quality_score=min_data_quality_score,
                 )
-                print(md)
+                print(render_markdown())
                 status = "print_only"
             elif dry_run:
+                evaluate_and_persist_candidate(
+                    session,
+                    candidate,
+                    min_data_quality_score=min_data_quality_score,
+                )
                 status = "dry_run"
+            else:
+                evaluate_and_persist_candidate(
+                    session,
+                    candidate,
+                    min_data_quality_score=min_data_quality_score,
+                )
 
             results.append(OUDailyFixtureResult(
                 fixture_id=fixture.fixture_id,
@@ -365,35 +375,9 @@ def run_daily_ou_predictions(
     )
 
 
-def _publication_metadata(decision: PublicationDecision) -> JsonDict:
-    payload = {
-        "publication_decision": publication_decision_payload(decision),
-        "publication_policy_version": decision.policy_version,
-    }
-    if decision.reason is not None:
-        payload["non_publication_reason"] = decision.reason
-    return payload
-
-
 def _ou_dedupe_key(
     fixture_id: int,
     window: DailyPredictionWindow,
     model_version: str,
 ) -> str:
     return f"ou25:{fixture_id}:{window.value}:{model_version}:ou_prediction"
-
-
-def _annotate_ou_model_prediction(
-    session: Session,
-    ou_model_prediction_id: int | None,
-    metadata: JsonDict,
-) -> None:
-    if ou_model_prediction_id is None:
-        return
-    prediction = session.get(models.OUModelPrediction, ou_model_prediction_id)
-    if prediction is None:
-        return
-    payload = dict(prediction.payload_json) if isinstance(prediction.payload_json, dict) else {}
-    payload.update(metadata)
-    prediction.payload_json = payload
-    session.flush()

@@ -77,6 +77,7 @@ from football_predictor.prediction import (
     run_daily_predictions_v3,
 )
 from football_predictor.prediction.model_approval import require_production_model_approval
+from football_predictor.prediction.publication_flow import publication_metadata
 from football_predictor.prediction.publication_policy import (
     PublicationDecision,
     evaluate_publication,
@@ -1053,13 +1054,7 @@ def _print_prediction_v3_summary(prediction: Any, timezone_name: str) -> None:
 
 
 def _publication_metadata(decision: PublicationDecision) -> dict[str, Any]:
-    payload = {
-        "publication_decision": publication_decision_payload(decision),
-        "publication_policy_version": decision.policy_version,
-    }
-    if decision.reason is not None:
-        payload["non_publication_reason"] = decision.reason
-    return payload
+    return publication_metadata(decision)
 
 
 def _annotate_model_publication(

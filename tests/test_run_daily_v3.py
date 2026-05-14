@@ -161,6 +161,10 @@ def test_run_daily_v3_shadow_logs_v3_without_discord_or_v2_prediction(tmp_path: 
     assert len(v3_predictions) == 2
     assert all(row.payload_json["shadow_mode"] is True for row in v3_predictions)
     assert all(row.payload_json["daily_window"] == "now" for row in v3_predictions)
+    assert all(
+        row.payload_json["publication_decision"]["allowed"] is True
+        for row in v3_predictions
+    )
 
 
 def test_run_daily_v3_production_refuses_without_approved_artifact(tmp_path: Path) -> None:
@@ -300,6 +304,65 @@ def test_run_daily_v3_production_sends_real_discord_and_v3_metadata(
     assert all(message.payload_json["daily_window"] == "now" for message in messages)
     assert all(message.payload_json["v3_model_prediction_id"] is not None for message in messages)
     assert all(row.payload_json["shadow_mode"] is False for row in v3_predictions)
+
+
+def test_run_daily_v3_late_publication_regression(tmp_path: Path) -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(204)
+
+    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'daily_v3_late_regression.db'}")
+    session_factory = create_session_factory(engine)
+    fake_service = FakePredictionV3Service(None)  # type: ignore[arg-type]
+    model_dir = _write_approved_artifact(tmp_path / "approved-v3-late", "v3_1x2")
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler)) as http_client,
+        session_scope(session_factory) as session,
+    ):
+        fake_service.session = session
+        _seed_teams(session)
+        _seed_fixture(session, -310, datetime(2026, 5, 2, 10, 30, tzinfo=UTC), -100, 2026)
+        summary = run_daily_predictions_v3(
+            TARGET_DATE,
+            league_ids=(-100,),
+            window="late",
+            send_discord=True,
+            refresh_data=False,
+            dry_run=False,
+            shadow_mode=False,
+            session=session,
+            reference=ApiFootballReference({"competitions": [], "references": {}}),
+            model_dir=model_dir,
+            discord_delivery=DiscordDeliveryService(
+                session,
+                legacy_webhook_url="https://example.invalid/v3-daily",
+                http_client=http_client,
+            ),
+            prediction_service_factory=lambda _session: fake_service,
+            now=NOW,
+        )
+        message = session.scalar(select(models.DiscordMessage))
+        prediction = session.scalar(select(models.V3ModelPrediction))
+
+    assert summary.mode == "v3"
+    assert summary.shadow_mode is False
+    assert summary.total == 1
+    assert summary.sent == 1
+    assert calls == 1
+    assert fake_service.calls == [(-310, NOW)]
+    assert prediction is not None
+    assert message is not None
+    assert message.status == "sent"
+    assert message.model_prediction_id is None
+    assert message.v3_model_prediction_id == prediction.id
+    assert message.payload_json["model_family"] == "v3"
+    assert message.payload_json["daily_window"] == "late"
+    assert message.payload_json["shadow_mode"] is False
+    assert message.payload_json["publication_decision"]["allowed"] is True
 
 
 def test_run_daily_v3_low_confidence_stays_internal_without_discord(

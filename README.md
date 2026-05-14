@@ -480,6 +480,15 @@ football-predictor backtest-production-like \
   --v2-model-dir data/models/v2-late \
   --output-dir reports/production_like \
   --format both
+football-predictor backtest-season-confidence \
+  --league-id 39 \
+  --league-id 61 \
+  --season 2025 \
+  --train-season 2022 \
+  --train-season 2023 \
+  --train-season 2024 \
+  --output-dir reports/season_confidence/2025_sample \
+  --format both
 football-predictor predict \
   --fixture <fixture_id> \
   --model-dir data/models/v2-late \
@@ -749,6 +758,12 @@ Le backtest `backtest-production-like` est le contrôle offline de référence :
 des fixtures terminées, fixe `prediction_time = fixture.date - 30 minutes`, ignore toute
 donnée postérieure, applique la même policy de publication que la production et produit des
 métriques `internal_all` et `published_only` pour V3 et O/U.
+
+La commande `backtest-season-confidence` est un rapport holdout saison : elle entraîne V3 et
+O/U sur des saisons antérieures, évalue uniquement les matchs terminés de la saison cible à
+M-30, puis sort les scores High/Very High par championnat. Le rapport distingue les lignes
+réellement publiables selon la policy production des lignes `confidence-only` qui ignorent
+le gate data quality pour auditer la valeur brute du label de confiance.
 
 La commande `predict-today` automatise les prédictions d'une date sans serveur web. Elle
 peut être appelée par cron ou par une tâche planifiée. Les fenêtres filtrent les fixtures

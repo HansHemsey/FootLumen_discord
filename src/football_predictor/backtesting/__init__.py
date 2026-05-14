@@ -27,6 +27,11 @@ from football_predictor.backtesting.production_like import (
     run_production_like_backtest,
 )
 from football_predictor.backtesting.reports import export_markdown_report, export_metrics_json
+from football_predictor.backtesting.season_confidence import (
+    SeasonConfidenceBacktestConfig,
+    SeasonConfidenceBacktestResult,
+    run_season_confidence_backtest,
+)
 from football_predictor.backtesting.v3_dataset_builder import (
     build_v3_draw_risk_dataset,
     build_v3_no_draw_winner_dataset,
@@ -46,6 +51,8 @@ __all__ = [
     "V3BacktestResult",
     "ProductionLikeBacktestConfig",
     "ProductionLikeBacktestResult",
+    "SeasonConfidenceBacktestConfig",
+    "SeasonConfidenceBacktestResult",
     "compare_models",
     "build_training_dataset",
     "build_training_dataset_v1",
@@ -61,6 +68,7 @@ __all__ = [
     "production_like_prediction_time",
     "run_backtest",
     "run_production_like_backtest",
+    "run_season_confidence_backtest",
     "run_v3_backtest",
     "temporal_split",
 ]

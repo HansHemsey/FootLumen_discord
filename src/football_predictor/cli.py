@@ -14,6 +14,7 @@ import typer
 from dotenv import dotenv_values
 from rich.console import Console
 from rich.table import Table
+from sqlalchemy import select
 
 from football_predictor import __version__
 from football_predictor.api.api_football_client import ApiFootballClient
@@ -3443,6 +3444,129 @@ def backtest_production_like(
             "leakage_checks": result.payload.get("leakage_checks", {}),
         }
     )
+
+
+@app.command("backtest-season-confidence")
+def backtest_season_confidence(
+    league_id: list[int] = typer.Option(
+        [],
+        "--league-id",
+        help="League id to include. Repeat for multiple leagues.",
+    ),
+    season: int = typer.Option(
+        ...,
+        "--season",
+        help="Finished season to evaluate.",
+    ),
+    train_season: list[int] = typer.Option(
+        [],
+        "--train-season",
+        help=(
+            "Prior season used for training. Repeat for multiple seasons. "
+            "Defaults to all local seasons before --season for the selected leagues."
+        ),
+    ),
+    output_dir: Path = typer.Option(
+        Path("reports/season_confidence"),
+        "--output-dir",
+        "--report",
+        help="Directory where season confidence reports are written.",
+    ),
+    v2_model_dir: Path | None = typer.Option(
+        None,
+        "--v2-model-dir",
+        help="Optional V2 model directory used for V3 comparison.",
+    ),
+    output_format: str = typer.Option(
+        "both",
+        "--format",
+        help="Report format: json, markdown, or both.",
+    ),
+    ou_fit_boosting: bool = typer.Option(
+        True,
+        "--ou-fit-boosting/--ou-fast",
+        help="Fit optional O/U boosting experts when available.",
+    ),
+    reuse_datasets: bool = typer.Option(
+        False,
+        "--reuse-datasets/--rebuild-datasets",
+        help="Reuse already generated local M-30 datasets in --output-dir.",
+    ),
+) -> None:
+    """Evaluate High/Very High V3 and O/U predictions on a finished season holdout."""
+    normalized_format = output_format.casefold()
+    if normalized_format not in {"json", "markdown", "both"}:
+        raise typer.BadParameter("--format must be json, markdown, or both")
+    if not league_id:
+        raise typer.BadParameter("--league-id is required")
+
+    from football_predictor.backtesting.season_confidence import (
+        SeasonConfidenceBacktestConfig,
+        run_season_confidence_backtest,
+    )
+
+    settings = get_settings()
+    _, session_factory = _engine_and_session(settings)
+    with session_scope(session_factory) as session:
+        resolved_train_seasons = train_season or _available_train_seasons(
+            session,
+            league_ids=league_id,
+            test_season=season,
+        )
+        result = run_season_confidence_backtest(
+            session,
+            config=SeasonConfidenceBacktestConfig(
+                league_ids=league_id,
+                test_season=season,
+                train_seasons=resolved_train_seasons,
+                output_dir=output_dir,
+                v2_model_dir=v2_model_dir,
+                ou_bet_id=settings.market_ou25_bet_id,
+                prediction_offset_minutes=30,
+                min_data_quality_score=settings.publication_min_data_quality_score,
+                report_format=cast(Any, normalized_format),
+                ou_fit_boosting=ou_fit_boosting,
+                reuse_existing_datasets=reuse_datasets,
+            ),
+        )
+    console.print(
+        {
+            "mode": result.payload.get("mode"),
+            "test_season": result.payload.get("config", {}).get("test_season"),
+            "train_seasons": result.payload.get("config", {}).get("train_seasons"),
+            "datasets": {name: str(path) for name, path in result.dataset_paths.items()},
+            "reports": {name: str(path) for name, path in result.report_paths.items()},
+            "v3_summary": result.payload.get("reports", {})
+            .get("v3_1x2", {})
+            .get("summary", {}),
+            "ou_summary": result.payload.get("reports", {})
+            .get("ou25", {})
+            .get("summary", {}),
+        }
+    )
+
+
+def _available_train_seasons(
+    session: Any,
+    *,
+    league_ids: list[int],
+    test_season: int,
+) -> list[int]:
+    seasons = session.scalars(
+        select(models.Fixture.season)
+        .where(
+            models.Fixture.league_id.in_(league_ids),
+            models.Fixture.season < test_season,
+        )
+        .distinct()
+        .order_by(models.Fixture.season.asc())
+    ).all()
+    resolved = [int(season) for season in seasons]
+    if not resolved:
+        raise typer.BadParameter(
+            "No local train seasons found before --season; pass --train-season explicitly."
+        )
+    return resolved
 
 
 @app.command()

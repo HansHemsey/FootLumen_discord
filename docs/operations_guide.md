@@ -89,7 +89,9 @@ Passe `SEND_DISCORD=true` seulement apres validation des webhooks et des routes.
 
 Depuis Sprint 10, `scripts/daily_late.sh` utilise la V3 par defaut pour le channel
 `predictions`. Les appels manuels de `predict-today-v3` restent en shadow mode par defaut ;
-ajouter `--production-mode` pour autoriser le chemin production.
+ajouter `--production-mode` pour autoriser le chemin production. Le répertoire modèle doit
+contenir `confidence_thresholds.json` avec `production_approved=true`, sinon le runner
+refuse le mode production avant prédiction.
 
 ```bash
 football-predictor predict-today-v3 \
@@ -113,9 +115,12 @@ Rollback V2 :
 PREDICTION_ENGINE=v2 SEND_DISCORD=true DRY_RUN=false scripts/daily_late.sh
 ```
 
-La V3 est activee en production malgre un backtest non valide. Surveiller les premiers
-runs reels, la calibration des probabilites et la couverture odds/API/lineups issue du
-refresh live M-30. Pour verifier le rendu Discord V3 sans publier :
+Le fichier d'approbation est généré par les backtests de calibration. Pour promouvoir un
+nouveau modèle, copier l'artefact approuvé dans le répertoire modèle actif, par exemple
+`data/models/v3/confidence_thresholds.json` ou
+`data/models/ou-v1/confidence_thresholds.json`. Si l'artefact manque, est invalide ou n'est
+pas approuvé, le log indique `Production mode refused` avec le modèle, le chemin attendu et
+la raison, sans afficher de secret. Pour verifier le rendu Discord V3 sans publier :
 
 Règle de publication publique : V2, V3 1X2 et O/U 2.5 ne publient dans Discord que les
 pronostics `High` ou `Very High` avec une qualité de données suffisante
@@ -166,6 +171,7 @@ CONFIG=config/competitions.yaml
 PREDICTION_ENGINE=v3
 MODEL_DIR=data/models/v3
 V2_MODEL_DIR=data/models/v2-late
+OU_MODEL_DIR=data/models/ou-v1
 SEND_DISCORD=false
 DRY_RUN=true
 FORCE=false

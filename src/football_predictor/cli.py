@@ -76,6 +76,7 @@ from football_predictor.prediction import (
     run_daily_predictions,
     run_daily_predictions_v3,
 )
+from football_predictor.prediction.model_approval import require_production_model_approval
 from football_predictor.prediction.publication_policy import (
     PublicationDecision,
     evaluate_publication,
@@ -1198,7 +1199,15 @@ def predict_v3(
     send_discord: bool = typer.Option(
         False,
         "--send-discord",
-        help="Send the V3 markdown prediction to Discord.",
+        help=(
+            "Send the V3 markdown prediction to Discord. Requires --production-mode "
+            "for live sends."
+        ),
+    ),
+    shadow_mode: bool = typer.Option(
+        True,
+        "--shadow-mode/--production-mode",
+        help="Shadow mode blocks live Discord sends; production mode requires approved backtest.",
     ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Persist Discord route without sending."),
     print_only: bool = typer.Option(
@@ -1220,6 +1229,13 @@ def predict_v3(
 ) -> None:
     """Predict a single fixture with V3 and optional Discord delivery."""
     settings = get_settings()
+    if shadow_mode and send_discord and not dry_run and not print_only:
+        raise typer.BadParameter(
+            "V3 shadow mode blocks live Discord sends; use --production-mode or "
+            "--dry-run/--print-only"
+        )
+    if not shadow_mode:
+        require_production_model_approval(model_dir, model_family="v3_1x2")
     if send_discord or dry_run or print_only:
         reference, channels_config, webhooks_config = _load_discord_routing(
             settings,
@@ -1312,6 +1328,7 @@ def predict_v3(
                 "model_family": "v3",
                 "v3_model_prediction_id": prediction.v3_model_prediction_id,
                 "v3_feature_snapshot_id": prediction.v3_feature_snapshot_id,
+                "shadow_mode": shadow_mode,
             }
             if send_discord and not dry_run and not print_only and not publication_decision.allowed:
                 discord_payload = {
@@ -3563,6 +3580,11 @@ def ou_run_daily(
     print_only: bool = typer.Option(False, "--print-only"),
     limit: int | None = typer.Option(None, "--limit"),
     edge_threshold: float = typer.Option(0.02, "--edge-threshold"),
+    shadow_mode: bool = typer.Option(
+        True,
+        "--shadow-mode/--production-mode",
+        help="Shadow mode blocks live Discord sends; production mode requires approved backtest.",
+    ),
 ) -> None:
     """Run O/U 2.5 predictions for all fixtures on a given date."""
     from football_predictor.ou_model.prediction.ou_run_daily import run_daily_ou_predictions
@@ -3570,6 +3592,12 @@ def ou_run_daily(
     settings = get_settings()
     engine, session_factory = _engine_and_session(settings)
     target_date = date_type.fromisoformat(date_str) if date_str else None
+    resolved_model_dir = model_dir or settings.ou_model_dir
+    if shadow_mode and send_discord and not dry_run and not print_only:
+        raise typer.BadParameter(
+            "O/U shadow mode blocks live Discord sends; use --production-mode or "
+            "--dry-run/--print-only"
+        )
 
     discord_delivery = None
     if send_discord:
@@ -3588,7 +3616,7 @@ def ou_run_daily(
             discord_delivery=discord_delivery,
             league_ids=league_id or None,
             season=season,
-            model_dir=model_dir,
+            model_dir=resolved_model_dir,
             ou_bet_id=settings.market_ou25_bet_id,
             send_discord=send_discord,
             dry_run=dry_run,
@@ -3597,6 +3625,7 @@ def ou_run_daily(
             limit=limit,
             edge_threshold=edge_threshold,
             min_data_quality_score=settings.publication_min_data_quality_score,
+            shadow_mode=shadow_mode,
         )
 
     console.print(json.dumps(summary.as_dict(), indent=2, default=str))

@@ -526,9 +526,12 @@ valeurs vérifiées dans les référentiels JSON ou dans la base locale.
 L'exemple `league 39` correspond à la Premier League 2025 et existe dans
 `docs/api_football_reference.json`; il reste à adapter selon les compétitions suivies.
 `predict-today-v3` reste en shadow mode par défaut pour les appels manuels. Ajouter
-`--production-mode` autorise le chemin production V3 ; un envoi Discord réel exige aussi
-`--send-discord` et l'absence de `--dry-run` / `--print-only`. Utiliser
-`--dry-run --print-only` pour vérifier le rendu Discord V3 sans publication.
+`--production-mode` autorise le chemin production V3 seulement si
+`data/models/v3/confidence_thresholds.json` est un artefact backtest approuvé
+(`production_approved=true`) ; un envoi Discord réel exige aussi `--send-discord` et
+l'absence de `--dry-run` / `--print-only`. Utiliser `--dry-run --print-only` pour vérifier
+le rendu Discord V3 sans publication. Le pipeline O/U applique la même règle avec
+`data/models/ou-v1/confidence_thresholds.json` et `ou run-daily --production-mode`.
 
 Les commandes `ingest-fixtures --league/--season`, `ingest-fixtures --date` et
 `ingest-standings --league/--season` utilisent les docs locaux par défaut. Les variantes

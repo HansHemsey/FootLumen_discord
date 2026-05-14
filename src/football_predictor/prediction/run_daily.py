@@ -26,6 +26,7 @@ from football_predictor.discord.v3_formatter import format_prediction_v3_markdow
 from football_predictor.ingestion.fixtures import FixtureIngestionService
 from football_predictor.ingestion.ingest_match_details import FixtureDetailsIngestionService
 from football_predictor.ingestion.ingest_odds import OddsIngestionService
+from football_predictor.prediction.model_approval import require_production_model_approval
 from football_predictor.prediction.publication_policy import (
     DEFAULT_MIN_DATA_QUALITY_SCORE,
     PublicationDecision,
@@ -504,14 +505,16 @@ def run_daily_predictions_v3(
     resolved_leagues = tuple(league_ids or _enabled_competition_leagues(competitions))
     run_key = daily_run_key(target_date.isoformat(), resolved_window, resolved_leagues, season)
 
-    if refresh_data and api_client is None:
-        raise PredictionError("refresh_data=True requires an API-Football client")
-    if send_discord and discord_delivery is None:
-        raise PredictionError("send_discord=True requires a DiscordDeliveryService")
     if shadow_mode and send_discord and not dry_run and not print_only:
         raise PredictionError(
             "V3 shadow mode does not allow live Discord sends; use dry_run or print_only"
         )
+    if not shadow_mode:
+        require_production_model_approval(model_dir, model_family="v3_1x2")
+    if refresh_data and api_client is None:
+        raise PredictionError("refresh_data=True requires an API-Football client")
+    if send_discord and discord_delivery is None:
+        raise PredictionError("send_discord=True requires a DiscordDeliveryService")
 
     if refresh_data and api_client is not None:
         _refresh_fixtures_for_date(

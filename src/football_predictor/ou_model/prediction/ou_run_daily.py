@@ -24,6 +24,7 @@ from football_predictor.ou_model.prediction.ou_service import (
     OUPredictionOutput,
     OUPredictionService,
 )
+from football_predictor.prediction.model_approval import require_production_model_approval
 from football_predictor.prediction.publication_policy import (
     DEFAULT_MIN_DATA_QUALITY_SCORE,
     PublicationDecision,
@@ -87,6 +88,7 @@ class OUDailyFixtureResult:
 class OUDailyPredictionSummary:
     target_date: date
     window: DailyPredictionWindow
+    shadow_mode: bool = True
     results: list[OUDailyFixtureResult] = field(default_factory=list)
 
     @property
@@ -117,6 +119,7 @@ class OUDailyPredictionSummary:
         return {
             "target_date": self.target_date.isoformat(),
             "window": self.window.value,
+            "shadow_mode": self.shadow_mode,
             "total": self.total,
             "success": self.success,
             "failed": self.failed,
@@ -176,6 +179,7 @@ def run_daily_ou_predictions(
     limit: int | None = None,
     edge_threshold: float = 0.02,
     min_data_quality_score: float = DEFAULT_MIN_DATA_QUALITY_SCORE,
+    shadow_mode: bool = True,
 ) -> OUDailyPredictionSummary:
     """Predict O/U 2.5 for all eligible fixtures on a date."""
     resolved_window = parse_daily_window(window)
@@ -183,6 +187,13 @@ def run_daily_ou_predictions(
     local_tz = ZoneInfo(timezone_name)
     target_date = fixture_date or current_time.astimezone(local_tz).date()
 
+    if shadow_mode and send_discord and not dry_run and not print_only:
+        raise ValueError(
+            "O/U shadow mode does not allow live Discord sends; use --production-mode "
+            "or --dry-run/--print-only"
+        )
+    if not shadow_mode:
+        require_production_model_approval(model_dir, model_family="ou25")
     if send_discord and discord_delivery is None:
         raise ValueError("send_discord=True requires a DiscordDeliveryService")
 
@@ -239,6 +250,7 @@ def run_daily_ou_predictions(
                 "automation_window": resolved_window.value,
                 "automation_date": target_date.isoformat(),
                 "prediction_time": prediction_time.isoformat(),
+                "shadow_mode": shadow_mode,
             }
             publication_decision = evaluate_publication(
                 prediction.confidence_label,
@@ -342,6 +354,7 @@ def run_daily_ou_predictions(
     return OUDailyPredictionSummary(
         target_date=target_date,
         window=resolved_window,
+        shadow_mode=shadow_mode,
         results=results,
     )
 

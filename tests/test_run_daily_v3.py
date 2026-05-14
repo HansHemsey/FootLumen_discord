@@ -163,6 +163,32 @@ def test_run_daily_v3_shadow_logs_v3_without_discord_or_v2_prediction(tmp_path: 
     assert all(row.payload_json["daily_window"] == "now" for row in v3_predictions)
 
 
+def test_run_daily_v3_production_refuses_without_approved_artifact(tmp_path: Path) -> None:
+    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'daily_v3_unapproved.db'}")
+    session_factory = create_session_factory(engine)
+    fake_service = FakePredictionV3Service(None)  # type: ignore[arg-type]
+
+    with session_scope(session_factory) as session:
+        fake_service.session = session
+        _seed_fixtures(session, league_id=-100, season=2026)
+        with pytest.raises(PredictionError, match="approved backtest artifact"):
+            run_daily_predictions_v3(
+                TARGET_DATE,
+                league_ids=(-100,),
+                window=DailyPredictionWindow.NOW,
+                send_discord=False,
+                refresh_data=False,
+                shadow_mode=False,
+                session=session,
+                reference=ApiFootballReference({"competitions": [], "references": {}}),
+                prediction_service_factory=lambda _session: fake_service,
+                model_dir=tmp_path / "missing-v3-approval",
+                now=NOW,
+            )
+
+    assert fake_service.calls == []
+
+
 def test_run_daily_v3_dry_run_persists_discord_metadata_without_http_send(
     tmp_path: Path,
 ) -> None:
@@ -227,6 +253,7 @@ def test_run_daily_v3_production_sends_real_discord_and_v3_metadata(
     engine = create_db_and_tables(f"sqlite:///{tmp_path / 'daily_v3_production.db'}")
     session_factory = create_session_factory(engine)
     fake_service = FakePredictionV3Service(None)  # type: ignore[arg-type]
+    model_dir = _write_approved_artifact(tmp_path / "approved-v3", "v3_1x2")
 
     with (
         httpx.Client(transport=httpx.MockTransport(handler)) as http_client,
@@ -244,6 +271,7 @@ def test_run_daily_v3_production_sends_real_discord_and_v3_metadata(
             shadow_mode=False,
             session=session,
             reference=ApiFootballReference({"competitions": [], "references": {}}),
+            model_dir=model_dir,
             discord_delivery=DiscordDeliveryService(
                 session,
                 legacy_webhook_url="https://example.invalid/v3-daily",
@@ -286,6 +314,7 @@ def test_run_daily_v3_low_confidence_stays_internal_without_discord(
 
     engine = create_db_and_tables(f"sqlite:///{tmp_path / 'daily_v3_low_confidence.db'}")
     session_factory = create_session_factory(engine)
+    model_dir = _write_approved_artifact(tmp_path / "approved-v3", "v3_1x2")
     fake_service = FakePredictionV3Service(
         None,
         confidence_label="Low",
@@ -308,6 +337,7 @@ def test_run_daily_v3_low_confidence_stays_internal_without_discord(
             shadow_mode=False,
             session=session,
             reference=ApiFootballReference({"competitions": [], "references": {}}),
+            model_dir=model_dir,
             discord_delivery=DiscordDeliveryService(
                 session,
                 legacy_webhook_url="https://example.invalid/v3-daily",
@@ -343,6 +373,7 @@ def test_run_daily_v3_high_confidence_low_quality_stays_internal_without_discord
 
     engine = create_db_and_tables(f"sqlite:///{tmp_path / 'daily_v3_low_quality.db'}")
     session_factory = create_session_factory(engine)
+    model_dir = _write_approved_artifact(tmp_path / "approved-v3", "v3_1x2")
     fake_service = FakePredictionV3Service(
         None,
         confidence_label="High",
@@ -366,6 +397,7 @@ def test_run_daily_v3_high_confidence_low_quality_stays_internal_without_discord
             shadow_mode=False,
             session=session,
             reference=ApiFootballReference({"competitions": [], "references": {}}),
+            model_dir=model_dir,
             discord_delivery=DiscordDeliveryService(
                 session,
                 legacy_webhook_url="https://example.invalid/v3-daily",
@@ -403,6 +435,7 @@ def test_run_daily_v3_production_skips_existing_sent_window_duplicate(
     engine = create_db_and_tables(f"sqlite:///{tmp_path / 'daily_v3_dedupe.db'}")
     session_factory = create_session_factory(engine)
     fake_service = FakePredictionV3Service(None)  # type: ignore[arg-type]
+    model_dir = _write_approved_artifact(tmp_path / "approved-v3", "v3_1x2")
 
     with (
         httpx.Client(transport=httpx.MockTransport(handler)) as http_client,
@@ -443,6 +476,7 @@ def test_run_daily_v3_production_skips_existing_sent_window_duplicate(
             shadow_mode=False,
             session=session,
             reference=ApiFootballReference({"competitions": [], "references": {}}),
+            model_dir=model_dir,
             discord_delivery=DiscordDeliveryService(
                 session,
                 legacy_webhook_url="https://example.invalid/v3-daily",
@@ -610,3 +644,19 @@ def _seed_teams(session) -> None:
             models.Team(team_id=-20, name="Synthetic Away", payload_json={"synthetic": True}),
         ]
     )
+
+
+def _write_approved_artifact(path: Path, model_family: str) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "confidence_thresholds.json").write_text(
+        json.dumps(
+            {
+                "threshold_version": "confidence_thresholds_v1",
+                "model_family": model_family,
+                "production_approved": True,
+                "thresholds": {"global": {"high": 60.0, "very_high": 80.0}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path

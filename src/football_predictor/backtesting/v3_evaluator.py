@@ -17,12 +17,18 @@ from sklearn.metrics import (  # type: ignore[import-untyped]
     roc_auc_score,
 )
 
+from football_predictor.backtesting.confidence_calibration import (
+    ConfidenceThresholdConfig,
+    apply_publication_policy_records,
+    build_confidence_threshold_artifact,
+)
 from football_predictor.backtesting.metrics import confidence_gap
 from football_predictor.backtesting.v3_dataset_builder import (
     OUTCOME_COL,
     add_v3_targets,
     chronological_splits,
 )
+from football_predictor.features.data_quality import DataQuality
 from football_predictor.modeling.constants import CLASSES
 from football_predictor.modeling.evaluation import evaluate_probabilities
 from football_predictor.modeling.poisson import poisson_baseline_probability
@@ -35,6 +41,7 @@ from football_predictor.modeling.v3.fusion import (
     v2_probability_from_row,
 )
 from football_predictor.modeling.v3.training import V3TrainingConfig, train_v3_from_dataset
+from football_predictor.prediction.confidence import confidence_score as prediction_confidence_score
 from football_predictor.utils.time import utc_now
 
 ReportFormat = Literal["json", "markdown", "both"]
@@ -56,6 +63,7 @@ class V3BacktestConfig:
     model_version: str = "v3.0-final"
     draw_calibration: str = "isotonic"
     no_draw_winner_calibration: str = "sigmoid"
+    min_data_quality_score: float = 60.0
 
 
 @dataclass(frozen=True)
@@ -135,6 +143,31 @@ def run_v3_backtest(
         "test": _group_metrics(splits.test, test_predictions, config=resolved_config),
     }
     success = _success_criteria(test_metrics, group_metrics.get("test", {}))
+    baseline_name = _calibration_baseline_name(validation_predictions)
+    confidence_thresholds = build_confidence_threshold_artifact(
+        validation_records=_confidence_records(
+            splits.valid,
+            validation_predictions.get(V3_PRIMARY_MODEL_NAME, []),
+            validation_predictions.get(baseline_name, []),
+        ),
+        test_records=_confidence_records(
+            splits.test,
+            test_predictions.get(V3_PRIMARY_MODEL_NAME, []),
+            test_predictions.get(baseline_name, []),
+        ),
+        config=ConfidenceThresholdConfig(
+            model_family="v3_1x2",
+            min_data_quality_score=resolved_config.min_data_quality_score,
+        ),
+        periods={name: asdict(period) for name, period in periods.items()},
+    )
+    confidence_thresholds["baseline_model"] = baseline_name
+    published_only_report = _published_only_report(
+        splits.test,
+        test_predictions,
+        confidence_thresholds,
+        config=resolved_config,
+    )
 
     payload: JsonDict = {
         "dataset_path": str(dataset_path),
@@ -149,6 +182,8 @@ def run_v3_backtest(
         },
         "group_metrics": group_metrics,
         "success_criteria": success,
+        "confidence_thresholds": confidence_thresholds,
+        "published_only_report": published_only_report,
         "leakage": {
             "evaluation_scope": "test fold only",
             "training_scope": (
@@ -553,6 +588,411 @@ def _league_regression_check(test_groups: JsonDict) -> JsonDict:
     }
 
 
+def _calibration_baseline_name(
+    predictions_by_model: dict[str, list[ProbabilityTriple | None]],
+) -> str:
+    v2_predictions = predictions_by_model.get(V2_MODEL_NAME, [])
+    if any(prediction is not None for prediction in v2_predictions):
+        return V2_MODEL_NAME
+    return "odds_only"
+
+
+def _confidence_records(
+    frame: pd.DataFrame,
+    predictions: list[ProbabilityTriple | None],
+    baseline_predictions: list[ProbabilityTriple | None],
+) -> list[JsonDict]:
+    records: list[JsonDict] = []
+    quality_scale = _quality_score_scale(frame)
+    y_true = list(frame[OUTCOME_COL].astype(str))
+    for index, (row_index, row) in enumerate(frame.iterrows()):
+        if index >= len(predictions):
+            continue
+        prediction = predictions[index]
+        if prediction is None:
+            continue
+        actual = y_true[index]
+        baseline = (
+            baseline_predictions[index]
+            if index < len(baseline_predictions)
+            else None
+        )
+        quality_score = _row_quality_score(row, scale=quality_scale)
+        data_quality = _publication_quality_payload(row, quality_score)
+        confidence = _row_confidence_score(row, prediction, quality_score)
+        record: JsonDict = {
+            "position": index,
+            "row_index": int(row_index),
+            "fixture_id": _json_value(row.get("fixture_id")),
+            "league_id": _json_value(row.get("league_id")),
+            "season": _json_value(row.get("season")),
+            "actual": actual,
+            "predicted": prediction.predicted_result(),
+            "correct": prediction.predicted_result() == actual,
+            "confidence_score": confidence,
+            "data_quality": data_quality,
+            "p_max": prediction.max_probability(),
+            "gap": confidence_gap(prediction.to_vector()),
+            "log_loss": _row_log_loss(actual, prediction),
+            "brier_score": _row_brier(actual, prediction),
+        }
+        if baseline is not None:
+            record.update(
+                {
+                    "baseline_predicted": baseline.predicted_result(),
+                    "baseline_correct": baseline.predicted_result() == actual,
+                    "baseline_log_loss": _row_log_loss(actual, baseline),
+                    "baseline_brier_score": _row_brier(actual, baseline),
+                }
+            )
+        records.append(record)
+    return records
+
+
+def _row_confidence_score(
+    row: pd.Series,
+    prediction: ProbabilityTriple,
+    quality_score: float | None,
+) -> float:
+    existing = _optional_float(row.get("confidence_score"))
+    if existing is not None:
+        return existing
+    data_quality = _data_quality_from_backtest_row(row, quality_score)
+    return prediction_confidence_score(prediction, data_quality)
+
+
+def _data_quality_from_backtest_row(
+    row: pd.Series,
+    quality_score: float | None,
+) -> DataQuality:
+    if quality_score is not None and not any(
+        str(key) in row for key in (
+            "odds_available_flag",
+            "injuries_available_flag",
+            "official_lineup_available_flag",
+            "historical_player_stats_available_rate",
+            "standings_available_flag",
+            "api_prediction_available_flag",
+        )
+    ):
+        return DataQuality(
+            odds_available=quality_score >= 60,
+            injuries_available=quality_score >= 70,
+            official_lineups_available=quality_score >= 75,
+            player_stats_available=quality_score >= 50,
+            standings_available=quality_score >= 60,
+            api_prediction_available=quality_score >= 60,
+        )
+    return DataQuality(
+        odds_available=bool(row.get("odds_available_flag") or row.get("odds_available")),
+        injuries_available=bool(
+            row.get("injuries_available_flag") or row.get("injuries_available")
+        ),
+        official_lineups_available=bool(
+            row.get("official_lineup_available_flag")
+            or row.get("has_official_lineup")
+            or row.get("target_lineups_available_flag")
+        ),
+        player_stats_available=(
+            _optional_float(
+                row.get(
+                    "historical_player_stats_available_rate",
+                    row.get("player_stats_available_rate"),
+                )
+            )
+            or 0.0
+        )
+        > 0,
+        standings_available=bool(row.get("standings_available_flag")),
+        api_prediction_available=bool(
+            row.get("api_prediction_available_flag")
+            or row.get("api_prediction_available")
+        ),
+    )
+
+
+def _publication_quality_payload(row: pd.Series, score: float | None) -> JsonDict:
+    payload: JsonDict = {}
+    if score is not None:
+        payload["publication_data_quality_score"] = score
+    blockers = _parse_blockers(row.get("publication_blockers"))
+    if blockers:
+        payload["publication_blockers"] = blockers
+    return payload
+
+
+def _row_quality_score(row: pd.Series, *, scale: float) -> float | None:
+    for key in (
+        "publication_data_quality_score",
+        "overall_data_quality_score",
+        "data_quality_score",
+        "ou_data_quality_score",
+    ):
+        value = _optional_float(row.get(key))
+        if value is not None:
+            return max(0.0, min(100.0, value * scale))
+    return None
+
+
+def _quality_score_scale(frame: pd.DataFrame) -> float:
+    values: list[float] = []
+    for key in (
+        "publication_data_quality_score",
+        "overall_data_quality_score",
+        "data_quality_score",
+        "ou_data_quality_score",
+    ):
+        if key not in frame.columns:
+            continue
+        values.extend(
+            value
+            for value in (
+                _optional_float(item)
+                for item in frame[key].tolist()
+            )
+            if value is not None
+        )
+    return 100.0 if values and max(values) <= 1.0 else 1.0
+
+
+def _parse_blockers(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list | tuple | set):
+        return [str(item) for item in value if str(item).strip()]
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return [value]
+        if isinstance(parsed, list):
+            return [str(item) for item in parsed if str(item).strip()]
+    return []
+
+
+def _row_log_loss(actual: str, prediction: ProbabilityTriple) -> float:
+    probability = prediction.as_dict()[actual]
+    return -math.log(min(max(probability, 1e-15), 1 - 1e-15))
+
+
+def _row_brier(actual: str, prediction: ProbabilityTriple) -> float:
+    values = prediction.as_dict()
+    return sum(
+        (values[label] - (1.0 if label == actual else 0.0)) ** 2
+        for label in CLASSES
+    )
+
+
+def _json_value(value: Any) -> Any:
+    if pd.isna(value):
+        return None
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
+
+
+def _optional_float(value: Any) -> float | None:
+    try:
+        resolved = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(resolved):
+        return None
+    return resolved
+
+
+def _published_only_report(
+    frame: pd.DataFrame,
+    predictions_by_model: dict[str, list[ProbabilityTriple | None]],
+    confidence_thresholds: JsonDict,
+    *,
+    config: V3BacktestConfig,
+) -> JsonDict:
+    thresholds = confidence_thresholds.get("thresholds", {}).get("global", {})
+    if not isinstance(thresholds, dict):
+        thresholds = {}
+    primary_records = _confidence_records(
+        frame,
+        predictions_by_model.get(V3_PRIMARY_MODEL_NAME, []),
+        predictions_by_model.get("odds_only", []),
+    )
+    policy_records = apply_publication_policy_records(
+        primary_records,
+        thresholds,
+        config=ConfidenceThresholdConfig(
+            model_family="v3_1x2",
+            min_data_quality_score=config.min_data_quality_score,
+        ),
+    )
+    internal_indexes = [
+        int(record["position"]) for record in policy_records if "position" in record
+    ]
+    published_indexes = [
+        int(record["position"])
+        for record in policy_records
+        if record.get("publication_allowed") and "position" in record
+    ]
+    report = {
+        "model_family": "v3_1x2",
+        "policy": {
+            "threshold_version": confidence_thresholds.get("threshold_version"),
+            "min_data_quality_score": confidence_thresholds.get("min_data_quality_score"),
+            "thresholds": thresholds,
+        },
+        "scopes": {
+            "internal_all": _model_metrics_for_indexes(
+                frame,
+                predictions_by_model,
+                internal_indexes,
+                config=config,
+            ),
+            "published_only": _model_metrics_for_indexes(
+                frame,
+                predictions_by_model,
+                published_indexes,
+                config=config,
+            ),
+        },
+        "publication_counts": _publication_counts(policy_records),
+        "comparisons": {
+            "internal_all": _v3_comparisons(
+                _model_metrics_for_indexes(
+                    frame,
+                    predictions_by_model,
+                    internal_indexes,
+                    config=config,
+                )
+            ),
+            "published_only": _v3_comparisons(
+                _model_metrics_for_indexes(
+                    frame,
+                    predictions_by_model,
+                    published_indexes,
+                    config=config,
+                )
+            ),
+        },
+        "groups": {
+            "league": _published_group_report(
+                frame,
+                predictions_by_model,
+                policy_records,
+                group_key="league_id",
+                config=config,
+            ),
+            "season": _published_group_report(
+                frame,
+                predictions_by_model,
+                policy_records,
+                group_key="season",
+                config=config,
+            ),
+            "confidence_label": _published_group_report(
+                frame,
+                predictions_by_model,
+                policy_records,
+                group_key="calibrated_label",
+                config=config,
+            ),
+            "data_quality": _published_group_report(
+                frame,
+                predictions_by_model,
+                policy_records,
+                group_key="data_quality_bin",
+                config=config,
+            ),
+        },
+    }
+    return report
+
+
+def _model_metrics_for_indexes(
+    frame: pd.DataFrame,
+    predictions_by_model: dict[str, list[ProbabilityTriple | None]],
+    indexes: list[int],
+    *,
+    config: V3BacktestConfig,
+) -> JsonDict:
+    y_true = list(frame[OUTCOME_COL].astype(str))
+    output: JsonDict = {}
+    for model_name in (V3_PRIMARY_MODEL_NAME, V2_MODEL_NAME, "odds_only"):
+        predictions = predictions_by_model.get(model_name, [])
+        selected_pairs = [
+            (y_true[index], predictions[index])
+            for index in indexes
+            if index < len(predictions) and index < len(y_true)
+        ]
+        output[model_name] = _metrics_for_predictions(
+            [actual for actual, _prediction in selected_pairs],
+            [prediction for _actual, prediction in selected_pairs],
+            config=config,
+        )
+    return output
+
+
+def _publication_counts(records: list[JsonDict]) -> JsonDict:
+    counts: JsonDict = {
+        "total": len(records),
+        "published": 0,
+        "internal": 0,
+        "reasons": {},
+        "labels": {},
+    }
+    for record in records:
+        allowed = bool(record.get("publication_allowed"))
+        counts["published" if allowed else "internal"] += 1
+        label = str(record.get("calibrated_label") or "Uncertain")
+        counts["labels"][label] = counts["labels"].get(label, 0) + 1
+        decision = record.get("publication_decision")
+        if isinstance(decision, dict) and decision.get("reason"):
+            reason = str(decision["reason"])
+            counts["reasons"][reason] = counts["reasons"].get(reason, 0) + 1
+    return counts
+
+
+def _v3_comparisons(metrics_by_model: JsonDict) -> JsonDict:
+    v3 = metrics_by_model.get(V3_PRIMARY_MODEL_NAME, {})
+    output: JsonDict = {}
+    for baseline_name in (V2_MODEL_NAME, "odds_only"):
+        baseline = metrics_by_model.get(baseline_name, {})
+        output[f"{V3_PRIMARY_MODEL_NAME}_vs_{baseline_name}"] = {
+            "accuracy_delta": _delta(v3.get("accuracy"), baseline.get("accuracy")),
+            "log_loss_delta": _delta(v3.get("log_loss"), baseline.get("log_loss")),
+            "brier_delta": _delta(v3.get("brier_score"), baseline.get("brier_score")),
+        }
+    return output
+
+
+def _published_group_report(
+    frame: pd.DataFrame,
+    predictions_by_model: dict[str, list[ProbabilityTriple | None]],
+    policy_records: list[JsonDict],
+    *,
+    group_key: str,
+    config: V3BacktestConfig,
+) -> JsonDict:
+    grouped: dict[str, list[int]] = {}
+    for record in policy_records:
+        if not record.get("publication_allowed"):
+            continue
+        value = record.get(group_key)
+        if value is None:
+            continue
+        grouped.setdefault(str(value), []).append(int(record["position"]))
+    return {
+        group: {
+            "row_count": len(indexes),
+            "metrics_by_model": _model_metrics_for_indexes(
+                frame,
+                predictions_by_model,
+                indexes,
+                config=config,
+            ),
+        }
+        for group, indexes in sorted(grouped.items())
+    }
+
+
 def _write_reports(
     payload: JsonDict,
     output_dir: Path,
@@ -567,10 +1007,84 @@ def _write_reports(
             json.dumps(_json_ready(payload), indent=2, sort_keys=True),
             encoding="utf-8",
         )
+    if "confidence_thresholds" in payload:
+        paths["confidence_thresholds"] = output_dir / "confidence_thresholds.json"
+        paths["confidence_thresholds"].write_text(
+            json.dumps(
+                _json_ready(payload.get("confidence_thresholds", {})),
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+    if "published_only_report" in payload:
+        paths["published_only_json"] = output_dir / "published_only_report.json"
+        paths["published_only_json"].write_text(
+            json.dumps(
+                _json_ready(payload.get("published_only_report", {})),
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+        paths["published_only_markdown"] = output_dir / "published_only_report.md"
+        paths["published_only_markdown"].write_text(
+            _published_only_markdown(payload.get("published_only_report", {})),
+            encoding="utf-8",
+        )
     if report_format in {"markdown", "both"}:
         paths["markdown"] = output_dir / "comparison_vs_v2.md"
         paths["markdown"].write_text(_markdown_report(payload), encoding="utf-8")
     return paths
+
+
+def _published_only_markdown(report: JsonDict) -> str:
+    lines = [
+        "# Backtest Published-Only V3",
+        "",
+        "## Policy",
+        "",
+        f"- Model family: `{report.get('model_family')}`",
+        f"- Threshold version: `{report.get('policy', {}).get('threshold_version')}`",
+        f"- Min data quality: `{report.get('policy', {}).get('min_data_quality_score')}`",
+        "",
+        "## Scopes",
+        "",
+    ]
+    for scope_name, metrics_by_model in report.get("scopes", {}).items():
+        lines.extend(
+            [
+                f"### {scope_name}",
+                "",
+                "| Model | Rows | Coverage | Accuracy | Log loss | Brier |",
+                "| --- | ---: | ---: | ---: | ---: | ---: |",
+            ]
+        )
+        for model_name, metrics in metrics_by_model.items():
+            lines.append(
+                f"| {model_name} | {metrics.get('row_count', 0)} | "
+                f"{_fmt(metrics.get('coverage'))} | {_fmt(metrics.get('accuracy'))} | "
+                f"{_fmt(metrics.get('log_loss'))} | {_fmt(metrics.get('brier_score'))} |"
+            )
+        lines.append("")
+    lines.extend(["## Publication Counts", ""])
+    counts = report.get("publication_counts", {})
+    lines.append(f"- Total: {counts.get('total', 0)}")
+    lines.append(f"- Published: {counts.get('published', 0)}")
+    lines.append(f"- Internal: {counts.get('internal', 0)}")
+    lines.extend(["", "## Published Groups", ""])
+    for group_name, groups in report.get("groups", {}).items():
+        lines.append(f"### {group_name}")
+        lines.append("")
+        lines.append("| Group | Rows | Models |")
+        lines.append("| --- | ---: | --- |")
+        for value, payload in groups.items():
+            models = ", ".join(payload.get("metrics_by_model", {}).keys())
+            lines.append(f"| `{value}` | {payload.get('row_count', 0)} | {models} |")
+        if not groups:
+            lines.append("| _none_ | 0 | |")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def _markdown_report(payload: JsonDict) -> str:
@@ -636,6 +1150,37 @@ def _markdown_report(payload: JsonDict) -> str:
                     f"| {name} | {check.get('passed')} | "
                     f"{_fmt(check.get('delta'))} | {_fmt(check.get('threshold'))} |"
                 )
+    thresholds = payload.get("confidence_thresholds", {})
+    if thresholds:
+        global_thresholds = thresholds.get("thresholds", {}).get("global", {})
+        published = thresholds.get("metrics", {}).get("test", {}).get("published_only", {})
+        baseline = thresholds.get("metrics", {}).get("test", {}).get("baseline_on_published", {})
+        lines.extend(
+            [
+                "",
+                "## Calibration Publication",
+                "",
+                f"- Baseline: `{thresholds.get('baseline_model', '')}`",
+                f"- Production approved: `{thresholds.get('production_approved')}`",
+                f"- High: `{_fmt(global_thresholds.get('high'))}`",
+                f"- Very High: `{_fmt(global_thresholds.get('very_high'))}`",
+                "",
+                "| Scope | Rows | Accuracy | Log loss | Brier |",
+                "| --- | ---: | ---: | ---: | ---: |",
+                (
+                    f"| published_only | {published.get('row_count', 0)} | "
+                    f"{_fmt(published.get('accuracy'))} | "
+                    f"{_fmt(published.get('log_loss'))} | "
+                    f"{_fmt(published.get('brier_score'))} |"
+                ),
+                (
+                    f"| baseline_on_published | {baseline.get('row_count', 0)} | "
+                    f"{_fmt(baseline.get('accuracy'))} | "
+                    f"{_fmt(baseline.get('log_loss'))} | "
+                    f"{_fmt(baseline.get('brier_score'))} |"
+                ),
+            ]
+        )
     lines.extend(["", "## Groupes Test", ""])
     for group_name, groups in payload.get("group_metrics", {}).get("test", {}).items():
         lines.append(f"### {group_name}")

@@ -88,6 +88,10 @@ if bool_flag "$PRINT_ONLY"; then
   set -- "$@" --print-only
 fi
 
+if bool_flag "$SEND_DISCORD" && ! bool_flag "$PUBLISH_DRY_RUN" && ! bool_flag "$PRINT_ONLY"; then
+  set -- "$@" --production-mode
+fi
+
 if [ -n "${LIMIT:-}" ]; then
   set -- "$@" --limit "$LIMIT"
 fi

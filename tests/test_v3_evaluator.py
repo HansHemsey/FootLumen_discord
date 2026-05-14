@@ -32,6 +32,9 @@ def test_run_v3_backtest_retrains_and_writes_comparison_reports(tmp_path: Path) 
     assert result.periods["test"].row_count == 48
     assert result.report_paths["json"].exists()
     assert result.report_paths["markdown"].exists()
+    assert result.report_paths["confidence_thresholds"].exists()
+    assert result.report_paths["published_only_json"].exists()
+    assert result.report_paths["published_only_markdown"].exists()
     assert result.report_paths["markdown"].name == "comparison_vs_v2.md"
 
     metrics = result.metrics_by_model
@@ -60,9 +63,33 @@ def test_run_v3_backtest_retrains_and_writes_comparison_reports(tmp_path: Path) 
 
     parsed = json.loads(result.report_paths["json"].read_text(encoding="utf-8"))
     assert parsed["success_criteria"]["status"] == result.success_criteria["status"]
+    assert parsed["confidence_thresholds"]["model_family"] == "v3_1x2"
+    assert parsed["confidence_thresholds"]["selection"]["source_split"] == "validation"
+    thresholds = json.loads(
+        result.report_paths["confidence_thresholds"].read_text(encoding="utf-8")
+    )
+    assert thresholds["thresholds"]["global"]["high"] < (
+        thresholds["thresholds"]["global"]["very_high"]
+    )
+    published_only = json.loads(
+        result.report_paths["published_only_json"].read_text(encoding="utf-8")
+    )
+    assert published_only["scopes"]["published_only"]["v3_stacker_full"]["row_count"] <= (
+        published_only["scopes"]["internal_all"]["v3_stacker_full"]["row_count"]
+    )
+    assert {"v3_stacker_full", "v2_existing", "odds_only"}.issubset(
+        published_only["scopes"]["published_only"]
+    )
+    assert "confidence_label" in published_only["groups"]
+    assert "data_quality" in published_only["groups"]
     markdown = result.report_paths["markdown"].read_text(encoding="utf-8")
     assert "Backtest V3 - Comparaison" in markdown
     assert "v3_stacker_full" in markdown
+    assert "Calibration Publication" in markdown
+    published_markdown = result.report_paths["published_only_markdown"].read_text(
+        encoding="utf-8"
+    )
+    assert "Backtest Published-Only V3" in published_markdown
 
 
 def test_v3_success_criteria_are_not_evaluable_without_v2_signal(tmp_path: Path) -> None:
@@ -118,6 +145,9 @@ def test_backtest_v3_cli_smoke_runs_on_synthetic_dataset(tmp_path: Path) -> None
     assert result.exit_code == 0, result.stdout
     assert (report_dir / "v3_backtest_report.json").exists()
     assert (report_dir / "comparison_vs_v2.md").exists()
+    assert (report_dir / "confidence_thresholds.json").exists()
+    assert (report_dir / "published_only_report.json").exists()
+    assert (report_dir / "published_only_report.md").exists()
     assert "v3_log_loss" in result.stdout
 
 

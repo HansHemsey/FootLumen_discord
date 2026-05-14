@@ -209,11 +209,27 @@ def test_predict_v3_cli_discord_dry_run_persists_v3_metadata(tmp_path: Path) -> 
     )
 
 
+def test_predict_v3_cli_blocks_live_discord_without_production_mode() -> None:
+    result = CliRunner().invoke(
+        app,
+        [
+            "predict-v3",
+            "--fixture",
+            "-900",
+            "--send-discord",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "shadow mode blocks live Discord sends" in result.output
+
+
 def test_predict_v3_cli_live_discord_skips_non_publishable_prediction(tmp_path: Path) -> None:
     db_path = tmp_path / "cli_v3_blocked.db"
     engine = create_db_and_tables(f"sqlite:///{db_path}")
     session_factory = create_session_factory(engine)
     model_dir = _write_synthetic_v3_model(tmp_path / "v3-model")
+    _write_approved_artifact(model_dir, "v3_1x2")
     with session_scope(session_factory) as session:
         _seed_base(session)
         _seed_point_in_time_sources(session)
@@ -231,6 +247,7 @@ def test_predict_v3_cli_live_discord_skips_non_publishable_prediction(tmp_path: 
             str(model_dir),
             "--no-refresh",
             "--send-discord",
+            "--production-mode",
             "--discord-webhooks",
             "config/discord_webhooks.example.yaml",
             "--json",
@@ -274,4 +291,19 @@ def _write_synthetic_v3_model(path: Path) -> Path:
     )
     draw.save(path / "draw_risk" / "model.joblib")
     no_draw.save(path / "no_draw_winner" / "model.joblib")
+    return path
+
+
+def _write_approved_artifact(path: Path, model_family: str) -> Path:
+    (path / "confidence_thresholds.json").write_text(
+        json.dumps(
+            {
+                "threshold_version": "confidence_thresholds_v1",
+                "model_family": model_family,
+                "production_approved": True,
+                "thresholds": {"global": {"high": 60.0, "very_high": 80.0}},
+            }
+        ),
+        encoding="utf-8",
+    )
     return path

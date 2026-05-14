@@ -2,6 +2,10 @@
 
 > Document de planification. Ne contient ni code ni modification du repo.
 > Choix structurants validés : **tables DB dédiées V3**, **stacker appris pour la fusion**, **dataset M-30 simulé avec flag XI**.
+> Statut : document historique. Pour l'exploitation courante, utiliser `README.md`,
+> `docs/operations_guide.md`, `docs/modeling_strategy.md` et `docs/data_contract.md`.
+> La production actuelle utilise V3 par défaut seulement avec artefact backtest approuvé ;
+> V2 reste le rollback et O/U 2.5 suit un pipeline séparé.
 
 ---
 

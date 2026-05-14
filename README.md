@@ -130,6 +130,9 @@ make train-backtest-all
 
 # Dataset multi-ligues, entrainement et backtest O/U 2.5.
 make train-backtest-ou
+
+# Backtest offline qui simule la production M-30 pour V3 et O/U.
+football-predictor backtest-production-like --league-id 39 --season 2025 --format both
 ```
 
 `config/competitions.yaml` reste la config de production quotidienne : elle contient les
@@ -244,6 +247,8 @@ crontab -l
 
 Elle publie réellement dans Discord avec `SEND_DISCORD=true DRY_RUN=false`, utilise les
 scripts prod, verrouille chaque routine avec `lockf` et écrit les logs dans `logs/cron/`.
+`lockf` est un verrou BSD/macOS ; sur VPS Linux, adapter cette crontab avec `flock` avant
+installation en production.
 
 Résumé des crons installés :
 
@@ -467,6 +472,13 @@ football-predictor backtest \
   --model-dir data/models/v2-late \
   --output-dir reports/backtest_v2_late \
   --retrain-v2-model-version v2-late \
+  --format both
+football-predictor backtest-production-like \
+  --league-id 39 \
+  --season 2025 \
+  --v3-model-dir data/models/v3 \
+  --v2-model-dir data/models/v2-late \
+  --output-dir reports/production_like \
   --format both
 football-predictor predict \
   --fixture <fixture_id> \
@@ -715,10 +727,12 @@ revient à `data/models/v1`, puis aux fallbacks. Avec V2, les probabilités par 
 persistées dans `ModelPrediction.payload_json.expert_probabilities`. Les appels API live ne
 sont faits qu'avec `--refresh-data`, jamais implicitement.
 
-Depuis Sprint 10, `scripts/daily_late.sh` publie les prédictions M-30 avec la V3 par
-défaut (`MODEL_DIR=data/models/v3`, `V2_MODEL_DIR=data/models/v2-late`). La promotion est
-volontaire malgré un backtest V3 non validé ; surveiller les premiers runs réels et la
-couverture odds/API/lineups rafraîchie à M-30. Le rollback officiel est :
+Depuis Sprint 10, `scripts/daily_late.sh` utilise la V3 par défaut
+(`MODEL_DIR=data/models/v3`, `V2_MODEL_DIR=data/models/v2-late`). Un envoi live V3 exige
+un artefact `data/models/v3/confidence_thresholds.json` approuvé par backtest
+(`production_approved=true`) ; sans cet artefact, le mode production est refusé avant
+prédiction. Le shadow mode, `--dry-run` et `--print-only` restent autorisés pour vérifier
+le rendu et la persistance locale. Le rollback officiel est :
 
 ```bash
 PREDICTION_ENGINE=v2 SEND_DISCORD=true DRY_RUN=false scripts/daily_late.sh
@@ -730,6 +744,11 @@ La publication publique applique le même filtre pour V3 1X2 et O/U 2.5 : seuls 
 `Low`, `Medium`, `Uncertain`, les scores qualité insuffisants ou les
 `publication_blockers` sont persistés pour suivi interne avec le statut
 `confidence_skipped`.
+
+Le backtest `backtest-production-like` est le contrôle offline de référence : il sélectionne
+des fixtures terminées, fixe `prediction_time = fixture.date - 30 minutes`, ignore toute
+donnée postérieure, applique la même policy de publication que la production et produit des
+métriques `internal_all` et `published_only` pour V3 et O/U.
 
 La commande `predict-today` automatise les prédictions d'une date sans serveur web. Elle
 peut être appelée par cron ou par une tâche planifiée. Les fenêtres filtrent les fixtures
@@ -758,12 +777,17 @@ scripts/daily_morning.sh
 
 # Update avant match : V3 par defaut, refresh explicite, Discord reel seulement si dry-run desactive.
 SEND_DISCORD=true DRY_RUN=false scripts/daily_late.sh
+
+# O/U 2.5 late : même gate High/Very High + data quality, dry-run par defaut.
+SEND_DISCORD=true DRY_RUN=false scripts/daily_ou.sh
 ```
 
 La déduplication Discord est faite par `fixture_id + window` pour les vrais messages
 `predictions`. En V3, elle n'empêche pas de créer une nouvelle `V3ModelPrediction`, mais
-évite un second envoi réel pour la même fenêtre. `--force` contourne cette protection ;
-`--dry-run` et `--print-only` ne bloquent jamais un futur envoi réel.
+évite un second envoi réel pour la même fenêtre. O/U ajoute une clé sémantique
+`ou25:{fixture_id}:{window}:{model_version}:ou_prediction`, ce qui bloque un second envoi
+live même si le rendu markdown change. `--force` contourne ces protections ; `--dry-run` et
+`--print-only` ne bloquent jamais un futur envoi réel.
 
 Le formatter Discord produit un bloc `md` ferme, en français, limite à 2000 caractères. Il
 inclut le match, la compétition, la date, les probabilités, la confiance, les facteurs clés,
@@ -818,9 +842,11 @@ SEND_DISCORD=true DRY_RUN=false scripts/publish_weekly_score.sh
 ```
 
 Il compte uniquement les pronostics réellement publiés dans Discord et dont le match est
-terminé : V2 legacy, V3 via `payload_json["v3_model_prediction_id"]`, et O/U 2.5 via
-`payload_json["ou_model_prediction_id"]`. Les prédictions internes non publiées pour
-confiance insuffisante, `dry_run` ou `print_only` ne sont pas affichées. Le bilan est
+terminé : V2 legacy via `model_prediction_id`, V3 via `v3_model_prediction_id` et O/U 2.5
+via `ou_model_prediction_id`. Les anciennes lignes restent compatibles via fallback
+`payload_json`. Les prédictions internes non publiées pour confiance insuffisante,
+`dry_run`, `print_only`, `duplicate_skipped` ou `confidence_skipped` ne sont pas affichées.
+Le bilan est
 calculé sur la semaine ISO lundi-dimanche en Europe/Paris, puis remplace seulement le
 message du même `week_key`. Le lundi matin, il met aussi à jour la semaine précédente
 afin de capter les résultats du dimanche arrivés dans la nuit, puis crée le message de la

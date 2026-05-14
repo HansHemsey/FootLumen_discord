@@ -1,5 +1,6 @@
 # Example only. Do not put real webhook URLs in this file.
 # Put real values in config/discord_webhooks.local.yaml or environment variables.
+# Keep discussions absent/disabled unless an automation explicitly supports it.
 webhooks:
   global:
     score_pronos_semaine:

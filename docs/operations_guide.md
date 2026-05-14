@@ -28,6 +28,20 @@ docs/api_football_players_cache.json
 `api_football_players_cache.json` est un cache technique de collecte. Le seed metier joueurs doit
 utiliser `api_football_players_reference.json`.
 
+## Routine D'Exploitation
+
+- Lundi matin : `scripts/weekly_ingestion.sh` prépare les fixtures des 7 prochains jours.
+- Chaque matin : `scripts/daily_morning.sh` rafraîchit la DB et publie classement,
+  calendrier, matchs du jour et score-pronos-semaine.
+- H-6 : `scripts/publish_match_analyses.sh` publie seulement les analyses pré-match assez
+  riches pour être utiles.
+- M-30 : `scripts/daily_late.sh` génère V3 1X2 et `scripts/daily_ou.sh` génère O/U 2.5.
+- Après match : `scripts/publish_match_results.sh` publie les résultats `FT/AET/PEN`.
+
+Les vrais envois Discord exigent toujours `SEND_DISCORD=true DRY_RUN=false`. Les pronostics
+faibles ou insuffisamment fiables restent internes et ne sont pas comptés dans le score
+hebdomadaire.
+
 ## Checklist Quotidienne
 
 ```bash
@@ -114,6 +128,11 @@ Rollback V2 :
 ```bash
 PREDICTION_ENGINE=v2 SEND_DISCORD=true DRY_RUN=false scripts/daily_late.sh
 ```
+
+En rollback, conserver les artefacts V3/O-U précédents mais les lancer en shadow/dry-run
+jusqu'à ce qu'un nouveau rapport backtest approuvé soit disponible. Le modèle V2 late reste
+dans `data/models/v2-late`; si ce répertoire manque, le pipeline retombe sur les fallbacks
+documentés.
 
 Le fichier d'approbation est généré par les backtests de calibration. Pour promouvoir un
 nouveau modèle, copier l'artefact approuvé dans le répertoire modèle actif, par exemple
@@ -345,20 +364,37 @@ REFRESH_ODDS=false
 ```
 
 `DETAILS_LIMIT` reste un plafond par ligue/saison. Pour resoudre les joueurs inconnus dans
-la meme passe, ajoute `RESOLVE_UNKNOWN_PLAYERS=true`, ou lance la resolution separement
+la meme passe, ajoute `RESOLVE_UNKNOWN_PLAYERS=true`, ou lance la resolution separement.
 
 ### Entrainement Et Backtest Multi-Saisons
 
 ```bash
 scripts/train_backtest_all.sh
 scripts/train_backtest_ou.sh
+football-predictor backtest-production-like --league-id 39 --season 2025 --format both
 ```
 
 Ces deux scripts utilisent `config/competitions_history.yaml` par defaut. Le premier
 entraine/backteste le modele 1X2 `data/models/v2-late`; le second entraine/backteste le
 modele Over/Under `data/models/ou-v1`. Les scripts quotidiens continuent d'utiliser
-`config/competitions.yaml`, donc l'historique ne ralentit pas la production.
-avec les refresh desactives si tu veux economiser le quota.
+`config/competitions.yaml`, donc l'historique ne ralentit pas la production. Garde les
+refresh desactives si tu veux economiser le quota.
+
+Contrôle mensuel recommandé :
+
+```bash
+football-predictor backtest-production-like \
+  --league-id 39 \
+  --season 2025 \
+  --v3-model-dir data/models/v3 \
+  --v2-model-dir data/models/v2-late \
+  --output-dir reports/production_like \
+  --format both
+```
+
+Promouvoir un modèle uniquement si le rapport published-only valide les critères et si
+`confidence_thresholds.json` porte `production_approved=true`. Conserver l'artefact précédent
+pour rollback.
 
 ## Refresh Live Et Quota API
 
@@ -392,6 +428,8 @@ crontab -l
 
 Ce fichier active explicitement `SEND_DISCORD=true DRY_RUN=false` pour les publications
 Discord, garde des verrous `lockf` par routine, et écrit les logs dans `logs/cron/`.
+`lockf` est un verrou BSD/macOS : sur VPS Linux, ne pas installer cette crontab telle quelle
+sans adaptation `flock` ou systemd timer.
 
 Exemple local sans refresh, uniquement pour test manuel :
 

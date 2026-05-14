@@ -561,8 +561,9 @@ football-predictor predict-v3 \
 ```
 
 Le message utilise le formatter V3 dédié, reste routé vers `message_type="prediction"` et
-stocke `v3_model_prediction_id` dans `DiscordMessage.payload_json` plutôt que dans
-`model_prediction_id`, car cette FK reste réservée aux prédictions V2.
+stocke `v3_model_prediction_id` dans la colonne dédiée `DiscordMessage.v3_model_prediction_id`.
+`model_prediction_id` reste réservé aux prédictions V2 ; `payload_json` conserve les mêmes
+références en fallback pour les anciennes lignes et l'audit.
 
 ### V3 Quotidien Et Production Discord
 
@@ -604,9 +605,10 @@ M-30 : odds, prédictions API, lineups et blessures.
 
 La publication Discord n'est pas automatique pour toutes les prédictions calculées. La
 règle métier commune V3 1X2 et O/U 2.5 est : publier uniquement les confiances `High` et
-`Very High`. Les prédictions `Medium`, `Low`, `Uncertain` ou non normalisables restent
-stockées en base avec `confidence_skipped` et ne sont pas prises en compte dans le score
-public hebdomadaire.
+`Very High`, avec `publication_data_quality_score >= PUBLICATION_MIN_DATA_QUALITY_SCORE` et
+aucun `publication_blockers`. Les prédictions `Medium`, `Low`, `Uncertain`, non
+normalisables ou insuffisamment fiables restent stockées en base avec `confidence_skipped`
+et ne sont pas prises en compte dans le score public hebdomadaire.
 
 Les seuils `High` et `Very High` doivent être validés par backtest avant promotion. Les
 backtests V3 et O/U écrivent un artefact `confidence_thresholds.json` contenant :
@@ -626,8 +628,9 @@ et séparent :
 - `published_only` : uniquement les prédictions qui auraient été envoyées Discord ;
 - les métriques par ligue, saison, label de confiance et tranche de data quality.
 
-Pour V3, le rapport compare `v3_stacker_full`, `v2_existing` et `odds_only` sur le même
-sous-ensemble publié. Pour O/U, il compare l'ensemble O/U au baseline marché.
+Pour V3, le rapport compare `v3_stacker_full`, `v2_existing`, `odds_only`,
+`api_prediction_only` et `poisson_baseline` sur le même sous-ensemble publié. Pour O/U, il
+compare l'ensemble O/U au baseline marché.
 
 La calibration des seuils est apprise sur validation chronologique uniquement et évaluée
 sur test. La publication simulée applique la même policy que la production :

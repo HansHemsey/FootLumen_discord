@@ -713,6 +713,27 @@ Le rapport JSON expose :
 Les rapports Markdown reprennent les mêmes informations principales pour lecture humaine.
 Les scores finaux et IDs naïfs restent metadata ou target, jamais features modèle.
 
+### Rapport Production-Like M-30
+
+`football-predictor backtest-production-like` écrit un rapport combiné offline qui simule la
+production `late` avec `prediction_time = fixture.date - 30 minutes`. Il ne consomme que des
+fixtures terminées déjà présentes en DB et ne fait aucun appel API.
+
+Le JSON expose au minimum :
+
+- `internal_all` : toutes les prédictions évaluées ;
+- `published_only` : sous-ensemble autorisé par la même policy que la production ;
+- métriques groupées par modèle, ligue, saison, label de confiance et tranche de data
+  quality ;
+- comparaisons V3 vs V2, odds-only, API prediction et Poisson ;
+- comparaison O/U vs baseline marché ;
+- `leakage_checks` avec cutoff M-30, snapshots futurs ignorés, fixtures exclues et raisons
+  d'exclusion.
+
+Les datasets générés pour le rapport restent des artefacts locaux sous le répertoire de
+sortie et doivent exclure la fixture cible, les scores finaux et toute source avec
+`fetched_at > prediction_time`.
+
 ## Seed Minimal Depuis Les Docs
 
 Depuis `docs/api_football_reference.json`, le seed doit pouvoir charger :
@@ -807,7 +828,8 @@ Raisons normalisées :
 
 - `confidence_below_publish_threshold` ;
 - `data_quality_score_missing` ;
-- `data_quality_below_publish_threshold`.
+- `data_quality_below_publish_threshold` ;
+- `data_quality_blocker_present`.
 
 ## Prédiction Fixture Unique
 
@@ -911,8 +933,9 @@ Pour compatibilité avec les anciennes lignes, `DiscordMessage.payload_json` con
 Les prédictions V3 et O/U à confiance insuffisante sont persistées mais ne créent pas de
 message Discord réel. Le statut opérationnel est `confidence_skipped` avec une raison
 normalisée de policy, par exemple `confidence_below_publish_threshold`,
-`data_quality_score_missing` ou `data_quality_below_publish_threshold`; ces lignes ne sont
-pas éligibles au score public hebdomadaire.
+`data_quality_score_missing`, `data_quality_below_publish_threshold` ou
+`data_quality_blocker_present`; ces lignes ne sont pas éligibles au score public
+hebdomadaire.
 
 Les vrais messages `predictions` sont dédupliqués par `fixture_id + window` pour éviter un
 second envoi réel V2 ou V3 sur la même fenêtre. `dry_run` et `print_only` ne bloquent

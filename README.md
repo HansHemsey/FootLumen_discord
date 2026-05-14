@@ -395,6 +395,7 @@ football-predictor doctor --strict
 football-predictor doctor --json
 football-predictor data-quality --league 39 --season 2025
 football-predictor data-quality --fixture <fixture_id> --json
+football-predictor data-quality --week-of YYYY-MM-DD --model-family v3 --markdown-output reports/data_quality_week.md
 football-predictor version
 football-predictor healthcheck
 football-predictor init-db
@@ -560,9 +561,11 @@ sort avec un code non zéro seulement sur erreur critique.
 
 `data-quality` observe la couverture locale déjà stockée en DB, sans ingestion ni recalcul
 de features. Le rapport peut être global, filtré par fixture, par date, ou par
-`--league/--season`. Il résume fixtures futures/terminées, odds, standings, injuries,
-lineups, stats joueurs, prédictions API, derniers `fetched_at`, nombre de
-`FeatureSnapshot` et score moyen `overall_data_quality_score`.
+`--week-of`, `--league/--season` et `--model-family all|v3|ou25`. Il résume fixtures
+futures/terminées, odds, standings, injuries, lineups, stats joueurs, prédictions API,
+derniers `fetched_at`, nombre de snapshots, fraîcheur par source et readiness de
+publication basée sur `publication_data_quality_score`. Les sorties locales sont
+disponibles via `--json-output` et `--markdown-output`.
 
 ## Base De Données
 
@@ -719,8 +722,10 @@ PREDICTION_ENGINE=v2 SEND_DISCORD=true DRY_RUN=false scripts/daily_late.sh
 ```
 
 La publication publique applique le même filtre pour V3 1X2 et O/U 2.5 : seuls les labels
-`High` et `Very High` sont envoyés dans Discord. Les prédictions `Low`, `Medium`,
-`Uncertain` ou assimilées sont persistées pour suivi interne avec le statut
+`High` et `Very High` sont envoyés dans Discord avec un
+`publication_data_quality_score >= PUBLICATION_MIN_DATA_QUALITY_SCORE`. Les prédictions
+`Low`, `Medium`, `Uncertain`, les scores qualité insuffisants ou les
+`publication_blockers` sont persistés pour suivi interne avec le statut
 `confidence_skipped`.
 
 La commande `predict-today` automatise les prédictions d'une date sans serveur web. Elle

@@ -77,3 +77,28 @@ def test_compute_absence_impact_weights_starter_more_than_bench_and_ignores_futu
     assert impact["replacement_quality_score"] <= 1.0
     assert starter_absence["absence_impact"] > bench_absence["absence_impact"]
     assert -101 not in {row["player_id"] for row in absences}
+
+
+def test_compute_absence_impact_ignores_future_generic_team_injury(tmp_path) -> None:
+    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'future_generic_injury.db'}")
+    session_factory = create_session_factory(engine)
+
+    with session_scope(session_factory) as session:
+        _seed_team_history(session)
+        session.add(
+            models.Injury(
+                fixture_id=None,
+                team_id=-10,
+                player_id=-109,
+                league_id=-100,
+                season=2026,
+                type="Missing Fixture",
+                reason="Synthetic generic future injury ignored",
+                fetched_at=datetime(2026, 5, 2, 13, tzinfo=UTC),
+                payload_json={"synthetic": True},
+            )
+        )
+        impact = compute_absence_impact(session, -10, -1000, PREDICTION_TIME)
+
+    assert impact["absent_expected_starters_count"] == 0
+    assert impact["key_absences_json"] == []

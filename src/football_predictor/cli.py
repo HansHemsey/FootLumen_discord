@@ -461,8 +461,10 @@ def _print_data_quality_report(report: dict) -> None:
         "Scope: "
         f"fixture={scope.get('fixture_id')} "
         f"date={scope.get('date')} "
+        f"week_of={scope.get('week_of')} "
         f"league={scope.get('league_id')} "
-        f"season={scope.get('season')}"
+        f"season={scope.get('season')} "
+        f"model_family={scope.get('model_family')}"
     )
     table = Table(title="Data Quality")
     table.add_column("Metric")
@@ -475,6 +477,58 @@ def _print_data_quality_report(report: dict) -> None:
         else:
             table.add_row(key, str(value))
     console.print(table)
+
+
+def _data_quality_markdown(report: dict) -> str:
+    scope = report.get("scope", {})
+    readiness = report.get("publication_readiness", {})
+    alerts = report.get("alerts", [])
+    lines = [
+        "# Data Quality Report",
+        "",
+        "## Scope",
+        "",
+        f"- fixture_id: {scope.get('fixture_id')}",
+        f"- date: {scope.get('date')}",
+        f"- week_of: {scope.get('week_of')}",
+        f"- league_id: {scope.get('league_id')}",
+        f"- season: {scope.get('season')}",
+        f"- model_family: {scope.get('model_family')}",
+        "",
+        "## Publication Readiness",
+        "",
+        f"- fixtures_ready: {report.get('fixtures_ready')}",
+        f"- fixtures_blocked: {report.get('fixtures_blocked')}",
+        f"- average_score: {readiness.get('average_publication_data_quality_score')}",
+        f"- missing_score_count: {readiness.get('missing_score_count')}",
+        "",
+        "## Alerts",
+        "",
+    ]
+    lines.extend(f"- {alert}" for alert in alerts)
+    if not alerts:
+        lines.append("- none")
+    lines.extend(
+        [
+            "",
+            "## Source Freshness",
+            "",
+            "| Source | Snapshots | Fresh | Checked | Avg score | Latest fetched at |",
+            "|---|---:|---:|---:|---:|---|",
+        ]
+    )
+    source_freshness = report.get("source_freshness", {})
+    if isinstance(source_freshness, dict):
+        for source, payload in sorted(source_freshness.items()):
+            if not isinstance(payload, dict):
+                continue
+            lines.append(
+                "| "
+                f"{source} | {payload.get('snapshots')} | {payload.get('fresh_count')} | "
+                f"{payload.get('checked_count')} | {payload.get('average_score')} | "
+                f"{payload.get('latest_fetched_at')} |"
+            )
+    return "\n".join(lines) + "\n"
 
 
 @app.command("version")
@@ -505,9 +559,21 @@ def doctor(
 def data_quality_command(
     fixture_id: int | None = typer.Option(None, "--fixture", help="Scope report to a fixture."),
     report_date: str | None = typer.Option(None, "--date", help="Scope report to YYYY-MM-DD."),
+    week_of: str | None = typer.Option(None, "--week-of", help="Scope report to a 7-day week."),
     league_id: int | None = typer.Option(None, "--league", help="Scope report to a league."),
     season: int | None = typer.Option(None, "--season", help="Scope report to a season."),
+    model_family: str = typer.Option("all", "--model-family", help="all, v3 or ou25."),
     json_output: bool = typer.Option(False, "--json", help="Output a machine-readable report."),
+    json_output_path: Path | None = typer.Option(
+        None,
+        "--json-output",
+        help="Write machine-readable report to a JSON file.",
+    ),
+    markdown_output: Path | None = typer.Option(
+        None,
+        "--markdown-output",
+        help="Write a Markdown data-quality report.",
+    ),
 ) -> None:
     """Report local DB coverage for prediction inputs without network calls."""
     settings = get_settings()
@@ -517,6 +583,17 @@ def data_quality_command(
             parsed_date = date_type.fromisoformat(report_date)
         except ValueError as exc:
             raise typer.BadParameter("--date must use YYYY-MM-DD format") from exc
+    parsed_week = None
+    if week_of is not None:
+        try:
+            parsed_week = date_type.fromisoformat(week_of)
+        except ValueError as exc:
+            raise typer.BadParameter("--week-of must use YYYY-MM-DD format") from exc
+    if parsed_date is not None and parsed_week is not None:
+        raise typer.BadParameter("--date and --week-of are mutually exclusive")
+    normalized_model_family = model_family.casefold()
+    if normalized_model_family not in {"all", "v3", "ou25"}:
+        raise typer.BadParameter("--model-family must be one of: all, v3, ou25")
     if league_id is not None and season is None:
         raise typer.BadParameter("--season is required with --league")
 
@@ -538,11 +615,20 @@ def data_quality_command(
             session,
             fixture_id=fixture_id,
             target_date=parsed_date,
+            week_of=parsed_week,
             league_id=league_id,
             season=season,
+            model_family=normalized_model_family,
         )
+    rendered_json = json.dumps(report, indent=2, sort_keys=True)
+    if json_output_path is not None:
+        json_output_path.parent.mkdir(parents=True, exist_ok=True)
+        json_output_path.write_text(rendered_json + "\n", encoding="utf-8")
+    if markdown_output is not None:
+        markdown_output.parent.mkdir(parents=True, exist_ok=True)
+        markdown_output.write_text(_data_quality_markdown(report), encoding="utf-8")
     if json_output:
-        typer.echo(json.dumps(report, indent=2, sort_keys=True))
+        typer.echo(rendered_json)
     else:
         _print_data_quality_report(report)
 

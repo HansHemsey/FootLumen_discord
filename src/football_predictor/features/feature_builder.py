@@ -6,12 +6,18 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from football_predictor.api.endpoints import FIXTURES_LINEUPS, INJURIES, PREDICTIONS
 from football_predictor.db import models
 from football_predictor.db.repositories import upsert_by_fields
-from football_predictor.features.data_quality import feature_quality_payload
+from football_predictor.features.data_quality import (
+    count_quality_ratio,
+    feature_quality_payload,
+    publication_quality_payload,
+    source_quality_payload,
+)
 from football_predictor.features.draw_risk_features import build_draw_risk_features
 from football_predictor.features.lineup_m30_features import build_lineup_m30_features
 from football_predictor.features.no_draw_winner_features import build_no_draw_winner_features
@@ -87,7 +93,10 @@ def build_feature_snapshot(
         team_quality=team_result.data_quality_json,
         xi_quality=xi_result.data_quality_json,
         odds_available=market is not None,
+        market_fetched_at=market.fetched_at if market is not None else None,
+        market_bookmaker_count=market.bookmaker_count if market is not None else 0,
         api_prediction_available=api_prediction is not None,
+        api_prediction_fetched_at=api_prediction.fetched_at if api_prediction else None,
         reference_docs_available=players_reference is not None or api_reference is not None,
         feature_version=feature_version,
     )
@@ -100,6 +109,10 @@ def build_feature_snapshot(
             data_quality=data_quality,
         )
     features["overall_data_quality_score"] = data_quality["overall_data_quality_score"]
+    features["publication_data_quality_score"] = data_quality[
+        "publication_data_quality_score"
+    ]
+    features["data_quality_version"] = data_quality["data_quality_version"]
     if _is_v3_feature_version(feature_version):
         features["data_quality_score"] = data_quality["overall_data_quality_score"]
         features["has_odds_multi_snapshot"] = int(data_quality["has_odds_multi_snapshot"])
@@ -275,7 +288,10 @@ def _data_quality_payload(
     team_quality: JsonDict,
     xi_quality: JsonDict,
     odds_available: bool,
+    market_fetched_at: datetime | None,
+    market_bookmaker_count: int,
     api_prediction_available: bool,
+    api_prediction_fetched_at: datetime | None,
     reference_docs_available: bool,
     feature_version: str,
 ) -> JsonDict:
@@ -323,8 +339,146 @@ def _data_quality_payload(
             "historical_player_stats_away_available_flag": player_stats_away > 0,
         }
     )
+    source_quality = _publication_source_quality_1x2(
+        session=session,
+        fixture=fixture,
+        prediction_time=prediction_time,
+        data_quality=payload,
+        market_fetched_at=market_fetched_at,
+        market_bookmaker_count=market_bookmaker_count,
+        api_prediction_available=api_prediction_available,
+        api_prediction_fetched_at=api_prediction_fetched_at,
+    )
+    payload.update(publication_quality_payload(source_quality))
     payload["feature_version"] = feature_version
     return payload
+
+
+def _publication_source_quality_1x2(
+    *,
+    session: Session,
+    fixture: models.Fixture,
+    prediction_time: datetime,
+    data_quality: JsonDict,
+    market_fetched_at: datetime | None,
+    market_bookmaker_count: int,
+    api_prediction_available: bool,
+    api_prediction_fetched_at: datetime | None,
+) -> dict[str, JsonDict]:
+    home_history = int(data_quality.get("historical_matches_home_count") or 0)
+    away_history = int(data_quality.get("historical_matches_away_count") or 0)
+    min_history = min(home_history, away_history)
+    team_stats_rate = float(data_quality.get("team_stats_available_rate") or 0.0)
+    player_stats_rate = float(data_quality.get("historical_player_stats_available_rate") or 0.0)
+    lineups_history_rate = (
+        (1 if data_quality.get("historical_lineups_home_available_flag") else 0)
+        + (1 if data_quality.get("historical_lineups_away_available_flag") else 0)
+    ) / 2
+    injuries_count, injuries_latest, injuries_checked = _injuries_quality_context(
+        session, fixture, prediction_time
+    )
+    standings_count, standings_latest = _standings_quality_context(
+        session, fixture, prediction_time
+    )
+    lineups_count = int(data_quality.get("target_lineups_available_count") or 0)
+    lineups_latest = _parse_optional_datetime(
+        data_quality.get("target_lineups_latest_fetched_at")
+    )
+    lineups_checked, lineups_latest = _endpoint_checked_context(
+        session,
+        endpoint=FIXTURES_LINEUPS,
+        fixture_id=fixture.fixture_id,
+        prediction_time=prediction_time,
+        row_latest_at=lineups_latest,
+    )
+    api_checked, api_latest = _endpoint_checked_context(
+        session,
+        endpoint=PREDICTIONS,
+        fixture_id=fixture.fixture_id,
+        prediction_time=prediction_time,
+        row_latest_at=api_prediction_fetched_at,
+    )
+    return {
+        "historical_matches": source_quality_payload(
+            available=min_history > 0,
+            checked=min_history > 0,
+            count=min_history,
+            weight=20,
+            base_ratio=count_quality_ratio(min_history, full_count=10, partial_count=5),
+        ),
+        "team_statistics": source_quality_payload(
+            available=team_stats_rate > 0,
+            checked=team_stats_rate > 0,
+            count=round(team_stats_rate * (home_history + away_history)),
+            weight=15,
+            base_ratio=team_stats_rate,
+        ),
+        "players_xi": source_quality_payload(
+            available=player_stats_rate > 0 or lineups_history_rate > 0,
+            checked=player_stats_rate > 0 or lineups_history_rate > 0,
+            count=int(
+                (player_stats_rate + lineups_history_rate)
+                * max(home_history + away_history, 1)
+                / 2
+            ),
+            weight=15,
+            base_ratio=(player_stats_rate + lineups_history_rate) / 2,
+        ),
+        "odds_1x2": source_quality_payload(
+            available=market_fetched_at is not None,
+            checked=market_fetched_at is not None,
+            count=market_bookmaker_count,
+            weight=20,
+            prediction_time=prediction_time,
+            latest_fetched_at=market_fetched_at,
+            fresh_minutes=6 * 60,
+            partial_minutes=24 * 60,
+        ),
+        "injuries": source_quality_payload(
+            available=injuries_count > 0,
+            checked=injuries_checked,
+            count=injuries_count,
+            weight=10,
+            prediction_time=prediction_time,
+            latest_fetched_at=injuries_latest,
+            fresh_minutes=48 * 60,
+            partial_minutes=96 * 60,
+            base_ratio=1.0 if injuries_checked else 0.0,
+        ),
+        "standings": source_quality_payload(
+            available=standings_count >= 2,
+            checked=standings_count > 0,
+            count=standings_count,
+            weight=10,
+            prediction_time=prediction_time,
+            latest_fetched_at=standings_latest,
+            fresh_minutes=72 * 60,
+            partial_minutes=7 * 24 * 60,
+            base_ratio=min(standings_count / 2, 1.0),
+        ),
+        "target_lineups": source_quality_payload(
+            available=lineups_count >= 2,
+            checked=lineups_checked,
+            count=lineups_count,
+            weight=5,
+            prediction_time=prediction_time,
+            latest_fetched_at=lineups_latest,
+            fresh_minutes=120,
+            partial_minutes=120,
+            base_ratio=min(lineups_count / 2, 1.0) if lineups_count else 0.0,
+        ),
+        "api_prediction": source_quality_payload(
+            available=api_prediction_available,
+            checked=api_checked,
+            count=1 if api_prediction_available else 0,
+            weight=5,
+            prediction_time=prediction_time,
+            latest_fetched_at=api_latest,
+            fresh_minutes=24 * 60,
+            partial_minutes=72 * 60,
+            base_ratio=1.0 if api_prediction_available else 0.0,
+        ),
+    }
 
 
 def _target_lineups_availability(
@@ -345,18 +499,139 @@ def _target_lineups_availability(
             models.FixtureLineup.fetched_at <= prediction_time,
         )
     ).scalars()
-    available_team_ids = {row.team_id for row in rows}
+    rows_list = list(rows)
+    available_team_ids = {row.team_id for row in rows_list}
     home_available = (
         fixture.home_team_id is not None and fixture.home_team_id in available_team_ids
     )
     away_available = (
         fixture.away_team_id is not None and fixture.away_team_id in available_team_ids
     )
+    latest_fetched_at = (
+        max(ensure_aware_utc(row.fetched_at) for row in rows_list) if rows_list else None
+    )
     return {
         "target_lineups_home_available_flag": home_available,
         "target_lineups_away_available_flag": away_available,
         "target_lineups_available_flag": home_available and away_available,
+        "target_lineups_available_count": len(available_team_ids),
+        "target_lineups_latest_fetched_at": latest_fetched_at.isoformat()
+        if latest_fetched_at is not None
+        else None,
     }
+
+
+def _injuries_quality_context(
+    session: Session,
+    fixture: models.Fixture,
+    prediction_time: datetime,
+) -> tuple[int, datetime | None, bool]:
+    rows = list(
+        session.execute(
+            select(models.Injury)
+            .where(
+                models.Injury.team_id.in_([fixture.home_team_id, fixture.away_team_id]),
+                models.Injury.fetched_at <= prediction_time,
+                or_(
+                    models.Injury.fixture_id == fixture.fixture_id,
+                    models.Injury.fixture_id.is_(None),
+                ),
+            )
+            .order_by(models.Injury.fetched_at.desc())
+        ).scalars()
+    )
+    row_latest = max((ensure_aware_utc(row.fetched_at) for row in rows), default=None)
+    checked, latest = _endpoint_checked_context(
+        session,
+        endpoint=INJURIES,
+        fixture_id=fixture.fixture_id,
+        prediction_time=prediction_time,
+        row_latest_at=row_latest,
+    )
+    return len(rows), latest, checked
+
+
+def _standings_quality_context(
+    session: Session,
+    fixture: models.Fixture,
+    prediction_time: datetime,
+) -> tuple[int, datetime | None]:
+    rows = list(
+        session.execute(
+            select(models.StandingSnapshot)
+            .where(
+                models.StandingSnapshot.league_id == fixture.league_id,
+                models.StandingSnapshot.season == fixture.season,
+                models.StandingSnapshot.team_id.in_(
+                    [fixture.home_team_id, fixture.away_team_id]
+                ),
+                models.StandingSnapshot.snapshot_date <= prediction_time,
+                models.StandingSnapshot.fetched_at <= prediction_time,
+            )
+            .order_by(
+                models.StandingSnapshot.team_id.asc(),
+                models.StandingSnapshot.snapshot_date.desc(),
+                models.StandingSnapshot.fetched_at.desc(),
+            )
+        ).scalars()
+    )
+    latest_by_team: dict[int, models.StandingSnapshot] = {}
+    for row in rows:
+        latest_by_team.setdefault(row.team_id, row)
+    latest = max(
+        (ensure_aware_utc(row.fetched_at) for row in latest_by_team.values()),
+        default=None,
+    )
+    return len(latest_by_team), latest
+
+
+def _endpoint_checked_context(
+    session: Session,
+    *,
+    endpoint: str,
+    fixture_id: int,
+    prediction_time: datetime,
+    row_latest_at: datetime | None,
+) -> tuple[bool, datetime | None]:
+    raw_latest = session.execute(
+        select(func.max(models.RawApiSnapshot.fetched_at)).where(
+            models.RawApiSnapshot.endpoint == endpoint,
+            models.RawApiSnapshot.fetched_at <= prediction_time,
+        )
+    ).scalar_one_or_none()
+    latest_raw_for_fixture: datetime | None = None
+    if raw_latest is not None:
+        for snapshot in session.execute(
+            select(models.RawApiSnapshot)
+            .where(
+                models.RawApiSnapshot.endpoint == endpoint,
+                models.RawApiSnapshot.status_code.in_((200, 204)),
+                models.RawApiSnapshot.fetched_at <= prediction_time,
+            )
+            .order_by(models.RawApiSnapshot.fetched_at.desc())
+        ).scalars():
+            params = snapshot.params_json if isinstance(snapshot.params_json, dict) else {}
+            if int(params.get("fixture") or 0) == fixture_id:
+                latest_raw_for_fixture = ensure_aware_utc(snapshot.fetched_at)
+                break
+    candidates = [
+        item
+        for item in (row_latest_at, latest_raw_for_fixture)
+        if item is not None
+    ]
+    latest = max((ensure_aware_utc(item) for item in candidates), default=None)
+    return bool(row_latest_at is not None or latest_raw_for_fixture is not None), latest
+
+
+def _parse_optional_datetime(value: Any) -> datetime | None:
+    if value is None or isinstance(value, datetime):
+        return value
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 def _normalize_percent(value: float | None) -> float | None:

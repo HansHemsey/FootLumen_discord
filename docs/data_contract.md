@@ -505,6 +505,71 @@ Depuis la clarification qualité live, les lineups et stats joueurs sont aussi s
 - `lineups_available_flag` reste compatible et vaut `true` si les lineups cible ou
   l'historique lineups sont disponibles.
 
+## Data Quality `dq_v2`
+
+Les builders enrichissent `data_quality_json` sans migration DB. Les champs historiques
+restent présents pour compatibilité, mais la publication Discord doit lire en priorité :
+
+- `data_quality_version="dq_v2"` ;
+- `publication_data_quality_score`, borné entre `0` et `100` ;
+- `publication_data_quality_label` parmi `High`, `Medium`, `Low`, `Uncertain` ;
+- `publication_blockers`, liste de raisons bloquantes normalisées ;
+- `source_quality_json`, détail par source.
+
+Chaque source de `source_quality_json` expose au minimum :
+
+- `available` : une donnée exploitable existe avant `prediction_time` ;
+- `checked` : la source a été vérifiée, y compris via un snapshot brut `200` ou `204` vide ;
+- `fresh` : la donnée respecte la fenêtre de fraîcheur de publication ;
+- `latest_fetched_at` ;
+- `age_minutes` et `age_hours` ;
+- `count` ;
+- `score` ;
+- `warnings`.
+
+Seules les lignes avec `fetched_at <= prediction_time` peuvent contribuer au score. Pour
+les standings, `snapshot_date <= prediction_time` est aussi obligatoire. Les snapshots
+futurs sont ignorés.
+
+Seuils de fraîcheur 1X2/V3 :
+
+- `odds_1x2` : frais jusqu'à `6h`, partiel jusqu'à `24h` ;
+- `target_lineups` : frais si les deux équipes sont présentes et âge `<= 120min` ;
+- `injuries` : frais jusqu'à `48h`, partiel jusqu'à `96h` ; un endpoint vide mais snapshoté
+  compte comme `checked` ;
+- `standings` : frais si les deux équipes ont un snapshot jusqu'à `72h`, partiel jusqu'à `7j` ;
+- `api_prediction` : frais jusqu'à `24h`, partiel jusqu'à `72h` ;
+- `historical_matches` : score plein à `>= 10` matchs par équipe, partiel à `>= 5`.
+
+Pondération publication 1X2/V3 :
+
+```text
+historique équipes          = 20
+stats équipe / match        = 15
+joueurs / XI historiques    = 15
+odds 1X2                    = 20
+injuries                    = 10
+standings                   = 10
+lineups officielles cible   = 5
+API prediction              = 5
+```
+
+Pondération publication O/U 2.5 :
+
+```text
+historique buts / rythme              = 30
+stats tirs / corners / pseudo-xG      = 15
+odds O/U                              = 30
+H2H                                   = 10
+contexte fatigue / calendrier         = 10
+injuries / lineups héritées           = 5
+```
+
+La policy de publication lit `publication_data_quality_score` en priorité. Une prédiction
+réelle Discord est bloquée si le score est absent, inférieur à
+`PUBLICATION_MIN_DATA_QUALITY_SCORE` ou si `publication_blockers` est non vide. La raison
+normalisée pour un blocker présent est `data_quality_blocker_present`.
+
 ## Feature Snapshot V3 M-30
 
 Quand `features.feature_builder.build_feature_snapshot` est appelé avec
@@ -703,7 +768,7 @@ conservé sans création d'identité.
 Les futurs builders de features doivent filtrer :
 
 - fixtures historiques : `Fixture.date < prediction_time` et `fixture_id` cible exclu ;
-- standings : `snapshot_date <= prediction_time` ou `fetched_at <= prediction_time`.
+- standings : `snapshot_date <= prediction_time` et `fetched_at <= prediction_time`.
 - fixture details, injuries, lineups, player stats et predictions API :
   `fetched_at <= prediction_time`.
 - odds prematch : `is_live = false` et `fetched_at <= prediction_time`; prendre le dernier
@@ -725,6 +790,24 @@ Chaque prédiction doit indiquer les sources disponibles :
 - prédiction API-Football.
 
 Une faible couverture doit réduire la confiance et apparaître dans la sortie.
+
+La publication Discord réelle des prédictions publiques applique aussi un gate qualité :
+le label doit être `High` ou `Very High` et le score qualité exploitable doit être au moins
+`PUBLICATION_MIN_DATA_QUALITY_SCORE` (`60` par défaut). Le score est lu dans l'ordre depuis
+`publication_data_quality_score`, `overall_data_quality_score`, `data_quality_score`, puis
+`ou_data_quality_score`.
+
+Chaque prédiction évaluée pour publication conserve dans `payload_json` :
+
+- `publication_decision` ;
+- `publication_policy_version` ;
+- `non_publication_reason` si la publication est bloquée.
+
+Raisons normalisées :
+
+- `confidence_below_publish_threshold` ;
+- `data_quality_score_missing` ;
+- `data_quality_below_publish_threshold`.
 
 ## Prédiction Fixture Unique
 
@@ -819,9 +902,10 @@ car la FK pointe vers les prédictions V2. Le lien V3 est porté par
 - `run_key`.
 
 Les prédictions V3 et O/U à confiance insuffisante sont persistées mais ne créent pas de
-message Discord réel. Le statut opérationnel est `confidence_skipped` avec la raison
-`confidence_below_publish_threshold`; ces lignes ne sont pas éligibles au score public
-hebdomadaire.
+message Discord réel. Le statut opérationnel est `confidence_skipped` avec une raison
+normalisée de policy, par exemple `confidence_below_publish_threshold`,
+`data_quality_score_missing` ou `data_quality_below_publish_threshold`; ces lignes ne sont
+pas éligibles au score public hebdomadaire.
 
 Les vrais messages `predictions` sont dédupliqués par `fixture_id + window` pour éviter un
 second envoi réel V2 ou V3 sur la même fenêtre. `dry_run` et `print_only` ne bloquent

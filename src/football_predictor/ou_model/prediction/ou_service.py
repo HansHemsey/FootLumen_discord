@@ -196,6 +196,12 @@ class OUPredictionService:
 
         conf_score = _ou_confidence_score(p_over, edge_over)
         conf_label = _ou_confidence_label(conf_score)
+        data_quality_json = dict(builder_result.data_quality_json)
+        publication_quality = data_quality_json.get(
+            "ou_data_quality_score",
+            data_quality_json.get("overall_data_quality_score"),
+        )
+        data_quality_json["publication_data_quality_score"] = publication_quality
 
         kickoff_time, match_label, competition = self._resolve_match_context(fixture_id)
 
@@ -223,7 +229,7 @@ class OUPredictionService:
             match_label=match_label,
             competition=competition,
             expert_probabilities=expert_probs,
-            data_quality_json=builder_result.data_quality_json,
+            data_quality_json=data_quality_json,
         )
 
         if save_to_db:

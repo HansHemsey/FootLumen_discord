@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import platform
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -162,8 +162,10 @@ def build_data_quality_report(
     *,
     fixture_id: int | None = None,
     target_date: date | None = None,
+    week_of: date | None = None,
     league_id: int | None = None,
     season: int | None = None,
+    model_family: str = "all",
     reference_docs_available: bool = True,
 ) -> JsonDict:
     """Summarize local DB coverage without recalculating features or calling APIs."""
@@ -171,6 +173,7 @@ def build_data_quality_report(
         session,
         fixture_id=fixture_id,
         target_date=target_date,
+        week_of=week_of,
         league_id=league_id,
         season=season,
     )
@@ -196,10 +199,22 @@ def build_data_quality_report(
         league_id=effective_league_id,
         season=effective_season,
     )
+    ou_feature_rows = _scoped_rows(
+        session,
+        models.OUFeatureSnapshot,
+        fixture_ids=fixture_ids,
+        league_id=effective_league_id,
+        season=effective_season,
+    )
+    quality_payloads = _quality_payloads_for_model_family(
+        feature_rows,
+        ou_feature_rows,
+        model_family=model_family,
+    )
     quality_scores: list[float] = []
-    for row in feature_rows:
-        if isinstance(row.data_quality_json, dict):
-            score = _extract_quality_score(row.data_quality_json)
+    for payload in quality_payloads:
+        if isinstance(payload, dict):
+            score = _extract_quality_score(payload)
             if score is not None:
                 quality_scores.append(score)
 
@@ -267,13 +282,23 @@ def build_data_quality_report(
     average_quality_score = (
         round(sum(quality_scores) / len(quality_scores), 2) if quality_scores else None
     )
+    source_freshness = _aggregate_source_freshness(quality_payloads)
+    publication_readiness = _publication_readiness(quality_payloads)
+    alerts = _data_quality_alerts(
+        fixtures_count=len(fixtures),
+        quality_payloads=quality_payloads,
+        source_freshness=source_freshness,
+        publication_readiness=publication_readiness,
+    )
 
     return {
         "scope": {
             "fixture_id": fixture_id,
             "date": target_date.isoformat() if target_date else None,
+            "week_of": week_of.isoformat() if week_of else None,
             "league_id": league_id,
             "season": season,
+            "model_family": model_family,
         },
         "fixtures_total": len(fixtures),
         "fixtures_future": sum(status in FUTURE_STATUSES for status in status_short),
@@ -298,6 +323,12 @@ def build_data_quality_report(
         "api_predictions": api_predictions_count,
         "availability": availability,
         "feature_snapshots": len(feature_rows),
+        "ou_feature_snapshots": len(ou_feature_rows),
+        "source_freshness": source_freshness,
+        "publication_readiness": publication_readiness,
+        "alerts": alerts,
+        "fixtures_ready": publication_readiness["ready_count"],
+        "fixtures_blocked": publication_readiness["blocked_count"],
         "latest_fetched_at": {
             "odds": _latest_fetched_at(
                 session,
@@ -673,13 +704,18 @@ def _select_fixtures(
     *,
     fixture_id: int | None,
     target_date: date | None,
+    week_of: date | None,
     league_id: int | None,
     season: int | None,
 ) -> list[models.Fixture]:
     stmt = select(models.Fixture)
     if fixture_id is not None:
         stmt = stmt.where(models.Fixture.fixture_id == fixture_id)
-    if target_date is not None:
+    if week_of is not None:
+        start = datetime.combine(week_of, time.min, tzinfo=UTC)
+        end = datetime.combine(week_of + timedelta(days=6), time.max, tzinfo=UTC)
+        stmt = stmt.where(models.Fixture.date >= start, models.Fixture.date <= end)
+    elif target_date is not None:
         start = datetime.combine(target_date, time.min, tzinfo=UTC)
         end = datetime.combine(target_date, time.max, tzinfo=UTC)
         stmt = stmt.where(models.Fixture.date >= start, models.Fixture.date <= end)
@@ -808,7 +844,9 @@ def _apply_scope(
 
 
 def _extract_quality_score(payload: JsonDict) -> float | None:
-    value = payload.get("overall_data_quality_score")
+    value = payload.get("publication_data_quality_score")
+    if value is None:
+        value = payload.get("overall_data_quality_score")
     if value is None:
         value = payload.get("score")
     if not isinstance(value, int | float | str):
@@ -817,3 +855,121 @@ def _extract_quality_score(payload: JsonDict) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _quality_payloads_for_model_family(
+    feature_rows: list[Any],
+    ou_feature_rows: list[Any],
+    *,
+    model_family: str,
+) -> list[JsonDict]:
+    normalized = model_family.casefold()
+    payloads: list[JsonDict] = []
+    if normalized in {"all", "v3"}:
+        for row in feature_rows:
+            feature_version = str(getattr(row, "feature_version", "") or "").casefold()
+            if normalized == "v3" and not feature_version.startswith("v3"):
+                continue
+            if isinstance(row.data_quality_json, dict):
+                payloads.append(row.data_quality_json)
+    if normalized in {"all", "ou25"}:
+        for row in ou_feature_rows:
+            if isinstance(row.data_quality_json, dict):
+                payloads.append(row.data_quality_json)
+    return payloads
+
+
+def _aggregate_source_freshness(payloads: list[JsonDict]) -> JsonDict:
+    buckets: dict[str, dict[str, Any]] = {}
+    for payload in payloads:
+        source_quality = payload.get("source_quality_json")
+        if not isinstance(source_quality, dict):
+            continue
+        for source_name, source in source_quality.items():
+            if not isinstance(source, dict):
+                continue
+            bucket = buckets.setdefault(
+                str(source_name),
+                {
+                    "snapshots": 0,
+                    "fresh_count": 0,
+                    "checked_count": 0,
+                    "available_count": 0,
+                    "scores": [],
+                    "latest_fetched_at": None,
+                },
+            )
+            bucket["snapshots"] += 1
+            bucket["fresh_count"] += 1 if source.get("fresh") else 0
+            bucket["checked_count"] += 1 if source.get("checked") else 0
+            bucket["available_count"] += 1 if source.get("available") else 0
+            bucket["scores"].append(float(source.get("score") or 0))
+            latest = source.get("latest_fetched_at")
+            if isinstance(latest, str) and (
+                bucket["latest_fetched_at"] is None or latest > bucket["latest_fetched_at"]
+            ):
+                bucket["latest_fetched_at"] = latest
+    return {
+        source_name: {
+            "snapshots": bucket["snapshots"],
+            "fresh_count": bucket["fresh_count"],
+            "checked_count": bucket["checked_count"],
+            "available_count": bucket["available_count"],
+            "average_score": round(sum(bucket["scores"]) / len(bucket["scores"]), 2)
+            if bucket["scores"]
+            else 0,
+            "latest_fetched_at": bucket["latest_fetched_at"],
+        }
+        for source_name, bucket in sorted(buckets.items())
+    }
+
+
+def _publication_readiness(payloads: list[JsonDict]) -> JsonDict:
+    ready = 0
+    blocked = 0
+    missing_score = 0
+    blocker_counts: dict[str, int] = {}
+    scores: list[float] = []
+    for payload in payloads:
+        score = _extract_quality_score(payload)
+        blockers = payload.get("publication_blockers")
+        blocker_list = blockers if isinstance(blockers, list) else []
+        for blocker in blocker_list:
+            blocker_counts[str(blocker)] = blocker_counts.get(str(blocker), 0) + 1
+        if score is None:
+            missing_score += 1
+            blocked += 1
+            continue
+        scores.append(score)
+        if score >= 60 and not blocker_list:
+            ready += 1
+        else:
+            blocked += 1
+    return {
+        "snapshots": len(payloads),
+        "ready_count": ready,
+        "blocked_count": blocked,
+        "missing_score_count": missing_score,
+        "average_publication_data_quality_score": round(sum(scores) / len(scores), 2)
+        if scores
+        else None,
+        "blockers": blocker_counts,
+    }
+
+
+def _data_quality_alerts(
+    *,
+    fixtures_count: int,
+    quality_payloads: list[JsonDict],
+    source_freshness: JsonDict,
+    publication_readiness: JsonDict,
+) -> list[str]:
+    alerts: list[str] = []
+    if fixtures_count and not quality_payloads:
+        alerts.append("no_feature_snapshots_for_scope")
+    if publication_readiness["blocked_count"] > 0:
+        alerts.append("publication_quality_blocks_present")
+    for source_name, source in source_freshness.items():
+        if source.get("snapshots") and source.get("fresh_count") == 0:
+            alerts.append(f"{source_name}_not_fresh")
+    return alerts

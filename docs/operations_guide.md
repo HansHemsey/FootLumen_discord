@@ -36,6 +36,17 @@ scripts/football_predictor_cli.sh data-quality
 scripts/smoke_test_local.sh
 ```
 
+Rapports qualité sans réseau :
+
+```bash
+scripts/football_predictor_cli.sh data-quality --date YYYY-MM-DD --model-family all --json
+scripts/football_predictor_cli.sh data-quality \
+  --week-of YYYY-MM-DD \
+  --model-family v3 \
+  --json-output reports/data_quality_week.json \
+  --markdown-output reports/data_quality_week.md
+```
+
 Le smoke test local n'appelle ni API-Football ni Discord. Il valide les fichiers de reference, la
 DB, le seed local et une execution `predict-today` en dry-run.
 
@@ -106,9 +117,13 @@ La V3 est activee en production malgre un backtest non valide. Surveiller les pr
 runs reels, la calibration des probabilites et la couverture odds/API/lineups issue du
 refresh live M-30. Pour verifier le rendu Discord V3 sans publier :
 
-Règle de publication publique : V3 1X2 et O/U 2.5 ne publient dans Discord que les
-pronostics `High` ou `Very High`. Les labels `Low`, `Medium`, `Uncertain` et assimilés
-sont persistés en base mais retournent `confidence_skipped`.
+Règle de publication publique : V2, V3 1X2 et O/U 2.5 ne publient dans Discord que les
+pronostics `High` ou `Very High` avec une qualité de données suffisante
+(`PUBLICATION_MIN_DATA_QUALITY_SCORE=60` par défaut). Les labels `Low`, `Medium`,
+`Uncertain`, les scores qualité absents et les scores qualité sous le seuil sont persistés
+en base mais retournent `confidence_skipped` avec une raison normalisée. Si
+`data_quality_json.publication_blockers` est non vide, la publication réelle est aussi bloquée
+avec `data_quality_blocker_present`.
 
 ```bash
 football-predictor predict-today-v3 --window late --dry-run --print-only

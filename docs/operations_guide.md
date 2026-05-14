@@ -161,6 +161,10 @@ en base mais retournent `confidence_skipped` avec une raison normalisée. Si
 `data_quality_json.publication_blockers` est non vide, la publication réelle est aussi bloquée
 avec `data_quality_blocker_present`.
 
+Les messages V3 1X2 et O/U 2.5 utilisent un rendu compact oriente parieur : pick,
+probabilites modele/marche, ecart de value, facteurs traduits et qualite data. Ce rendu
+ne modifie pas les modeles, les crons, le routage ni le filtre de publication.
+
 ```bash
 football-predictor predict-today-v3 --window late --dry-run --print-only
 ```

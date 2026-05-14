@@ -77,8 +77,20 @@ def test_run_v3_backtest_retrains_and_writes_comparison_reports(tmp_path: Path) 
     assert published_only["scopes"]["published_only"]["v3_stacker_full"]["row_count"] <= (
         published_only["scopes"]["internal_all"]["v3_stacker_full"]["row_count"]
     )
-    assert {"v3_stacker_full", "v2_existing", "odds_only"}.issubset(
+    assert {
+        "v3_stacker_full",
+        "v2_existing",
+        "odds_only",
+        "api_prediction_only",
+        "poisson_baseline",
+    }.issubset(
         published_only["scopes"]["published_only"]
+    )
+    assert "v3_stacker_full_vs_api_prediction_only" in (
+        published_only["comparisons"]["published_only"]
+    )
+    assert "v3_stacker_full_vs_poisson_baseline" in (
+        published_only["comparisons"]["published_only"]
     )
     assert "confidence_label" in published_only["groups"]
     assert "data_quality" in published_only["groups"]

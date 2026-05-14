@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from football_predictor.backtesting.confidence_calibration import (
     ConfidenceThresholdConfig,
+    apply_publication_policy_records,
     build_confidence_threshold_artifact,
     is_production_approved_artifact,
 )
@@ -82,6 +83,35 @@ def test_ou_calibration_uses_market_baseline_and_roi() -> None:
     assert validation_metrics["published_only"]["roi"] > 0
     assert validation_metrics["baseline_on_published"]["accuracy"] == 0.0
     assert "published_log_loss_vs_market" in artifact["approval_checks"]
+
+
+def test_production_like_publication_policy_excludes_weak_labels_and_quality_gate() -> None:
+    records = [
+        _v3_record(95, True, quality=85, baseline_correct=False, league_id=-10),
+        _v3_record(72, True, quality=85, baseline_correct=False, league_id=-10),
+        _v3_record(55, True, quality=95, baseline_correct=False, league_id=-10),
+        _v3_record(25, True, quality=95, baseline_correct=False, league_id=-10),
+        _v3_record(10, True, quality=95, baseline_correct=False, league_id=-10),
+        _v3_record(92, True, quality=59, baseline_correct=False, league_id=-10),
+    ]
+
+    enriched = apply_publication_policy_records(
+        records,
+        {"high": 70, "very_high": 90},
+        config=ConfidenceThresholdConfig(model_family="v3_1x2", min_data_quality_score=60),
+    )
+
+    published = [record for record in enriched if record["publication_allowed"]]
+    blocked_reasons = {
+        record["publication_decision"]["reason"]
+        for record in enriched
+        if not record["publication_allowed"]
+    }
+    assert [record["calibrated_label"] for record in published] == ["Very High", "High"]
+    assert {
+        "confidence_below_publish_threshold",
+        "data_quality_below_publish_threshold",
+    } <= blocked_reasons
 
 
 def test_invalid_or_incomplete_threshold_artifact_is_not_approved() -> None:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +15,7 @@ from football_predictor.db import models
 from football_predictor.ou_model.constants import FEATURE_VERSION, OU_THRESHOLD
 from football_predictor.ou_model.features.ou_feature_builder import build_ou_feature_snapshot
 from football_predictor.reference.lookups import ApiFootballReference, PlayersReference
+from football_predictor.utils.time import ensure_aware_utc
 
 logger = logging.getLogger(__name__)
 
@@ -30,17 +31,21 @@ def build_ou_training_dataset(
     league_ids: list[int] | None = None,
     seasons: list[int] | None = None,
     prediction_offset_hours: int = 24,
+    prediction_offset_minutes: int | None = None,
     save_path: Path | None = None,
     feature_version: str = FEATURE_VERSION,
     threshold: float = OU_THRESHOLD,
     players_reference: PlayersReference | None = None,
     api_reference: ApiFootballReference | None = None,
     limit: int | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
 ) -> pd.DataFrame:
     """Build a PIT-safe O/U training dataset.
 
     For each finished fixture with a known score:
-      - prediction_time = fixture.date - prediction_offset_hours
+      - prediction_time = fixture.date - prediction_offset_minutes when provided,
+        otherwise fixture.date - prediction_offset_hours
       - target_ou25 = int(home_goals + away_goals > threshold)
       - Calls build_ou_feature_snapshot() for point-in-time features
     """
@@ -54,6 +59,10 @@ def build_ou_training_dataset(
         stmt = stmt.where(models.Fixture.league_id.in_(league_ids))
     if seasons:
         stmt = stmt.where(models.Fixture.season.in_(seasons))
+    if date_from is not None:
+        stmt = stmt.where(models.Fixture.date >= ensure_aware_utc(date_from))
+    if date_to is not None:
+        stmt = stmt.where(models.Fixture.date <= ensure_aware_utc(date_to))
     stmt = stmt.order_by(models.Fixture.date.asc())
 
     fixtures = list(session.execute(stmt).scalars())
@@ -70,7 +79,12 @@ def build_ou_training_dataset(
         away_goals = fixture.away_goals or fixture.goals_away or 0
         total_goals = home_goals + away_goals
 
-        prediction_time = fixture.date - timedelta(hours=prediction_offset_hours)
+        offset = (
+            timedelta(minutes=prediction_offset_minutes)
+            if prediction_offset_minutes is not None
+            else timedelta(hours=prediction_offset_hours)
+        )
+        prediction_time = fixture.date - offset
         try:
             result = build_ou_feature_snapshot(
                 session,

@@ -310,6 +310,34 @@ Exports V1 :
   données de seuils de confiance réutilisables pour de futurs graphiques ;
 - `backtest_report.md` : résumé lisible des mêmes résultats.
 
+### Backtest Production-Like M-30
+
+Le backtest production-like reconstruit le flux opérationnel `late` sans appel réseau :
+il lit la base locale, sélectionne uniquement des fixtures terminées, fixe
+`prediction_time = fixture_date - 30 minutes`, génère les datasets V3 et O/U, puis applique
+la même policy de publication que la production pour produire les métriques internes et
+`published-only`.
+
+Commande :
+
+```bash
+football-predictor backtest-production-like \
+  --league-id 39 \
+  --season 2025 \
+  --v3-model-dir data/models/v3 \
+  --v2-model-dir data/models/v2-late \
+  --output-dir reports/production_like \
+  --format both
+```
+
+Rapports écrits :
+
+- `production_like_backtest_report.json` : rapport combiné V3/O-U, datasets générés,
+  métriques internes/publiées et contrôles anti-leakage ;
+- `production_like_backtest_report.md` : résumé lisible ;
+- `datasets/v3_m30.parquet` et `datasets/ou25_m30.parquet` : datasets offline utilisés
+  pour les évaluations.
+
 ## Modélisation V2 Late M-30
 
 La V2 est pensée pour les prédictions `late` M-30 et reste le rollback officiel de

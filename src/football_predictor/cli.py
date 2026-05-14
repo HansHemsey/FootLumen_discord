@@ -3349,6 +3349,107 @@ def backtest_v3(
     )
 
 
+@app.command("backtest-production-like")
+def backtest_production_like(
+    league_id: list[int] = typer.Option(
+        [],
+        "--league-id",
+        help="League id to include. Repeat for multiple leagues.",
+    ),
+    season: list[int] = typer.Option(
+        [],
+        "--season",
+        help="Season to include. Repeat for multiple seasons.",
+    ),
+    output_dir: Path = typer.Option(
+        Path("reports/production_like"),
+        "--output-dir",
+        "--report",
+        help="Directory where combined production-like reports are written.",
+    ),
+    v3_model_dir: Path = typer.Option(
+        Path("data/models/v3"),
+        "--v3-model-dir",
+        help="Directory containing V3 component artifacts.",
+    ),
+    v2_model_dir: Path | None = typer.Option(
+        None,
+        "--v2-model-dir",
+        help="Optional V2 model directory used for comparison.",
+    ),
+    date_from: str | None = typer.Option(
+        None,
+        "--date-from",
+        help="Inclusive fixture kickoff lower bound, ISO datetime.",
+    ),
+    date_to: str | None = typer.Option(
+        None,
+        "--date-to",
+        help="Inclusive fixture kickoff upper bound, ISO datetime.",
+    ),
+    limit: int | None = typer.Option(None, "--limit"),
+    output_format: str = typer.Option(
+        "both",
+        "--format",
+        help="Combined report format: json, markdown, or both.",
+    ),
+    retrain_v3: bool = typer.Option(
+        False,
+        "--retrain-v3/--no-retrain-v3",
+        help="Retrain V3 from the generated M-30 dataset before evaluating.",
+    ),
+    ou_splits: int = typer.Option(5, "--ou-splits"),
+    ou_min_train_rows: int = typer.Option(300, "--ou-min-train-rows"),
+) -> None:
+    """Run an offline production-like M-30 backtest for V3 and O/U."""
+    normalized_format = output_format.casefold()
+    if normalized_format not in {"json", "markdown", "both"}:
+        raise typer.BadParameter("--format must be json, markdown, or both")
+    if not league_id:
+        raise typer.BadParameter("--league-id is required")
+    if not season:
+        raise typer.BadParameter("--season is required")
+
+    from football_predictor.backtesting.production_like import (
+        ProductionLikeBacktestConfig,
+        run_production_like_backtest,
+    )
+
+    settings = get_settings()
+    _, session_factory = _engine_and_session(settings)
+    with session_scope(session_factory) as session:
+        result = run_production_like_backtest(
+            session,
+            config=ProductionLikeBacktestConfig(
+                league_ids=league_id,
+                seasons=season,
+                output_dir=output_dir,
+                v3_model_dir=v3_model_dir,
+                v2_model_dir=v2_model_dir,
+                ou_model_dir=settings.ou_model_dir,
+                ou_bet_id=settings.market_ou25_bet_id,
+                prediction_offset_minutes=30,
+                min_data_quality_score=settings.publication_min_data_quality_score,
+                date_from=parse_datetime(date_from),
+                date_to=parse_datetime(date_to),
+                limit=limit,
+                report_format=cast(Any, normalized_format),
+                retrain_v3=retrain_v3,
+                ou_n_splits=ou_splits,
+                ou_min_train_rows=ou_min_train_rows,
+            ),
+        )
+    console.print(
+        {
+            "v3_rows": result.v3_rows,
+            "ou_rows": result.ou_rows,
+            "datasets": {name: str(path) for name, path in result.dataset_paths.items()},
+            "reports": {name: str(path) for name, path in result.report_paths.items()},
+            "leakage_checks": result.payload.get("leakage_checks", {}),
+        }
+    )
+
+
 @app.command()
 def backtest(
     dataset: Path = typer.Option(..., "--dataset", help="CSV or Parquet backtest dataset."),

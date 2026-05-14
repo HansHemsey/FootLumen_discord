@@ -915,7 +915,13 @@ def _model_metrics_for_indexes(
 ) -> JsonDict:
     y_true = list(frame[OUTCOME_COL].astype(str))
     output: JsonDict = {}
-    for model_name in (V3_PRIMARY_MODEL_NAME, V2_MODEL_NAME, "odds_only"):
+    for model_name in (
+        V3_PRIMARY_MODEL_NAME,
+        V2_MODEL_NAME,
+        "odds_only",
+        "api_prediction_only",
+        "poisson_baseline",
+    ):
         predictions = predictions_by_model.get(model_name, [])
         selected_pairs = [
             (y_true[index], predictions[index])
@@ -953,7 +959,12 @@ def _publication_counts(records: list[JsonDict]) -> JsonDict:
 def _v3_comparisons(metrics_by_model: JsonDict) -> JsonDict:
     v3 = metrics_by_model.get(V3_PRIMARY_MODEL_NAME, {})
     output: JsonDict = {}
-    for baseline_name in (V2_MODEL_NAME, "odds_only"):
+    for baseline_name in (
+        V2_MODEL_NAME,
+        "odds_only",
+        "api_prediction_only",
+        "poisson_baseline",
+    ):
         baseline = metrics_by_model.get(baseline_name, {})
         output[f"{V3_PRIMARY_MODEL_NAME}_vs_{baseline_name}"] = {
             "accuracy_delta": _delta(v3.get("accuracy"), baseline.get("accuracy")),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -66,6 +67,8 @@ def build_v3_base_dataset(
     limit: int | None = None,
     feature_version: str = V3_FEATURE_VERSION,
     prediction_offset_minutes: int = V3_PREDICTION_OFFSET_MINUTES,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
 ) -> pd.DataFrame:
     """Build the shared PIT-safe V3 M-30 fixture dataset."""
     frame = build_training_dataset(
@@ -77,6 +80,8 @@ def build_v3_base_dataset(
         limit=limit,
         feature_version=feature_version,
         prediction_offset_minutes=prediction_offset_minutes,
+        date_from=date_from,
+        date_to=date_to,
     )
     frame = add_v3_targets(frame)
     if save_path is not None:
@@ -94,6 +99,8 @@ def build_v3_draw_risk_dataset(
     limit: int | None = None,
     feature_version: str = V3_FEATURE_VERSION,
     prediction_offset_minutes: int = V3_PREDICTION_OFFSET_MINUTES,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
 ) -> pd.DataFrame:
     """Build the binary Draw Risk dataset: target is DRAW vs NOT_DRAW."""
     frame = build_v3_base_dataset(
@@ -104,6 +111,8 @@ def build_v3_draw_risk_dataset(
         limit=limit,
         feature_version=feature_version,
         prediction_offset_minutes=prediction_offset_minutes,
+        date_from=date_from,
+        date_to=date_to,
     )
     if save_path is not None:
         _save_frame(frame, save_path)
@@ -120,6 +129,8 @@ def build_v3_no_draw_winner_dataset(
     limit: int | None = None,
     feature_version: str = V3_FEATURE_VERSION,
     prediction_offset_minutes: int = V3_PREDICTION_OFFSET_MINUTES,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
 ) -> pd.DataFrame:
     """Build the binary No-Draw Winner dataset: target is HOME vs AWAY, draws excluded."""
     frame = build_v3_base_dataset(
@@ -130,6 +141,8 @@ def build_v3_no_draw_winner_dataset(
         limit=limit,
         feature_version=feature_version,
         prediction_offset_minutes=prediction_offset_minutes,
+        date_from=date_from,
+        date_to=date_to,
     )
     if frame.empty:
         result = frame.copy()

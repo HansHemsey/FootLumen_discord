@@ -28,11 +28,13 @@ class FakeOUService:
         confidence_label: str = "Very High",
         confidence_score: float = 88.0,
         data_quality_score: float = 65.0,
+        model_version: str = "synthetic-ou",
     ) -> None:
         self.session = session
         self.confidence_label = confidence_label
         self.confidence_score = confidence_score
         self.data_quality_score = data_quality_score
+        self.model_version = model_version
         self.calls: list[int] = []
 
     def predict_fixture_ou(
@@ -46,10 +48,11 @@ class FakeOUService:
         cutoff = prediction_time or NOW
         prediction_id = None
         if save_to_db:
+            feature_version = f"{self.model_version}-{self.confidence_score:.1f}"
             snapshot = models.OUFeatureSnapshot(
                 fixture_id=fixture_id,
                 prediction_time=cutoff,
-                feature_version="synthetic-ou",
+                feature_version=feature_version,
                 threshold=2.5,
                 features_json={"synthetic": True},
                 data_quality_json={"publication_data_quality_score": self.data_quality_score},
@@ -60,7 +63,7 @@ class FakeOUService:
                 fixture_id=fixture_id,
                 ou_feature_snapshot_id=snapshot.id,
                 prediction_time=cutoff,
-                model_version="synthetic-ou",
+                model_version=self.model_version,
                 threshold=2.5,
                 p_over=0.72,
                 p_under=0.28,
@@ -76,7 +79,7 @@ class FakeOUService:
         return OUPredictionOutput(
             fixture_id=fixture_id,
             prediction_time=cutoff,
-            model_version="synthetic-ou",
+            model_version=self.model_version,
             threshold=2.5,
             p_over=0.72,
             p_under=0.28,
@@ -150,6 +153,117 @@ def test_daily_ou_late_window_sends_high_confidence_prediction(tmp_path: Path) -
     assert message.payload_json["daily_window"] == "late"
     assert message.payload_json["shadow_mode"] is False
     assert message.payload_json["publication_decision"]["allowed"] is True
+
+
+def test_daily_ou_duplicate_dedupe_key_is_not_sent_twice(tmp_path: Path) -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(204)
+
+    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'ou_daily_duplicate.db'}")
+    session_factory = create_session_factory(engine)
+    model_dir = _write_approved_artifact(tmp_path / "approved-ou", "ou25")
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler)) as http_client,
+        session_scope(session_factory) as session,
+    ):
+        _seed_ou_fixtures(session)
+        first_service = FakeOUService(session, confidence_score=88.0)
+        first = run_daily_ou_predictions(
+            TARGET_DATE,
+            session=session,
+            ou_service=first_service,  # type: ignore[arg-type]
+            discord_delivery=DiscordDeliveryService(
+                session,
+                legacy_webhook_url="https://example.invalid/ou",
+                http_client=http_client,
+            ),
+            send_discord=True,
+            dry_run=False,
+            shadow_mode=False,
+            model_dir=model_dir,
+            window="late",
+            now=NOW,
+        )
+        second_service = FakeOUService(session, confidence_score=89.0)
+        second = run_daily_ou_predictions(
+            TARGET_DATE,
+            session=session,
+            ou_service=second_service,  # type: ignore[arg-type]
+            discord_delivery=DiscordDeliveryService(
+                session,
+                legacy_webhook_url="https://example.invalid/ou",
+                http_client=http_client,
+            ),
+            send_discord=True,
+            dry_run=False,
+            shadow_mode=False,
+            model_dir=model_dir,
+            window="late",
+            now=NOW,
+        )
+
+    assert first.sent == 1
+    assert second.sent == 0
+    assert second.results[0].status == "duplicate_skipped"
+    assert calls == 1
+
+
+def test_daily_ou_different_model_version_can_send_again(tmp_path: Path) -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(204)
+
+    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'ou_daily_model_versions.db'}")
+    session_factory = create_session_factory(engine)
+    model_dir = _write_approved_artifact(tmp_path / "approved-ou", "ou25")
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler)) as http_client,
+        session_scope(session_factory) as session,
+    ):
+        _seed_ou_fixtures(session)
+        first = run_daily_ou_predictions(
+            TARGET_DATE,
+            session=session,
+            ou_service=FakeOUService(session, model_version="synthetic-ou-a"),  # type: ignore[arg-type]
+            discord_delivery=DiscordDeliveryService(
+                session,
+                legacy_webhook_url="https://example.invalid/ou",
+                http_client=http_client,
+            ),
+            send_discord=True,
+            dry_run=False,
+            shadow_mode=False,
+            model_dir=model_dir,
+            window="late",
+            now=NOW,
+        )
+        second = run_daily_ou_predictions(
+            TARGET_DATE,
+            session=session,
+            ou_service=FakeOUService(session, model_version="synthetic-ou-b"),  # type: ignore[arg-type]
+            discord_delivery=DiscordDeliveryService(
+                session,
+                legacy_webhook_url="https://example.invalid/ou",
+                http_client=http_client,
+            ),
+            send_discord=True,
+            dry_run=False,
+            shadow_mode=False,
+            model_dir=model_dir,
+            window="late",
+            now=NOW,
+        )
+
+    assert first.sent == 1
+    assert second.sent == 1
+    assert calls == 2
 
 
 def test_daily_ou_production_refuses_without_approved_artifact(tmp_path: Path) -> None:

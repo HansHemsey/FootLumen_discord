@@ -2,16 +2,27 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any
 
-from football_predictor.utils.time import format_in_timezone
+from football_predictor.discord.formatter import (
+    CODE_CLOSE,
+    CODE_OPEN,
+    DISCORD_LIMIT,
+    truncate_discord_message,
+)
+from football_predictor.utils.time import ensure_aware_utc
 
-DISCORD_LIMIT = 1900
-CODE_OPEN = "```md"
-CODE_CLOSE = "```"
-_TRUNCATION = "... message tronqué ..."
 _NA = "N/A"
+_SECRET_PATTERNS = (
+    re.compile(r"https://(?:canary\.|ptb\.)?discord(?:app)?\.com/api/webhooks/\S+", re.I),
+    re.compile(
+        r"\b(?:api[_-]?key|api[_-]?football[_-]?key|token|secret)\s*[:=]\s*['\"]?[^'\"\s]+",
+        re.I,
+    ),
+    re.compile(r"\b[A-Za-z0-9_-]{24,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{20,}\b"),
+)
 
 
 def _pct(value: float | None, decimals: int = 1) -> str:
@@ -45,7 +56,7 @@ def _date_str(dt: datetime | None, timezone_name: str) -> str:
         return _NA
     try:
         from zoneinfo import ZoneInfo
-        from football_predictor.utils.time import ensure_aware_utc
+
         local = ensure_aware_utc(dt).astimezone(ZoneInfo(timezone_name))
         return local.strftime("%d/%m/%Y %H:%M")
     except Exception:
@@ -56,13 +67,13 @@ def _match_label(prediction: Any, fixture: Any | None) -> str:
     # Prefer pre-resolved label from the prediction object
     label = getattr(prediction, "match_label", None)
     if label:
-        return label
+        return _clean(label)
     # Fall back to fixture ORM relations if available
     if fixture is not None:
         home = getattr(fixture, "home_team_name", None) or getattr(fixture, "home_team", None)
         away = getattr(fixture, "away_team_name", None) or getattr(fixture, "away_team", None)
         if home and away:
-            return f"{home} vs {away}"
+            return f"{_clean(home)} vs {_clean(away)}"
     return f"Fixture #{getattr(prediction, 'fixture_id', '?')}"
 
 
@@ -70,11 +81,11 @@ def _competition_label(prediction: Any, fixture: Any | None) -> str:
     # Prefer pre-resolved competition from the prediction object
     comp = getattr(prediction, "competition", None)
     if comp:
-        return str(comp)
+        return _clean(comp)
     if fixture is not None:
         league = getattr(fixture, "league_name", None) or getattr(fixture, "competition", None)
         if league:
-            return str(league)
+            return _clean(league)
     return _NA
 
 
@@ -94,8 +105,15 @@ def _experts_lines(experts: dict[str, float] | None) -> list[str]:
         return []
     lines = ["Sources experts :"]
     for name, p in sorted(experts.items()):
-        lines.append(f"  {name:<12} {_pct(p)}")
+        lines.append(f"  {_clean(name):<12} {_pct(p)}")
     return lines
+
+
+def _clean(value: Any) -> str:
+    text = str(value).replace("```", "'''").replace("\r", " ").strip()
+    for pattern in _SECRET_PATTERNS:
+        text = pattern.sub("[secret masqué]", text)
+    return " ".join(text.split()) or _NA
 
 
 def format_ou_prediction_markdown(
@@ -182,18 +200,4 @@ def format_ou_prediction_markdown(
 
     lines.append(CODE_CLOSE)
 
-    raw = "\n".join(lines)
-    if len(raw) <= limit:
-        return raw
-
-    truncated: list[str] = []
-    budget = limit - len(CODE_CLOSE) - len(_TRUNCATION) - 2
-    used = 0
-    for line in lines[:-1]:
-        if used + len(line) + 1 > budget:
-            truncated.append(_TRUNCATION)
-            break
-        truncated.append(line)
-        used += len(line) + 1
-    truncated.append(CODE_CLOSE)
-    return "\n".join(truncated)
+    return truncate_discord_message("\n".join(lines), max_chars=limit)

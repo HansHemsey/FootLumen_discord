@@ -888,6 +888,7 @@ def _send_prediction_v3(
         message_type="prediction",
         fixture_id=fixture.fixture_id,
         model_prediction_id=None,
+        v3_model_prediction_id=output.v3_model_prediction_id,
         dry_run=dry_run,
         print_only=print_only,
         force=force,

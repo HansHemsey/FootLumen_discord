@@ -10,6 +10,7 @@ from football_predictor.discord.formatter import (
     truncate_discord_message,
 )
 from football_predictor.modeling.probabilities import ProbabilityTriple
+from football_predictor.ou_model.discord.ou_formatter import format_ou_prediction_markdown
 
 
 def test_message_starts_and_ends_with_markdown_code_block() -> None:
@@ -118,6 +119,60 @@ def test_secrets_are_masked_from_rendered_message() -> None:
     )
 
     message = format_prediction_markdown(prediction, _fixture())
+
+    assert webhook not in message
+    assert "synthetic-secret-value" not in message
+    assert "abc123syntheticsecret" not in message
+    assert "[secret masqué]" in message
+
+
+def test_ou_formatter_truncates_and_preserves_code_block() -> None:
+    prediction = SimpleNamespace(
+        fixture_id=-501,
+        p_over=0.72,
+        p_under=0.28,
+        xg_home=1.6,
+        xg_away=1.2,
+        xg_total=2.8,
+        market_odd_over=1.9,
+        market_odd_under=1.9,
+        market_p_over=0.55,
+        market_p_under=0.45,
+        edge_over=0.17,
+        ev_over=0.36,
+        edge_under=-0.17,
+        ev_under=-0.47,
+        confidence_label="Very High",
+        confidence_score=88.0,
+        kickoff_time=datetime(2026, 5, 2, 18, 0, tzinfo=UTC),
+        match_label="Synthetic Home " + "x" * 1200 + " vs Synthetic Away",
+        competition="Synthetic League",
+        expert_probabilities={f"expert_{idx}_{'x' * 80}": 0.72 for idx in range(20)},
+    )
+
+    message = format_ou_prediction_markdown(prediction, limit=500)
+
+    assert len(message) <= 500
+    assert message.startswith("```md")
+    assert message.endswith("\n```")
+    assert "message tronqué" in message
+
+
+def test_ou_formatter_masks_secrets_from_text_fields() -> None:
+    webhook = "https://discord.com/api/webhooks/123456/synthetic-secret"
+    prediction = SimpleNamespace(
+        fixture_id=-501,
+        p_over=0.72,
+        p_under=0.28,
+        confidence_label="Very High",
+        confidence_score=88.0,
+        kickoff_time=datetime(2026, 5, 2, 18, 0, tzinfo=UTC),
+        match_label=f"Synthetic Home {webhook} vs Synthetic Away",
+        competition="api_key=synthetic-secret-value",
+        expert_probabilities={"token=abc123syntheticsecret": 0.72},
+    )
+
+    message = format_ou_prediction_markdown(prediction)
 
     assert webhook not in message
     assert "synthetic-secret-value" not in message

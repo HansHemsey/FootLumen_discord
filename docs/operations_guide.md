@@ -209,6 +209,11 @@ Le score hebdomadaire compte uniquement les predictions réellement envoyées da
 et dont le match est terminé : V2 legacy, V3 via `v3_model_prediction_id`, et O/U 2.5 via
 `ou_model_prediction_id`. Les prédictions internes non publiées, `dry_run`, `print_only`
 et `confidence_skipped` ne sont jamais incluses.
+Le payload du message `weekly_prediction_score` conserve un audit local avec
+`model_family_counts` et `counted_predictions` pour relier chaque ligne au message Discord
+et a la prediction source réellement comptés. Ce bilan reflète l'état enregistré dans la
+base locale : une suppression manuelle directement dans Discord n'est pas détectable sans
+audit API explicite.
 Il est remplace par `week_key` : une relance dans la même semaine met a jour le message
 de cette semaine, mais ne supprime pas les autres semaines. Le lundi, `daily_morning.sh`
 publie aussi une finalisation de la semaine précédente pour inclure les matchs du dimanche

@@ -300,6 +300,12 @@ def run_daily_ou_predictions(
                             message_type="ou_prediction",
                             fixture_id=fixture.fixture_id,
                             model_prediction_id=None,
+                            ou_model_prediction_id=prediction.ou_model_prediction_id,
+                            dedupe_key=_ou_dedupe_key(
+                                fixture.fixture_id,
+                                resolved_window,
+                                prediction.model_version,
+                            ),
                             dry_run=dry_run,
                             print_only=print_only,
                             payload_metadata=payload_metadata,
@@ -367,6 +373,14 @@ def _publication_metadata(decision: PublicationDecision) -> JsonDict:
     if decision.reason is not None:
         payload["non_publication_reason"] = decision.reason
     return payload
+
+
+def _ou_dedupe_key(
+    fixture_id: int,
+    window: DailyPredictionWindow,
+    model_version: str,
+) -> str:
+    return f"ou25:{fixture_id}:{window.value}:{model_version}:ou_prediction"
 
 
 def _annotate_ou_model_prediction(

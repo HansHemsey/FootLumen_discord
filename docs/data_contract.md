@@ -888,13 +888,20 @@ Métadonnées ajoutées dans `V3ModelPrediction.payload_json` :
 - `run_key` ;
 - `refresh_warnings`.
 
-Quand un message Discord V3 est créé, `DiscordMessage.model_prediction_id` reste `null`
-car la FK pointe vers les prédictions V2. Le lien V3 est porté par
-`DiscordMessage.payload_json` :
+Quand un message Discord V3 ou O/U est créé, `DiscordMessage.model_prediction_id` reste
+`null` car cette FK pointe vers les prédictions V2. Les liens directs sont portés par
+des colonnes dédiées :
+
+- `DiscordMessage.v3_model_prediction_id` pour les prédictions V3 1X2 publiées ;
+- `DiscordMessage.ou_model_prediction_id` pour les prédictions O/U 2.5 publiées ;
+- `DiscordMessage.dedupe_key` pour la déduplication sémantique O/U.
+
+Pour compatibilité avec les anciennes lignes, `DiscordMessage.payload_json` conserve aussi :
 
 - `v3_model_prediction_id` pour les prédictions V3 1X2 publiées ;
 - `v3_feature_snapshot_id` pour les prédictions V3 1X2 publiées ;
 - `ou_model_prediction_id` pour les prédictions O/U 2.5 publiées ;
+- `dedupe_key` si une clé de déduplication sémantique a été fournie ;
 - `model_family` (`v3` ou `ou25`) ;
 - `shadow_mode` pour V3 ;
 - `daily_window` / `automation_window` ;
@@ -910,3 +917,9 @@ pas éligibles au score public hebdomadaire.
 Les vrais messages `predictions` sont dédupliqués par `fixture_id + window` pour éviter un
 second envoi réel V2 ou V3 sur la même fenêtre. `dry_run` et `print_only` ne bloquent
 jamais un futur envoi réel. `--force` permet de renvoyer explicitement.
+
+Les vrais messages O/U utilisent en plus une clé sémantique :
+`ou25:{fixture_id}:{window}:{model_version}:ou_prediction`. Un message `sent` avec le même
+`webhook_hash` et la même `dedupe_key` bloque un second envoi live, même si le rendu
+markdown change. `dry_run`, `print_only` et les lignes `duplicate_skipped` ne comptent pas
+comme publication réelle et ne sont pas éligibles au score public hebdomadaire.

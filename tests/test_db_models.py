@@ -218,8 +218,11 @@ def test_create_db_and_tables_creates_expected_schema(tmp_path: Path) -> None:
     assert _columns(inspector, "discord_messages") >= {
         "fixture_id",
         "model_prediction_id",
+        "v3_model_prediction_id",
+        "ou_model_prediction_id",
         "webhook_url_hash",
         "message_hash",
+        "dedupe_key",
         "competition_key",
         "league_id",
         "season",

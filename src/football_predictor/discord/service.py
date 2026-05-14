@@ -68,6 +68,9 @@ class DiscordDeliveryService:
         message_type: str = "prediction",
         fixture_id: int | None = None,
         model_prediction_id: int | None = None,
+        v3_model_prediction_id: int | None = None,
+        ou_model_prediction_id: int | None = None,
+        dedupe_key: str | None = None,
         dry_run: bool = False,
         print_only: bool = False,
         force: bool = False,
@@ -91,21 +94,47 @@ class DiscordDeliveryService:
         message_hash = hash_message(markdown)
         webhook_hash = route.webhook_hash
         if not force and webhook_hash is not None:
-            existing = self._existing_sent(webhook_hash, message_hash)
-            if existing is not None:
-                row = self._persist_message(
-                    markdown,
-                    route=route,
-                    message_hash=message_hash,
-                    status="duplicate_skipped",
-                    fixture_id=fixture_id,
-                    model_prediction_id=model_prediction_id,
-                    dry_run=dry_run,
-                    print_only=print_only,
-                    response_json={"duplicate_of": existing.id},
-                    payload_metadata=payload_metadata,
-                )
-                return self._result("duplicate_skipped", route, message_hash, row)
+            if dedupe_key:
+                existing = self._existing_sent_by_dedupe_key(webhook_hash, dedupe_key)
+                if existing is not None:
+                    row = self._persist_message(
+                        markdown,
+                        route=route,
+                        message_hash=message_hash,
+                        status="duplicate_skipped",
+                        fixture_id=fixture_id,
+                        model_prediction_id=model_prediction_id,
+                        v3_model_prediction_id=v3_model_prediction_id,
+                        ou_model_prediction_id=ou_model_prediction_id,
+                        dedupe_key=dedupe_key,
+                        dry_run=dry_run,
+                        print_only=print_only,
+                        response_json={
+                            "duplicate_of": existing.id,
+                            "duplicate_reason": "dedupe_key",
+                        },
+                        payload_metadata=payload_metadata,
+                    )
+                    return self._result("duplicate_skipped", route, message_hash, row)
+            else:
+                existing = self._existing_sent(webhook_hash, message_hash)
+                if existing is not None:
+                    row = self._persist_message(
+                        markdown,
+                        route=route,
+                        message_hash=message_hash,
+                        status="duplicate_skipped",
+                        fixture_id=fixture_id,
+                        model_prediction_id=model_prediction_id,
+                        v3_model_prediction_id=v3_model_prediction_id,
+                        ou_model_prediction_id=ou_model_prediction_id,
+                        dedupe_key=dedupe_key,
+                        dry_run=dry_run,
+                        print_only=print_only,
+                        response_json={"duplicate_of": existing.id},
+                        payload_metadata=payload_metadata,
+                    )
+                    return self._result("duplicate_skipped", route, message_hash, row)
 
         if print_only:
             row = self._persist_message(
@@ -115,6 +144,9 @@ class DiscordDeliveryService:
                 status="print_only",
                 fixture_id=fixture_id,
                 model_prediction_id=model_prediction_id,
+                v3_model_prediction_id=v3_model_prediction_id,
+                ou_model_prediction_id=ou_model_prediction_id,
+                dedupe_key=dedupe_key,
                 dry_run=dry_run,
                 print_only=True,
                 response_json={"print_only": True},
@@ -130,6 +162,9 @@ class DiscordDeliveryService:
                 status="dry_run",
                 fixture_id=fixture_id,
                 model_prediction_id=model_prediction_id,
+                v3_model_prediction_id=v3_model_prediction_id,
+                ou_model_prediction_id=ou_model_prediction_id,
+                dedupe_key=dedupe_key,
                 dry_run=True,
                 print_only=False,
                 response_json={"dry_run": True, "route": route.safe_dict()},
@@ -154,6 +189,9 @@ class DiscordDeliveryService:
             status="sent",
             fixture_id=fixture_id,
             model_prediction_id=model_prediction_id,
+            v3_model_prediction_id=v3_model_prediction_id,
+            ou_model_prediction_id=ou_model_prediction_id,
+            dedupe_key=dedupe_key,
             dry_run=False,
             print_only=False,
             sent_at=utc_now(),
@@ -242,6 +280,20 @@ class DiscordDeliveryService:
         )
         return self.session.execute(stmt).scalars().first()
 
+    def _existing_sent_by_dedupe_key(
+        self,
+        webhook_hash: str,
+        dedupe_key: str,
+    ) -> DiscordMessage | None:
+        stmt = select(DiscordMessage).where(
+            DiscordMessage.webhook_hash == webhook_hash,
+            DiscordMessage.dedupe_key == dedupe_key,
+            DiscordMessage.status == "sent",
+            DiscordMessage.dry_run.is_(False),
+            DiscordMessage.print_only.is_(False),
+        )
+        return self.session.execute(stmt).scalars().first()
+
     def _previous_sent_messages(
         self,
         route: DiscordRoute,
@@ -292,6 +344,9 @@ class DiscordDeliveryService:
         status: str,
         fixture_id: int | None,
         model_prediction_id: int | None,
+        v3_model_prediction_id: int | None,
+        ou_model_prediction_id: int | None,
+        dedupe_key: str | None,
         dry_run: bool,
         print_only: bool,
         response_json: dict[str, Any],
@@ -300,9 +355,20 @@ class DiscordDeliveryService:
     ) -> DiscordMessage:
         webhook_hash = route.webhook_hash
         metadata = payload_metadata or {}
+        link_metadata = {
+            key: value
+            for key, value in {
+                "v3_model_prediction_id": v3_model_prediction_id,
+                "ou_model_prediction_id": ou_model_prediction_id,
+                "dedupe_key": dedupe_key,
+            }.items()
+            if value is not None
+        }
         row = DiscordMessage(
             fixture_id=fixture_id,
             model_prediction_id=model_prediction_id,
+            v3_model_prediction_id=v3_model_prediction_id,
+            ou_model_prediction_id=ou_model_prediction_id,
             sent_at=sent_at,
             status=status,
             competition_key=route.competition_key,
@@ -315,12 +381,14 @@ class DiscordDeliveryService:
             webhook_url_hash=webhook_hash,
             webhook_hash=webhook_hash,
             message_hash=message_hash,
+            dedupe_key=dedupe_key,
             message_markdown=markdown,
             route_json=route.safe_dict(),
             response_json=response_json,
             payload_json={
                 "content": markdown,
                 "discord_api_message_id": _response_message_id(response_json),
+                **link_metadata,
                 **metadata,
             },
             response_text=str(response_json)[:500] if response_json else None,
@@ -372,6 +440,9 @@ def send_discord_message(
     message_type: str,
     fixture_id: int | None = None,
     model_prediction_id: int | None = None,
+    v3_model_prediction_id: int | None = None,
+    ou_model_prediction_id: int | None = None,
+    dedupe_key: str | None = None,
     dry_run: bool = False,
     print_only: bool = False,
     force: bool = False,
@@ -384,6 +455,9 @@ def send_discord_message(
         message_type=message_type,
         fixture_id=fixture_id,
         model_prediction_id=model_prediction_id,
+        v3_model_prediction_id=v3_model_prediction_id,
+        ou_model_prediction_id=ou_model_prediction_id,
+        dedupe_key=dedupe_key,
         dry_run=dry_run,
         print_only=print_only,
         force=force,

@@ -115,6 +115,58 @@ def test_delivery_sends_with_mocked_http_and_dedupes(
     assert statuses == ["sent", "duplicate_skipped"]
 
 
+def test_delivery_masks_secret_content_before_http_and_persistence(
+    reference_path: Path,
+    tmp_path: Path,
+) -> None:
+    secret_webhook = "https://discord.com/api/webhooks/123456/synthetic-secret"
+    api_key = "synthetic-api-key-value"
+    captured: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = request.read().decode()
+        return httpx.Response(204)
+
+    reference = load_api_football_reference(reference_path)
+    channels = load_discord_channels_config("config/discord_channels.example.yaml", reference)
+    webhooks = load_discord_webhooks_config(
+        _write_webhooks(tmp_path / "discord_webhooks.yaml"),
+        reference,
+    )
+    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'discord_secret_guard.db'}")
+    session_factory = create_session_factory(engine)
+
+    markdown = f"```md\nWebhook {secret_webhook}\napi_key={api_key}\n```"
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler)) as client,
+        session_scope(session_factory) as session,
+    ):
+        result = DiscordDeliveryService(
+            session,
+            channels_config=channels,
+            webhooks_config=webhooks,
+            http_client=client,
+        ).send_markdown(
+            markdown,
+            competition_key="ligue1",
+            message_type="prediction",
+            payload_metadata={"note": f"webhook={secret_webhook}", "api_key": api_key},
+        )
+
+    with session_scope(session_factory) as session:
+        row = session.get(models.DiscordMessage, result.discord_message_id)
+
+    assert row is not None
+    assert secret_webhook not in captured["body"]
+    assert api_key not in captured["body"]
+    assert secret_webhook not in row.message_markdown
+    assert api_key not in row.message_markdown
+    assert secret_webhook not in row.payload_json["content"]
+    assert row.payload_json["api_key"] == "<redacted>"
+    assert row.payload_json["note"] == "webhook=<redacted>"
+    assert "[secret masqué]" in row.message_markdown
+
+
 def test_delivery_wait_stores_discord_api_message_id(
     reference_path: Path,
     tmp_path: Path,

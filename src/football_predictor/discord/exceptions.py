@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from football_predictor.utils.exceptions import DiscordWebhookError as BaseDiscordWebhookError
+from football_predictor.utils.secrets import sanitize_secret_text
 
 
 class DiscordRoutingError(BaseDiscordWebhookError):
@@ -27,5 +28,5 @@ class DiscordWebhookError(BaseDiscordWebhookError):
         if self.webhook_hash:
             parts.append(f"webhook_hash={self.webhook_hash}")
         if self.response_text:
-            parts.append(f"response_text={self.response_text[:200]}")
+            parts.append(f"response_text={sanitize_secret_text(self.response_text[:200])}")
         return " ".join(parts)

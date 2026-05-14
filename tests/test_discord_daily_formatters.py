@@ -92,3 +92,26 @@ def test_daily_matches_formatter_handles_no_matches() -> None:
     assert len(messages) == 1
     assert "Aucun match programmé" in messages[0]
     assert len(messages[0]) <= 1900
+
+
+def test_daily_formatters_mask_secret_like_text() -> None:
+    webhook = "https://discord.com/api/webhooks/123456/synthetic-secret"
+    api_key = "synthetic-api-key-value"
+
+    messages = format_daily_matches_messages(
+        competition=f"League {webhook}",
+        match_date="2026-05-02",
+        rows=[
+            FixtureLine(
+                datetime(2026, 5, 2, 18, 0, tzinfo=UTC),
+                f"Home api_key={api_key}",
+                "Away",
+                "NS",
+            )
+        ],
+    )
+
+    rendered = "\n".join(messages)
+    assert webhook not in rendered
+    assert api_key not in rendered
+    assert "[secret masqué]" in rendered

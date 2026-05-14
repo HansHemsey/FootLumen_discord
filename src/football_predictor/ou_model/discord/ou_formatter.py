@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from datetime import datetime
 from typing import Any
 
@@ -12,17 +11,10 @@ from football_predictor.discord.formatter import (
     DISCORD_LIMIT,
     truncate_discord_message,
 )
+from football_predictor.utils.secrets import sanitize_secret_text
 from football_predictor.utils.time import ensure_aware_utc
 
 _NA = "N/A"
-_SECRET_PATTERNS = (
-    re.compile(r"https://(?:canary\.|ptb\.)?discord(?:app)?\.com/api/webhooks/\S+", re.I),
-    re.compile(
-        r"\b(?:api[_-]?key|api[_-]?football[_-]?key|token|secret)\s*[:=]\s*['\"]?[^'\"\s]+",
-        re.I,
-    ),
-    re.compile(r"\b[A-Za-z0-9_-]{24,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{20,}\b"),
-)
 
 
 def _pct(value: float | None, decimals: int = 1) -> str:
@@ -111,8 +103,7 @@ def _experts_lines(experts: dict[str, float] | None) -> list[str]:
 
 def _clean(value: Any) -> str:
     text = str(value).replace("```", "'''").replace("\r", " ").strip()
-    for pattern in _SECRET_PATTERNS:
-        text = pattern.sub("[secret masqué]", text)
+    text = sanitize_secret_text(text, replacement="[secret masqué]")
     return " ".join(text.split()) or _NA
 
 

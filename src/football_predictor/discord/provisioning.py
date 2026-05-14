@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -15,7 +16,7 @@ from football_predictor.discord.config import (
 )
 from football_predictor.discord.exceptions import DiscordWebhookError
 from football_predictor.reference.lookups import ApiFootballReference
-from football_predictor.utils.secrets import hash_secret
+from football_predictor.utils.secrets import hash_secret, sanitize_secret_text
 
 
 @dataclass(frozen=True)
@@ -115,7 +116,7 @@ class DiscordWebhookProvisioner:
             raise DiscordWebhookError(
                 "Discord webhook provisioning failed",
                 status_code=response.status_code,
-                response_text=response.text[:200],
+                response_text=sanitize_secret_text(response.text[:200]),
             )
         return response
 
@@ -190,3 +191,5 @@ def write_local_webhooks_config(path: str | Path, routes: list[ProvisionedWebhoo
     resolved = Path(path)
     resolved.parent.mkdir(parents=True, exist_ok=True)
     resolved.write_text(text, encoding="utf-8")
+    with suppress(OSError):
+        resolved.chmod(0o600)

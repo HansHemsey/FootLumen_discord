@@ -13,6 +13,18 @@ Les secrets restent hors Git :
 Ne jamais afficher une cle API, une URL webhook complete ou un bot token. Les logs peuvent afficher
 un statut configure/non configure et un hash court.
 
+Permissions recommandées sur la machine d'exploitation :
+
+```bash
+[ -f .env ] && chmod 600 .env
+find config -maxdepth 1 -name '*.local.yaml' -exec chmod 600 {} +
+chmod 700 logs data
+```
+
+Les fichiers générés par le provisioning Discord local sont écrits en `0600` quand le système
+de fichiers le permet. Ne jamais copier `.env` ou `config/*.local.yaml` dans un rapport, un
+ticket ou un commit.
+
 ## Fichiers De Reference
 
 Les cinq fichiers suivants doivent etre presents sur la machine d'exploitation :

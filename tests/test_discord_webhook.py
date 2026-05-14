@@ -83,6 +83,32 @@ def test_webhook_client_errors_mask_url(status_code: int) -> None:
     assert "hash=" in str(exc_info.value)
 
 
+def test_webhook_client_error_body_masks_secret_fragments() -> None:
+    webhook = "https://discord.com/api/webhooks/123456/synthetic-secret"
+    api_key = "synthetic-api-key-value"
+    bearer = "synthetic-bearer-token"
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            500,
+            text=f"proxy echoed {webhook} api_key={api_key} Bearer {bearer}",
+        )
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler)) as client,
+        pytest.raises(DiscordWebhookError) as exc_info,
+    ):
+        DiscordWebhookClient("https://example.invalid/webhook", client=client).send_message(
+            "message"
+        )
+
+    rendered = str(exc_info.value)
+    assert webhook not in rendered
+    assert api_key not in rendered
+    assert bearer not in rendered
+    assert "<redacted>" in rendered
+
+
 def test_webhook_payload_does_not_include_bot_token() -> None:
     captured: dict[str, str] = {}
 

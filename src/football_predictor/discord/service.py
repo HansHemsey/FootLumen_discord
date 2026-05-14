@@ -24,7 +24,8 @@ from football_predictor.prediction.publication_policy import (
     evaluate_publication,
     publication_decision_payload,
 )
-from football_predictor.utils.secrets import hash_secret
+from football_predictor.utils.logging import sanitize_value
+from football_predictor.utils.secrets import hash_secret, sanitize_secret_text
 from football_predictor.utils.time import utc_now
 
 
@@ -78,6 +79,7 @@ class DiscordDeliveryService:
         wait: bool = False,
         payload_metadata: dict[str, Any] | None = None,
     ) -> DiscordSendResult:
+        safe_markdown = sanitize_discord_markdown(markdown)
         route = resolve_discord_route(
             channels_config=self.channels_config,
             webhooks_config=self.webhooks_config,
@@ -91,14 +93,14 @@ class DiscordDeliveryService:
             allow_missing_webhook=dry_run or print_only,
             force=force,
         )
-        message_hash = hash_message(markdown)
+        message_hash = hash_message(safe_markdown)
         webhook_hash = route.webhook_hash
         if not force and webhook_hash is not None:
             if dedupe_key:
                 existing = self._existing_sent_by_dedupe_key(webhook_hash, dedupe_key)
                 if existing is not None:
                     row = self._persist_message(
-                        markdown,
+                        safe_markdown,
                         route=route,
                         message_hash=message_hash,
                         status="duplicate_skipped",
@@ -120,7 +122,7 @@ class DiscordDeliveryService:
                 existing = self._existing_sent(webhook_hash, message_hash)
                 if existing is not None:
                     row = self._persist_message(
-                        markdown,
+                        safe_markdown,
                         route=route,
                         message_hash=message_hash,
                         status="duplicate_skipped",
@@ -138,7 +140,7 @@ class DiscordDeliveryService:
 
         if print_only:
             row = self._persist_message(
-                markdown,
+                safe_markdown,
                 route=route,
                 message_hash=message_hash,
                 status="print_only",
@@ -156,7 +158,7 @@ class DiscordDeliveryService:
 
         if dry_run:
             row = self._persist_message(
-                markdown,
+                safe_markdown,
                 route=route,
                 message_hash=message_hash,
                 status="dry_run",
@@ -181,9 +183,9 @@ class DiscordDeliveryService:
             route.webhook_url,
             timeout=self.timeout,
             client=self.http_client,
-        ).send_markdown(markdown, wait=wait)
+        ).send_markdown(safe_markdown, wait=wait)
         row = self._persist_message(
-            markdown,
+            safe_markdown,
             route=route,
             message_hash=message_hash,
             status="sent",
@@ -354,7 +356,12 @@ class DiscordDeliveryService:
         payload_metadata: dict[str, Any] | None = None,
     ) -> DiscordMessage:
         webhook_hash = route.webhook_hash
-        metadata = payload_metadata or {}
+        metadata = sanitize_value(payload_metadata or {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+        safe_response_json = sanitize_value(response_json)
+        if not isinstance(safe_response_json, dict):
+            safe_response_json = {}
         link_metadata = {
             key: value
             for key, value in {
@@ -384,14 +391,14 @@ class DiscordDeliveryService:
             dedupe_key=dedupe_key,
             message_markdown=markdown,
             route_json=route.safe_dict(),
-            response_json=response_json,
+            response_json=safe_response_json,
             payload_json={
                 "content": markdown,
-                "discord_api_message_id": _response_message_id(response_json),
+                "discord_api_message_id": _response_message_id(safe_response_json),
                 **link_metadata,
                 **metadata,
             },
-            response_text=str(response_json)[:500] if response_json else None,
+            response_text=str(safe_response_json)[:500] if safe_response_json else None,
         )
         self.session.add(row)
         self.session.flush()
@@ -417,6 +424,11 @@ class DiscordDeliveryService:
 
 def hash_message(markdown: str) -> str:
     return hashlib.sha256(markdown.encode("utf-8")).hexdigest()
+
+
+def sanitize_discord_markdown(markdown: str) -> str:
+    """Final guardrail before Discord send/persistence."""
+    return sanitize_secret_text(markdown, replacement="[secret masqué]")
 
 
 def discord_api_message_id(row: DiscordMessage) -> str | None:

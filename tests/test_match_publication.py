@@ -47,6 +47,33 @@ def test_match_analysis_formatter_is_closed_and_under_limit() -> None:
     assert "Conclusion" in message
 
 
+def test_match_analysis_formatter_masks_secret_like_text() -> None:
+    webhook = "https://discord.com/api/webhooks/123456/synthetic-secret"
+    api_key = "synthetic-api-key-value"
+    fixture, prediction, snapshot = _fixture_prediction_snapshot(
+        fixture_date=datetime(2026, 5, 3, 18, tzinfo=UTC),
+        prediction_time=datetime(2026, 5, 3, 12, tzinfo=UTC),
+    )
+    fixture.home_team = f"Home {webhook}"
+    fixture.venue_name = f"api_key={api_key}"
+    snapshot.features_json = {
+        **snapshot.features_json,
+        "home_team_key_absences_json": [
+            {"name": f"Player {webhook}", "reason": f"api_key={api_key}"}
+        ],
+    }
+
+    message = format_match_analysis_message(
+        fixture=fixture,
+        prediction=prediction,
+        features=snapshot.features_json,
+    )
+
+    assert webhook not in message
+    assert api_key not in message
+    assert "[secret masqué]" in message
+
+
 def test_match_result_formatter_compares_prediction() -> None:
     fixture, prediction, _snapshot = _fixture_prediction_snapshot(
         fixture_date=datetime(2026, 5, 3, 18, tzinfo=UTC),

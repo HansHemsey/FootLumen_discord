@@ -25,9 +25,11 @@ from football_predictor.ou_model.prediction.ou_service import (
     OUPredictionService,
 )
 from football_predictor.prediction.publication_policy import (
-    CONFIDENCE_SKIP_REASON,
-    is_publishable_confidence,
+    DEFAULT_MIN_DATA_QUALITY_SCORE,
+    PublicationDecision,
+    evaluate_publication,
     normalize_confidence_label,
+    publication_decision_payload,
 )
 from football_predictor.prediction.scheduler import (
     DailyPredictionWindow,
@@ -173,6 +175,7 @@ def run_daily_ou_predictions(
     now: datetime | None = None,
     limit: int | None = None,
     edge_threshold: float = 0.02,
+    min_data_quality_score: float = DEFAULT_MIN_DATA_QUALITY_SCORE,
 ) -> OUDailyPredictionSummary:
     """Predict O/U 2.5 for all eligible fixtures on a date."""
     resolved_window = parse_daily_window(window)
@@ -229,26 +232,44 @@ def run_daily_ou_predictions(
                 prediction_time,
                 save_to_db=not dry_run,
             )
+            payload_metadata = {
+                "model_family": "ou25",
+                "ou_model_prediction_id": prediction.ou_model_prediction_id,
+                "daily_window": resolved_window.value,
+                "automation_window": resolved_window.value,
+                "automation_date": target_date.isoformat(),
+                "prediction_time": prediction_time.isoformat(),
+            }
+            publication_decision = evaluate_publication(
+                prediction.confidence_label,
+                prediction.data_quality_json,
+                min_data_quality_score=min_data_quality_score,
+            )
+            payload_metadata.update(_publication_metadata(publication_decision))
+            _annotate_ou_model_prediction(
+                session,
+                prediction.ou_model_prediction_id,
+                payload_metadata,
+            )
 
             status = "predicted"
             if send_discord and discord_delivery is not None:
-                if (
-                    not dry_run
-                    and not print_only
-                    and not is_publishable_confidence(prediction.confidence_label)
-                ):
+                if not dry_run and not print_only and not publication_decision.allowed:
                     logger.info(
                         "O/U Discord publication skipped: fixture_id=%s "
-                        "confidence_label=%s confidence_score=%s expected=%s "
-                        "window=%s",
+                        "confidence_label=%s confidence_score=%s data_quality_score=%s "
+                        "min_data_quality_score=%s reason=%s expected=%s window=%s",
                         fixture.fixture_id,
                         normalize_confidence_label(prediction.confidence_label),
                         prediction.confidence_score,
+                        publication_decision.data_quality_score,
+                        publication_decision.min_data_quality_score,
+                        publication_decision.reason,
                         "High|Very High",
                         resolved_window.value,
                     )
                     status = "confidence_skipped"
-                    reason = CONFIDENCE_SKIP_REASON
+                    reason = publication_decision.reason
                 else:
                     try:
                         md = format_ou_prediction_markdown(
@@ -269,14 +290,7 @@ def run_daily_ou_predictions(
                             model_prediction_id=None,
                             dry_run=dry_run,
                             print_only=print_only,
-                            payload_metadata={
-                                "model_family": "ou25",
-                                "ou_model_prediction_id": prediction.ou_model_prediction_id,
-                                "daily_window": resolved_window.value,
-                                "automation_window": resolved_window.value,
-                                "automation_date": target_date.isoformat(),
-                                "prediction_time": prediction_time.isoformat(),
-                            },
+                            payload_metadata=payload_metadata,
                         )
                         discord_sent = send_result.status == "sent"
                         discord_message_id = send_result.discord_message_id
@@ -330,3 +344,29 @@ def run_daily_ou_predictions(
         window=resolved_window,
         results=results,
     )
+
+
+def _publication_metadata(decision: PublicationDecision) -> JsonDict:
+    payload = {
+        "publication_decision": publication_decision_payload(decision),
+        "publication_policy_version": decision.policy_version,
+    }
+    if decision.reason is not None:
+        payload["non_publication_reason"] = decision.reason
+    return payload
+
+
+def _annotate_ou_model_prediction(
+    session: Session,
+    ou_model_prediction_id: int | None,
+    metadata: JsonDict,
+) -> None:
+    if ou_model_prediction_id is None:
+        return
+    prediction = session.get(models.OUModelPrediction, ou_model_prediction_id)
+    if prediction is None:
+        return
+    payload = dict(prediction.payload_json) if isinstance(prediction.payload_json, dict) else {}
+    payload.update(metadata)
+    prediction.payload_json = payload
+    session.flush()

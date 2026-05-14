@@ -113,12 +113,23 @@ class Settings(BaseSettings):
         default=Path("data/models/ou-v1"),
         validation_alias="OU_MODEL_DIR",
     )
+    publication_min_data_quality_score: float = Field(
+        default=60.0,
+        validation_alias="PUBLICATION_MIN_DATA_QUALITY_SCORE",
+    )
 
     @field_validator("market_1x2_bet_id", mode="before")
     @classmethod
     def _empty_market_bet_id_to_none(cls, value: object) -> object:
         if value == "":
             return None
+        return value
+
+    @field_validator("publication_min_data_quality_score")
+    @classmethod
+    def _validate_publication_quality_score(cls, value: float) -> float:
+        if not 0 <= value <= 100:
+            raise ValueError("PUBLICATION_MIN_DATA_QUALITY_SCORE must be between 0 and 100")
         return value
 
     def secret_status_lines(self) -> list[str]:

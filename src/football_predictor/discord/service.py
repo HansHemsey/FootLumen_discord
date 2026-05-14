@@ -18,6 +18,12 @@ from football_predictor.discord.exceptions import DiscordWebhookError
 from football_predictor.discord.formatter import format_prediction_markdown
 from football_predictor.discord.router import DiscordRoute, resolve_discord_route
 from football_predictor.discord.webhook import DiscordWebhookClient
+from football_predictor.prediction.publication_policy import (
+    DEFAULT_MIN_DATA_QUALITY_SCORE,
+    PublicationDecision,
+    evaluate_publication,
+    publication_decision_payload,
+)
 from football_predictor.utils.secrets import hash_secret
 from football_predictor.utils.time import utc_now
 
@@ -393,11 +399,19 @@ def send_prediction_to_discord(
     print_only: bool = False,
     force: bool = False,
     timezone_name: str = "Europe/Paris",
+    min_data_quality_score: float = DEFAULT_MIN_DATA_QUALITY_SCORE,
 ) -> DiscordSendResult:
     prediction = service.session.get(ModelPrediction, model_prediction_id)
     if prediction is None:
         raise DiscordWebhookError(f"Unknown model_prediction_id={model_prediction_id}")
     fixture = service.session.get(Fixture, prediction.fixture_id)
+    decision = evaluate_publication(
+        prediction.confidence_label,
+        prediction.data_quality_json if isinstance(prediction.data_quality_json, dict) else {},
+        min_data_quality_score=min_data_quality_score,
+    )
+    metadata = _publication_metadata(decision)
+    _annotate_prediction_publication(service.session, prediction, metadata)
     rendered_prediction = SimpleNamespace(
         predicted_outcome=prediction.predicted_outcome or prediction.predicted_result,
         probabilities={
@@ -420,6 +434,29 @@ def send_prediction_to_discord(
         fixture,
         timezone_name=timezone_name,
     )
+    if not dry_run and not print_only and not decision.allowed:
+        route = resolve_discord_route(
+            channels_config=service.channels_config,
+            webhooks_config=service.webhooks_config,
+            league_id=fixture.league_id if fixture else None,
+            season=fixture.season if fixture else None,
+            channel_key="predictions",
+            message_type="prediction",
+            legacy_webhook_url=service.legacy_webhook_url,
+            allow_missing_webhook=True,
+            force=force,
+        )
+        return DiscordSendResult(
+            status="confidence_skipped",
+            route=route,
+            message_hash=hash_message(markdown),
+            webhook_hash=hash_secret(route.webhook_url),
+            response_json={
+                "reason": decision.reason,
+                "publication_decision": publication_decision_payload(decision),
+            },
+            discord_message_id=None,
+        )
     return service.send_markdown(
         markdown,
         competition_key=None,
@@ -432,7 +469,29 @@ def send_prediction_to_discord(
         dry_run=dry_run,
         print_only=print_only,
         force=force,
+        payload_metadata=metadata,
     )
+
+
+def _publication_metadata(decision: PublicationDecision) -> dict[str, Any]:
+    payload = {
+        "publication_decision": publication_decision_payload(decision),
+        "publication_policy_version": decision.policy_version,
+    }
+    if decision.reason is not None:
+        payload["non_publication_reason"] = decision.reason
+    return payload
+
+
+def _annotate_prediction_publication(
+    session: Session,
+    prediction: ModelPrediction,
+    metadata: dict[str, Any],
+) -> None:
+    payload = dict(prediction.payload_json) if isinstance(prediction.payload_json, dict) else {}
+    payload.update(metadata)
+    prediction.payload_json = payload
+    session.flush()
 
 
 def send_standings_to_discord(service: DiscordDeliveryService, **kwargs: Any) -> DiscordSendResult:

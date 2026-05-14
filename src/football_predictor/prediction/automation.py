@@ -18,6 +18,12 @@ from football_predictor.db import models
 from football_predictor.discord.formatter import format_prediction_markdown
 from football_predictor.discord.service import DiscordDeliveryService, DiscordSendResult
 from football_predictor.ingestion.fixtures import FixtureIngestionService
+from football_predictor.prediction.publication_policy import (
+    DEFAULT_MIN_DATA_QUALITY_SCORE,
+    PublicationDecision,
+    evaluate_publication,
+    publication_decision_payload,
+)
 from football_predictor.prediction.service import (
     ApiFootballPayloadClient,
     PredictionOutput,
@@ -55,6 +61,7 @@ class AutomationRunConfig:
     force: bool = False
     limit: int | None = None
     save_raw: bool = False
+    min_data_quality_score: float = DEFAULT_MIN_DATA_QUALITY_SCORE
 
 
 @dataclass(frozen=True)
@@ -110,6 +117,7 @@ class AutomationRunSummary:
             1
             for item in self.results
             if item.status in {"predicted", "sent", "dry_run", "print_only", "duplicate_skipped"}
+            or item.status == "confidence_skipped"
         )
 
     @property
@@ -123,6 +131,10 @@ class AutomationRunSummary:
     @property
     def duplicate_skipped(self) -> int:
         return sum(1 for item in self.results if item.status == "duplicate_skipped")
+
+    @property
+    def confidence_skipped(self) -> int:
+        return sum(1 for item in self.results if item.status == "confidence_skipped")
 
     @property
     def failed(self) -> int:
@@ -143,6 +155,7 @@ class AutomationRunSummary:
             "sent": self.sent,
             "skipped": self.skipped,
             "duplicate_skipped": self.duplicate_skipped,
+            "confidence_skipped": self.confidence_skipped,
             "failed": self.failed,
             "refresh_summary": self.refresh_summary,
             "results": [item.as_dict() for item in self.results],
@@ -373,23 +386,37 @@ class PredictionAutomationService:
                 save_raw=config.save_raw,
                 api_client=self.api_client if config.refresh_data else None,
             )
+            publication_decision = evaluate_publication(
+                output.confidence_label,
+                output.data_quality_json,
+                min_data_quality_score=config.min_data_quality_score,
+            )
+            metadata.update(_publication_metadata(publication_decision))
             self._annotate_model_prediction(output.model_prediction_id, metadata)
             send_result = None
             status = "predicted"
             reason = None
             if config.send_discord:
-                duplicate = (
-                    not config.force
-                    and not config.dry_run
+                if (
+                    not config.dry_run
                     and not config.print_only
-                    and self._already_sent(fixture.fixture_id, window, target_date)
-                )
-                if duplicate:
-                    status = "duplicate_skipped"
-                    reason = "discord_duplicate"
+                    and not publication_decision.allowed
+                ):
+                    status = "confidence_skipped"
+                    reason = publication_decision.reason
                 else:
-                    send_result = self._send_discord(output, fixture, config, metadata)
-                    status = "sent" if send_result.status == "sent" else send_result.status
+                    duplicate = (
+                        not config.force
+                        and not config.dry_run
+                        and not config.print_only
+                        and self._already_sent(fixture.fixture_id, window, target_date)
+                    )
+                    if duplicate:
+                        status = "duplicate_skipped"
+                        reason = "discord_duplicate"
+                    else:
+                        send_result = self._send_discord(output, fixture, config, metadata)
+                        status = "sent" if send_result.status == "sent" else send_result.status
             return AutomationFixtureResult(
                 fixture_id=fixture.fixture_id,
                 status=status,
@@ -503,6 +530,16 @@ def _skip_reason(
     if _window_matches(kickoff - prediction_time, window):
         return None
     return f"outside_{window.value}_window"
+
+
+def _publication_metadata(decision: PublicationDecision) -> JsonDict:
+    payload = {
+        "publication_decision": publication_decision_payload(decision),
+        "publication_policy_version": decision.policy_version,
+    }
+    if decision.reason is not None:
+        payload["non_publication_reason"] = decision.reason
+    return payload
 
 
 def _window_matches(delta: timedelta, window: PredictionWindow) -> bool:

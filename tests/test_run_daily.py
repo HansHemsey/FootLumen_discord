@@ -6,6 +6,7 @@ from typing import Any
 
 import httpx
 import pytest
+from sqlalchemy import select
 
 from football_predictor.api.api_football_client import ApiFootballPayload
 from football_predictor.config.competitions import CompetitionConfig
@@ -34,9 +35,20 @@ TARGET_DATE = date(2026, 5, 2)
 
 
 class FakePredictionService:
-    def __init__(self, session, *, fail_fixture_ids: set[int] | None = None) -> None:
+    def __init__(
+        self,
+        session,
+        *,
+        fail_fixture_ids: set[int] | None = None,
+        confidence_label: str = "High",
+        confidence_score: float = 72.0,
+        data_quality_score: float = 75.0,
+    ) -> None:
         self.session = session
         self.fail_fixture_ids = fail_fixture_ids or set()
+        self.confidence_label = confidence_label
+        self.confidence_score = confidence_score
+        self.data_quality_score = data_quality_score
         self.calls: list[tuple[int, datetime | None]] = []
 
     def predict_fixture(
@@ -61,7 +73,7 @@ class FakePredictionService:
             prediction_time=cutoff,
             feature_version=f"run_daily_fake_{fixture_id}_{len(self.calls)}",
             features_json={"synthetic": True},
-            data_quality_json={"overall_data_quality_score": 55},
+            data_quality_json={"overall_data_quality_score": self.data_quality_score},
         )
         self.session.add(feature)
         self.session.flush()
@@ -76,11 +88,11 @@ class FakePredictionService:
             predicted_outcome="HOME",
             predicted_result="HOME",
             confidence=42.0,
-            confidence_label="Medium",
-            confidence_score=42.0,
+            confidence_label=self.confidence_label,
+            confidence_score=self.confidence_score,
             explanation_json=["Prediction synthétique quotidienne"],
             explanations_json=["Prediction synthétique quotidienne"],
-            data_quality_json={"overall_data_quality_score": 55},
+            data_quality_json={"overall_data_quality_score": self.data_quality_score},
             payload_json={"synthetic": True},
         )
         self.session.add(prediction)
@@ -93,11 +105,11 @@ class FakePredictionService:
             prediction_time=cutoff,
             probabilities=ProbabilityTriple(0.48, 0.27, 0.25),
             predicted_result="HOME",
-            confidence_label="Medium",
-            confidence_score=42.0,
+            confidence_label=self.confidence_label,
+            confidence_score=self.confidence_score,
             explanations=["Prediction synthétique quotidienne"],
             data_quality=DataQuality(),
-            data_quality_json={"overall_data_quality_score": 55},
+            data_quality_json={"overall_data_quality_score": self.data_quality_score},
             model_version="synthetic-daily-model",
             feature_snapshot_id=feature.id,
             model_prediction_id=prediction.id,
@@ -463,6 +475,150 @@ def test_run_daily_dry_run_prediction_does_not_block_future_real_send(tmp_path: 
 
     assert real.sent == 1
     assert calls == 1
+
+
+def test_run_daily_live_skips_high_confidence_with_low_data_quality(tmp_path: Path) -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(204)
+
+    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'daily_low_quality.db'}")
+    session_factory = create_session_factory(engine)
+    fake_service = FakePredictionService(
+        None,
+        confidence_label="High",
+        confidence_score=72.0,
+        data_quality_score=59.0,
+    )  # type: ignore[arg-type]
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler)) as http_client,
+        session_scope(session_factory) as session,
+    ):
+        fake_service.session = session
+        _seed_fixtures(session, league_id=-100, season=2026)
+        summary = run_daily_predictions(
+            TARGET_DATE,
+            league_ids=(-100,),
+            window="now",
+            send_discord=True,
+            refresh_data=False,
+            session=session,
+            reference=ApiFootballReference({"competitions": [], "references": {}}),
+            discord_delivery=DiscordDeliveryService(
+                session,
+                legacy_webhook_url="https://example.invalid/daily",
+                http_client=http_client,
+            ),
+            prediction_service_factory=lambda _session: fake_service,
+            now=NOW,
+        )
+        messages = list(session.execute(select(models.DiscordMessage)).scalars())
+        predictions = list(session.execute(select(models.ModelPrediction)).scalars())
+
+    assert summary.confidence_skipped == 2
+    assert summary.sent == 0
+    assert calls == 0
+    assert messages == []
+    assert {result.reason for result in summary.results} == {
+        "data_quality_below_publish_threshold"
+    }
+    assert all(
+        prediction.payload_json["non_publication_reason"]
+        == "data_quality_below_publish_threshold"
+        for prediction in predictions
+    )
+
+
+def test_run_daily_live_skips_medium_confidence_even_with_high_quality(
+    tmp_path: Path,
+) -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(204)
+
+    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'daily_medium_quality.db'}")
+    session_factory = create_session_factory(engine)
+    fake_service = FakePredictionService(
+        None,
+        confidence_label="Medium",
+        confidence_score=55.0,
+        data_quality_score=90.0,
+    )  # type: ignore[arg-type]
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler)) as http_client,
+        session_scope(session_factory) as session,
+    ):
+        fake_service.session = session
+        _seed_fixtures(session, league_id=-100, season=2026)
+        summary = run_daily_predictions(
+            TARGET_DATE,
+            league_ids=(-100,),
+            window="now",
+            send_discord=True,
+            refresh_data=False,
+            session=session,
+            reference=ApiFootballReference({"competitions": [], "references": {}}),
+            discord_delivery=DiscordDeliveryService(
+                session,
+                legacy_webhook_url="https://example.invalid/daily",
+                http_client=http_client,
+            ),
+            prediction_service_factory=lambda _session: fake_service,
+            now=NOW,
+        )
+
+    assert summary.confidence_skipped == 2
+    assert calls == 0
+    assert {result.reason for result in summary.results} == {
+        "confidence_below_publish_threshold"
+    }
+
+
+def test_run_daily_dry_run_persists_publication_decision_for_non_publishable_prediction(
+    tmp_path: Path,
+) -> None:
+    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'daily_dry_run_policy.db'}")
+    session_factory = create_session_factory(engine)
+    fake_service = FakePredictionService(
+        None,
+        confidence_label="Medium",
+        confidence_score=55.0,
+        data_quality_score=50.0,
+    )  # type: ignore[arg-type]
+    with session_scope(session_factory) as session:
+        fake_service.session = session
+        _fixture(session, -11, datetime(2026, 5, 2, 10, 30, tzinfo=UTC), -100, 2026, "NS")
+        summary = run_daily_predictions(
+            TARGET_DATE,
+            league_ids=(-100,),
+            window="late",
+            send_discord=True,
+            refresh_data=False,
+            dry_run=True,
+            session=session,
+            reference=ApiFootballReference({"competitions": [], "references": {}}),
+            discord_delivery=DiscordDeliveryService(
+                session,
+                legacy_webhook_url="https://example.invalid/daily",
+            ),
+            prediction_service_factory=lambda _session: fake_service,
+            now=NOW,
+        )
+        message = session.scalar(select(models.DiscordMessage))
+
+    assert summary.success == 1
+    assert message is not None
+    assert message.status == "dry_run"
+    assert message.payload_json["publication_decision"]["allowed"] is False
+    assert message.payload_json["non_publication_reason"] == (
+        "confidence_below_publish_threshold"
+    )
 
 
 def test_run_daily_refresh_uses_mock_api_client(tmp_path: Path) -> None:

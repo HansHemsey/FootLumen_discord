@@ -27,9 +27,11 @@ from football_predictor.ingestion.fixtures import FixtureIngestionService
 from football_predictor.ingestion.ingest_match_details import FixtureDetailsIngestionService
 from football_predictor.ingestion.ingest_odds import OddsIngestionService
 from football_predictor.prediction.publication_policy import (
-    CONFIDENCE_SKIP_REASON,
-    is_publishable_confidence,
+    DEFAULT_MIN_DATA_QUALITY_SCORE,
+    PublicationDecision,
+    evaluate_publication,
     normalize_confidence_label,
+    publication_decision_payload,
 )
 from football_predictor.prediction.scheduler import (
     DailyPredictionWindow,
@@ -280,6 +282,7 @@ def run_daily_predictions(
     save_raw: bool = False,
     limit: int | None = None,
     now: datetime | None = None,
+    min_data_quality_score: float = DEFAULT_MIN_DATA_QUALITY_SCORE,
 ) -> DailyPredictionSummary:
     """Predict all eligible fixtures for a date and return a compact summary."""
     resolved_window = parse_daily_window(window)
@@ -385,8 +388,37 @@ def run_daily_predictions(
                 "run_key": run_key,
                 "refresh_warnings": refresh_warnings,
             }
+            publication_decision = evaluate_publication(
+                output.confidence_label,
+                output.data_quality_json,
+                min_data_quality_score=min_data_quality_score,
+            )
+            metadata.update(_publication_metadata(publication_decision))
             _annotate_model_prediction(session, output.model_prediction_id, metadata)
             if send_discord:
+                if not dry_run and not print_only and not publication_decision.allowed:
+                    logger.info(
+                        "V2 Discord publication skipped: fixture_id=%s "
+                        "confidence_label=%s confidence_score=%s data_quality_score=%s "
+                        "min_data_quality_score=%s reason=%s window=%s",
+                        fixture.fixture_id,
+                        normalize_confidence_label(output.confidence_label),
+                        output.confidence_score,
+                        publication_decision.data_quality_score,
+                        publication_decision.min_data_quality_score,
+                        publication_decision.reason,
+                        resolved_window.value,
+                    )
+                    results.append(
+                        _result(
+                            fixture,
+                            "confidence_skipped",
+                            prediction_time,
+                            model_prediction_id=output.model_prediction_id,
+                            reason=publication_decision.reason,
+                        )
+                    )
+                    continue
                 send_result = _send_prediction(
                     discord_delivery,
                     output,
@@ -456,6 +488,7 @@ def run_daily_predictions_v3(
     limit: int | None = None,
     now: datetime | None = None,
     shadow_mode: bool = True,
+    min_data_quality_score: float = DEFAULT_MIN_DATA_QUALITY_SCORE,
 ) -> DailyPredictionSummary:
     """Run V3 daily predictions in shadow mode by default.
 
@@ -574,19 +607,25 @@ def run_daily_predictions_v3(
                 "model_family": "v3",
                 "shadow_mode": shadow_mode,
             }
+            publication_decision = evaluate_publication(
+                output.confidence_label,
+                output.data_quality_json,
+                min_data_quality_score=min_data_quality_score,
+            )
+            metadata.update(_publication_metadata(publication_decision))
             _annotate_v3_model_prediction(session, output.v3_model_prediction_id, metadata)
             if send_discord:
-                if (
-                    not dry_run
-                    and not print_only
-                    and not is_publishable_confidence(output.confidence_label)
-                ):
+                if not dry_run and not print_only and not publication_decision.allowed:
                     logger.info(
                         "V3 Discord publication skipped: fixture_id=%s confidence_label=%s "
-                        "confidence_score=%s expected=%s window=%s",
+                        "confidence_score=%s data_quality_score=%s "
+                        "min_data_quality_score=%s reason=%s expected=%s window=%s",
                         fixture.fixture_id,
                         normalize_confidence_label(output.confidence_label),
                         output.confidence_score,
+                        publication_decision.data_quality_score,
+                        publication_decision.min_data_quality_score,
+                        publication_decision.reason,
                         "High|Very High",
                         resolved_window.value,
                     )
@@ -597,7 +636,7 @@ def run_daily_predictions_v3(
                             prediction_time,
                             v3_model_prediction_id=output.v3_model_prediction_id,
                             v3_feature_snapshot_id=output.v3_feature_snapshot_id,
-                            reason=CONFIDENCE_SKIP_REASON,
+                            reason=publication_decision.reason,
                         )
                     )
                     continue
@@ -654,6 +693,16 @@ def _uses_live_prediction_time(window: DailyPredictionWindow) -> bool:
         DailyPredictionWindow.NOW,
         DailyPredictionWindow.ALL,
     }
+
+
+def _publication_metadata(decision: PublicationDecision) -> JsonDict:
+    payload = {
+        "publication_decision": publication_decision_payload(decision),
+        "publication_policy_version": decision.policy_version,
+    }
+    if decision.reason is not None:
+        payload["non_publication_reason"] = decision.reason
+    return payload
 
 
 def _prediction_service(

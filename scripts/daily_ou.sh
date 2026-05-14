@@ -96,6 +96,21 @@ if [ -n "${LEAGUE_ID:-}" ]; then
   set -- "$@" --league-id "$LEAGUE_ID"
 fi
 
-"$CLI_BIN" "$@" | tee "$SUMMARY_PATH"
+STATUS_FILE="$(mktemp "${TMPDIR:-/tmp}/daily_ou_status.XXXXXX")"
+trap 'rm -f "$STATUS_FILE"' EXIT HUP INT TERM
+
+(
+  set +e
+  "$CLI_BIN" "$@"
+  runner_status=$?
+  printf '%s\n' "$runner_status" > "$STATUS_FILE"
+  exit "$runner_status"
+) | tee "$SUMMARY_PATH"
+
+RUNNER_STATUS="$(cat "$STATUS_FILE" 2>/dev/null || printf '%s\n' 1)"
+if [ "$RUNNER_STATUS" -ne 0 ]; then
+  echo "O/U daily runner failed with status=$RUNNER_STATUS — summary at $SUMMARY_PATH" >&2
+  exit "$RUNNER_STATUS"
+fi
 
 echo "O/U daily pipeline complete for date=$RUN_DATE — summary at $SUMMARY_PATH"

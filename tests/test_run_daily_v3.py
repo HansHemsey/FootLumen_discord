@@ -36,11 +36,13 @@ class FakePredictionV3Service:
         fail_fixture_ids: set[int] | None = None,
         confidence_label: str = "High",
         confidence_score: float = 72.0,
+        data_quality_score: float = 61.0,
     ) -> None:
         self.session = session
         self.fail_fixture_ids = fail_fixture_ids or set()
         self.confidence_label = confidence_label
         self.confidence_score = confidence_score
+        self.data_quality_score = data_quality_score
         self.calls: list[tuple[int, datetime | None]] = []
 
     def predict_fixture_v3(
@@ -67,7 +69,7 @@ class FakePredictionV3Service:
             feature_version="v3.0",
             official_lineup_available_flag=False,
             features_json={"synthetic": True},
-            data_quality_json={"overall_data_quality_score": 61},
+            data_quality_json={"overall_data_quality_score": self.data_quality_score},
         )
         self.session.add(feature)
         self.session.flush()
@@ -86,14 +88,14 @@ class FakePredictionV3Service:
             p_v2_home=1 / 3,
             p_v2_draw=1 / 3,
             p_v2_away=1 / 3,
-            data_quality_score=61,
+            data_quality_score=self.data_quality_score,
             official_lineup_available_flag=False,
             confidence_score=self.confidence_score,
             confidence_label=self.confidence_label,
             predicted_result="HOME",
             expert_probabilities_json={},
             explanations_json={},
-            data_quality_json={"overall_data_quality_score": 61},
+            data_quality_json={"overall_data_quality_score": self.data_quality_score},
             payload_json={"model_family": "v3"},
         )
         self.session.add(prediction)
@@ -120,7 +122,7 @@ class FakePredictionV3Service:
             top_factors_no_draw_winner=[{"name": "ndw_synthetic", "value": 0.7}],
             explanations=["Prediction V3 synthétique quotidienne"],
             data_quality=DataQuality(),
-            data_quality_json={"overall_data_quality_score": 61},
+            data_quality_json={"overall_data_quality_score": self.data_quality_score},
             key_absences_json={"home": [], "away": []},
             v3_feature_snapshot_id=feature.id,
             v3_model_prediction_id=prediction.id,
@@ -209,6 +211,7 @@ def test_run_daily_v3_dry_run_persists_discord_metadata_without_http_send(
     assert message.payload_json["model_family"] == "v3"
     assert message.payload_json["v3_model_prediction_id"] is not None
     assert message.payload_json["shadow_mode"] is True
+    assert message.payload_json["publication_decision"]["allowed"] is True
 
 
 def test_run_daily_v3_production_sends_real_discord_and_v3_metadata(
@@ -326,6 +329,65 @@ def test_run_daily_v3_low_confidence_stays_internal_without_discord(
     assert {
         result.reason for result in summary.results
     } == {"confidence_below_publish_threshold"}
+
+
+def test_run_daily_v3_high_confidence_low_quality_stays_internal_without_discord(
+    tmp_path: Path,
+) -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(204)
+
+    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'daily_v3_low_quality.db'}")
+    session_factory = create_session_factory(engine)
+    fake_service = FakePredictionV3Service(
+        None,
+        confidence_label="High",
+        confidence_score=72.0,
+        data_quality_score=59.0,
+    )  # type: ignore[arg-type]
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler)) as http_client,
+        session_scope(session_factory) as session,
+    ):
+        fake_service.session = session
+        _seed_fixtures(session, league_id=-100, season=2026)
+        summary = run_daily_predictions_v3(
+            TARGET_DATE,
+            league_ids=(-100,),
+            window="now",
+            send_discord=True,
+            refresh_data=False,
+            dry_run=False,
+            shadow_mode=False,
+            session=session,
+            reference=ApiFootballReference({"competitions": [], "references": {}}),
+            discord_delivery=DiscordDeliveryService(
+                session,
+                legacy_webhook_url="https://example.invalid/v3-daily",
+                http_client=http_client,
+            ),
+            prediction_service_factory=lambda _session: fake_service,
+            now=NOW,
+        )
+        messages = list(session.execute(select(models.DiscordMessage)).scalars())
+        v3_predictions = list(session.execute(select(models.V3ModelPrediction)).scalars())
+
+    assert summary.confidence_skipped == 2
+    assert summary.sent == 0
+    assert calls == 0
+    assert messages == []
+    assert {result.reason for result in summary.results} == {
+        "data_quality_below_publish_threshold"
+    }
+    assert all(
+        row.payload_json["non_publication_reason"] == "data_quality_below_publish_threshold"
+        for row in v3_predictions
+    )
 
 
 def test_run_daily_v3_production_skips_existing_sent_window_duplicate(

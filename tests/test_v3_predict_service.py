@@ -203,6 +203,56 @@ def test_predict_v3_cli_discord_dry_run_persists_v3_metadata(tmp_path: Path) -> 
     assert message.model_prediction_id is None
     assert message.payload_json["model_family"] == "v3"
     assert message.payload_json["v3_model_prediction_id"] == payload["v3_model_prediction_id"]
+    assert message.payload_json["publication_decision"]["allowed"] is False
+    assert message.payload_json["non_publication_reason"] == (
+        "confidence_below_publish_threshold"
+    )
+
+
+def test_predict_v3_cli_live_discord_skips_non_publishable_prediction(tmp_path: Path) -> None:
+    db_path = tmp_path / "cli_v3_blocked.db"
+    engine = create_db_and_tables(f"sqlite:///{db_path}")
+    session_factory = create_session_factory(engine)
+    model_dir = _write_synthetic_v3_model(tmp_path / "v3-model")
+    with session_scope(session_factory) as session:
+        _seed_base(session)
+        _seed_point_in_time_sources(session)
+
+    get_settings.cache_clear()
+    result = CliRunner().invoke(
+        app,
+        [
+            "predict-v3",
+            "--fixture",
+            "-900",
+            "--prediction-time",
+            PREDICTION_TIME.isoformat(),
+            "--model-dir",
+            str(model_dir),
+            "--no-refresh",
+            "--send-discord",
+            "--discord-webhooks",
+            "config/discord_webhooks.example.yaml",
+            "--json",
+        ],
+        env={
+            "DATABASE_URL": f"sqlite:///{db_path}",
+            "DISCORD_WEBHOOK_URL": "https://example.invalid/v3-blocked",
+            "PUBLICATION_MIN_DATA_QUALITY_SCORE": "100",
+        },
+    )
+    get_settings.cache_clear()
+
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["discord"]["status"] == "confidence_skipped"
+    assert payload["discord"]["reason"] == "confidence_below_publish_threshold"
+    with session_scope(session_factory) as session:
+        message_count = session.scalar(select(func.count()).select_from(models.DiscordMessage))
+        prediction = session.get(models.V3ModelPrediction, payload["v3_model_prediction_id"])
+    assert message_count == 0
+    assert prediction is not None
+    assert prediction.payload_json["non_publication_reason"] == payload["discord"]["reason"]
 
 
 def _write_synthetic_v3_model(path: Path) -> Path:

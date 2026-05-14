@@ -176,6 +176,51 @@ def test_daily_ou_echo_uses_late_window(repo_root: Path) -> None:
     assert "--dry-run" in output
 
 
+def test_daily_ou_propagates_runner_failure_after_tee(
+    repo_root: Path,
+    tmp_path: Path,
+) -> None:
+    fake_cli = tmp_path / "fake_ou_runner.sh"
+    fake_cli.write_text(
+        "\n".join(
+            [
+                "#!/bin/sh",
+                "printf '%s\\n' '{\"status\":\"failed\",\"source\":\"fake-ou-runner\"}'",
+                "printf '%s\\n' 'fake O/U runner failed' >&2",
+                "exit 42",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    fake_cli.chmod(0o755)
+    summary_path = tmp_path / "ou_summary.json"
+
+    result = subprocess.run(
+        ["scripts/daily_ou.sh"],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        env={
+            "FOOTBALL_PREDICTOR_BIN": str(fake_cli),
+            "PYTHON_BIN": sys.executable,
+            "DATE": "2026-05-02",
+            "REFRESH_DATA": "false",
+            "DRY_RUN": "true",
+            "JSON_OUTPUT": str(summary_path),
+            "PATH": "/usr/bin:/bin",
+        },
+        text=True,
+    )
+
+    assert result.returncode == 42
+    assert '{"status":"failed","source":"fake-ou-runner"}' in result.stdout
+    assert "fake O/U runner failed" in result.stderr
+    assert "O/U daily runner failed with status=42" in result.stderr
+    assert summary_path.read_text(encoding="utf-8").strip() == (
+        '{"status":"failed","source":"fake-ou-runner"}'
+    )
+
+
 def test_daily_late_echo_defaults_to_v3_production_command(repo_root: Path) -> None:
     result = subprocess.run(
         ["scripts/daily_late.sh"],

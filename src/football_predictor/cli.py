@@ -21,6 +21,7 @@ from football_predictor.backtesting.dataset import build_training_dataset, parse
 from football_predictor.backtesting.evaluator import BacktestConfig, ReportFormat, run_backtest
 from football_predictor.config import Settings, get_settings
 from football_predictor.config.competitions import CompetitionConfig, load_competition_config
+from football_predictor.db import models
 from football_predictor.db.models import Fixture
 from football_predictor.db.session import (
     create_db_engine,
@@ -74,6 +75,11 @@ from football_predictor.prediction import (
     PredictionService,
     run_daily_predictions,
     run_daily_predictions_v3,
+)
+from football_predictor.prediction.publication_policy import (
+    PublicationDecision,
+    evaluate_publication,
+    publication_decision_payload,
 )
 from football_predictor.prediction.service import RESULT_LABELS_FR, PredictionOutput
 from football_predictor.reference.loaders import load_api_football_reference, load_players_reference
@@ -959,6 +965,48 @@ def _print_prediction_v3_summary(prediction: Any, timezone_name: str) -> None:
         console.print(f"{index}. {explanation}")
 
 
+def _publication_metadata(decision: PublicationDecision) -> dict[str, Any]:
+    payload = {
+        "publication_decision": publication_decision_payload(decision),
+        "publication_policy_version": decision.policy_version,
+    }
+    if decision.reason is not None:
+        payload["non_publication_reason"] = decision.reason
+    return payload
+
+
+def _annotate_model_publication(
+    session: Any,
+    model_prediction_id: int | None,
+    metadata: dict[str, Any],
+) -> None:
+    if model_prediction_id is None:
+        return
+    prediction = session.get(models.ModelPrediction, model_prediction_id)
+    if prediction is None:
+        return
+    payload = dict(prediction.payload_json) if isinstance(prediction.payload_json, dict) else {}
+    payload.update(metadata)
+    prediction.payload_json = payload
+    session.flush()
+
+
+def _annotate_v3_publication(
+    session: Any,
+    v3_model_prediction_id: int | None,
+    metadata: dict[str, Any],
+) -> None:
+    if v3_model_prediction_id is None:
+        return
+    prediction = session.get(models.V3ModelPrediction, v3_model_prediction_id)
+    if prediction is None:
+        return
+    payload = dict(prediction.payload_json) if isinstance(prediction.payload_json, dict) else {}
+    payload.update(metadata)
+    prediction.payload_json = payload
+    session.flush()
+
+
 @app.command()
 def predict(
     fixture: int = typer.Option(..., "--fixture", help="API-Football fixture_id from local docs."),
@@ -1133,6 +1181,17 @@ def predict_v3(
                 refresh_data=False,
                 save_raw=save_raw,
             )
+        publication_decision = evaluate_publication(
+            prediction.confidence_label,
+            prediction.data_quality_json,
+            min_data_quality_score=settings.publication_min_data_quality_score,
+        )
+        publication_metadata = _publication_metadata(publication_decision)
+        _annotate_v3_publication(
+            session,
+            prediction.v3_model_prediction_id,
+            publication_metadata,
+        )
         markdown = format_prediction_v3_markdown(
             prediction,
             timezone_name=settings.app_timezone,
@@ -1162,30 +1221,51 @@ def predict_v3(
                 legacy_webhook_url=settings.discord_webhook_url,
                 timeout=settings.discord_timeout_seconds,
             )
-            result = delivery.send_markdown(
-                markdown,
-                competition_key=competition_key,
-                league_id=route_league_id,
-                season=route_season,
-                channel_key="predictions",
-                message_type="prediction",
-                fixture_id=fixture,
-                model_prediction_id=None,
-                dry_run=dry_run,
-                print_only=print_only,
-                force=force,
-                payload_metadata={
-                    "model_family": "v3",
-                    "v3_model_prediction_id": prediction.v3_model_prediction_id,
-                    "v3_feature_snapshot_id": prediction.v3_feature_snapshot_id,
-                },
-            )
-            discord_payload = {
-                "status": result.status,
-                "discord_message_id": result.discord_message_id,
-                "webhook_hash": result.webhook_hash,
-                "channel": result.route.channel_key,
+            payload_metadata = {
+                **publication_metadata,
+                "model_family": "v3",
+                "v3_model_prediction_id": prediction.v3_model_prediction_id,
+                "v3_feature_snapshot_id": prediction.v3_feature_snapshot_id,
             }
+            if send_discord and not dry_run and not print_only and not publication_decision.allowed:
+                discord_payload = {
+                    "status": "confidence_skipped",
+                    "discord_message_id": None,
+                    "webhook_hash": None,
+                    "channel": "predictions",
+                    "reason": publication_decision.reason,
+                    "publication_decision": publication_decision_payload(publication_decision),
+                }
+            else:
+                result = delivery.send_markdown(
+                    markdown,
+                    competition_key=competition_key,
+                    league_id=route_league_id,
+                    season=route_season,
+                    channel_key="predictions",
+                    message_type="prediction",
+                    fixture_id=fixture,
+                    model_prediction_id=None,
+                    dry_run=dry_run,
+                    print_only=print_only,
+                    force=force,
+                    payload_metadata=payload_metadata,
+                )
+                discord_payload = {
+                    "status": result.status,
+                    "discord_message_id": result.discord_message_id,
+                    "webhook_hash": result.webhook_hash,
+                    "channel": result.route.channel_key,
+                    "publication_decision": publication_decision_payload(publication_decision),
+                }
+            if discord_payload.get("status") != "confidence_skipped":
+                discord_payload.update(
+                    {
+                        "model_family": "v3",
+                        "v3_model_prediction_id": prediction.v3_model_prediction_id,
+                        "v3_feature_snapshot_id": prediction.v3_feature_snapshot_id,
+                    }
+                )
 
     payload = prediction.to_dict()
     if discord_payload is not None:
@@ -1280,34 +1360,59 @@ def predict_and_send(
         markdown = format_prediction_markdown(prediction, settings.app_timezone)
         if print_only:
             console.print(markdown)
-        delivery = DiscordDeliveryService(
+        publication_decision = evaluate_publication(
+            prediction.confidence_label,
+            prediction.data_quality_json,
+            min_data_quality_score=settings.publication_min_data_quality_score,
+        )
+        publication_metadata = _publication_metadata(publication_decision)
+        _annotate_model_publication(
             session,
-            channels_config=channels_config,
-            webhooks_config=webhooks_config,
-            legacy_webhook_url=settings.discord_webhook_url,
-            timeout=settings.discord_timeout_seconds,
+            prediction.model_prediction_id,
+            publication_metadata,
         )
-        result = delivery.send_markdown(
-            markdown,
-            competition_key=_competition_key_from_fixture(
-                reference,
-                fixture_row,
-                competition_key,
-            ),
-            league_id=fixture_row.league_id if fixture_row is not None else None,
-            season=fixture_row.season if fixture_row is not None else None,
-            channel_key=channel,
-            message_type="prediction",
-            fixture_id=fixture,
-            model_prediction_id=prediction.model_prediction_id,
-            dry_run=dry_run,
-            print_only=print_only,
-            force=force,
-        )
+        if not dry_run and not print_only and not publication_decision.allowed:
+            result_status = "confidence_skipped"
+            result_channel = channel
+            result_webhook_hash = "none"
+        else:
+            delivery = DiscordDeliveryService(
+                session,
+                channels_config=channels_config,
+                webhooks_config=webhooks_config,
+                legacy_webhook_url=settings.discord_webhook_url,
+                timeout=settings.discord_timeout_seconds,
+            )
+            result = delivery.send_markdown(
+                markdown,
+                competition_key=_competition_key_from_fixture(
+                    reference,
+                    fixture_row,
+                    competition_key,
+                ),
+                league_id=fixture_row.league_id if fixture_row is not None else None,
+                season=fixture_row.season if fixture_row is not None else None,
+                channel_key=channel,
+                message_type="prediction",
+                fixture_id=fixture,
+                model_prediction_id=prediction.model_prediction_id,
+                dry_run=dry_run,
+                print_only=print_only,
+                force=force,
+                payload_metadata=publication_metadata,
+            )
+            result_status = result.status
+            result_channel = result.route.channel_key
+            result_webhook_hash = result.webhook_hash or "none"
+    reason_suffix = (
+        f" reason={publication_decision.reason}"
+        if result_status == "confidence_skipped"
+        else ""
+    )
     console.print(
         "Discord route "
-        f"status={result.status} channel={result.route.channel_key} "
-        f"webhook_hash={result.webhook_hash or 'none'}"
+        f"status={result_status} channel={result_channel} "
+        f"webhook_hash={result_webhook_hash}{reason_suffix}"
     )
 
 
@@ -1357,9 +1462,13 @@ def discord_send(
             print_only=print_only,
             force=force,
             timezone_name=settings.app_timezone,
+            min_data_quality_score=settings.publication_min_data_quality_score,
         )
+    reason = result.response_json.get("reason") if isinstance(result.response_json, dict) else None
+    reason_suffix = f" reason={reason}" if reason else ""
     console.print(
-        f"Discord prediction status={result.status} webhook_hash={result.webhook_hash or 'none'}"
+        "Discord prediction "
+        f"status={result.status} webhook_hash={result.webhook_hash or 'none'}{reason_suffix}"
     )
 
 
@@ -1934,6 +2043,7 @@ def predict_today(
                 limit=limit,
                 save_raw=save_raw,
                 now=cutoff,
+                min_data_quality_score=settings.publication_min_data_quality_score,
             )
         finally:
             if api_client is not None:
@@ -2093,6 +2203,7 @@ def predict_today_v3(
                 save_raw=save_raw,
                 now=cutoff,
                 shadow_mode=shadow_mode,
+                min_data_quality_score=settings.publication_min_data_quality_score,
             )
         finally:
             if api_client is not None:
@@ -3399,6 +3510,7 @@ def ou_run_daily(
             window=window,
             limit=limit,
             edge_threshold=edge_threshold,
+            min_data_quality_score=settings.publication_min_data_quality_score,
         )
 
     console.print(json.dumps(summary.as_dict(), indent=2, default=str))

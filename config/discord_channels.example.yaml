@@ -1,7 +1,4 @@
 # Example only. Do not put real Discord channel IDs in this file.
-# Production league_id/season values must come from docs/api_football_reference.json
-# or config/competitions.example.yaml; never invent API-Football IDs.
-# The discussions channels stay disabled because automations do not publish there.
 global_channels:
   score_pronos_semaine:
     channel_name: "📊-score-pronos-semaine"

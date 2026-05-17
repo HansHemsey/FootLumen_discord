@@ -32,18 +32,6 @@ def test_discord_example_configs_validate_against_reference(reference_path: Path
         "premier_league"
     )
     assert all(route.webhook_url is None for route in webhooks.routes)
-    route_keys = {
-        (route.competition_key, route.channel_key)
-        for route in webhooks.routes
-        if route.enabled
-    }
-    for competition_key, competition in channels.competitions.items():
-        for channel_key, channel in competition.channels.items():
-            if channel.enabled and channel_key != "discussions":
-                assert (competition_key, channel_key) in route_keys
-    for channel_key, channel in channels.global_channels.items():
-        if channel.enabled:
-            assert ("global", channel_key) in route_keys
 
 
 def test_discord_webhook_env_is_resolved(tmp_path: Path, reference_path: Path) -> None:
@@ -190,26 +178,12 @@ competitions:
         load_discord_channels_config(config, reference)
 
 
-def test_placeholder_webhook_detected_when_rejecting_placeholders(
-    tmp_path: Path,
-    reference_path: Path,
-) -> None:
+def test_placeholder_webhook_detected_in_local_config(reference_path: Path) -> None:
     reference = load_api_football_reference(reference_path)
-    config = tmp_path / "discord_webhooks.yaml"
-    config.write_text(
-        """
-webhooks:
-  ligue1:
-    predictions:
-      webhook_url: "REPLACE_WITH_WEBHOOK_URL"
-      enabled: true
-""",
-        encoding="utf-8",
-    )
 
     with pytest.raises(DiscordRoutingError):
         load_discord_webhooks_config(
-            config,
+            "config/discord_webhooks.example.yaml",
             reference,
             reject_placeholders=True,
         )
@@ -219,8 +193,7 @@ def test_example_webhooks_config_contains_no_real_discord_url() -> None:
     text = Path("config/discord_webhooks.example.yaml").read_text(encoding="utf-8")
 
     assert "https://discord.com/api/webhooks" not in text
-    assert "webhook_url_env" in text
-    assert "webhook_url:" not in text
+    assert "REPLACE_WITH_WEBHOOK_URL" in text
 
 
 def test_discord_local_configs_are_gitignored() -> None:

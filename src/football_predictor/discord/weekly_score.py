@@ -36,9 +36,6 @@ class WeeklyScoreLine:
     status: str
     correct: bool | None
     model_family: str = "1X2"
-    prediction_table: str | None = None
-    prediction_id: int | None = None
-    discord_message_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -314,10 +311,7 @@ def _line_from_message(
 ) -> WeeklyScoreLine | None:
     payload = message.payload_json if isinstance(message.payload_json, dict) else {}
     if message.message_type == "ou_prediction" or payload.get("model_family") == "ou25":
-        ou_prediction_id = message.ou_model_prediction_id or _payload_int(
-            payload,
-            "ou_model_prediction_id",
-        )
+        ou_prediction_id = _payload_int(payload, "ou_model_prediction_id")
         prediction = (
             session.get(models.OUModelPrediction, ou_prediction_id)
             if ou_prediction_id is not None
@@ -327,18 +321,15 @@ def _line_from_message(
             return None
         if ensure_before_kickoff(prediction.prediction_time, fixture.date) is False:
             return None
-        return _score_line_ou(fixture, prediction, message.id)
-    v3_prediction_id = message.v3_model_prediction_id or _payload_int(
-        payload,
-        "v3_model_prediction_id",
-    )
+        return _score_line_ou(fixture, prediction)
+    v3_prediction_id = _payload_int(payload, "v3_model_prediction_id")
     if v3_prediction_id is not None:
         prediction = session.get(models.V3ModelPrediction, v3_prediction_id)
         if prediction is None:
             return None
         if ensure_before_kickoff(prediction.prediction_time, fixture.date) is False:
             return None
-        return _score_line_v3(fixture, prediction, message.id)
+        return _score_line_v3(fixture, prediction)
     if message.model_prediction_id is None:
         return None
     prediction = session.get(models.ModelPrediction, message.model_prediction_id)
@@ -346,13 +337,12 @@ def _line_from_message(
         return None
     if ensure_before_kickoff(prediction.prediction_time, fixture.date) is False:
         return None
-    return _score_line_v2(fixture, prediction, message.id)
+    return _score_line_v2(fixture, prediction)
 
 
 def _score_line_v2(
     fixture: models.Fixture,
     prediction: models.ModelPrediction,
-    discord_message_id: int | None,
 ) -> WeeklyScoreLine | None:
     actual = _actual_outcome(fixture)
     if actual is None:
@@ -371,16 +361,12 @@ def _score_line_v2(
         status=(fixture.status_short or fixture.status or "").upper(),
         correct=correct,
         model_family="1X2 V2",
-        prediction_table="model_predictions",
-        prediction_id=prediction.id,
-        discord_message_id=discord_message_id,
     )
 
 
 def _score_line_v3(
     fixture: models.Fixture,
     prediction: models.V3ModelPrediction,
-    discord_message_id: int | None,
 ) -> WeeklyScoreLine | None:
     actual = _actual_outcome(fixture)
     if actual is None:
@@ -399,16 +385,12 @@ def _score_line_v3(
         status=(fixture.status_short or fixture.status or "").upper(),
         correct=correct,
         model_family="1X2 V3",
-        prediction_table="v3_model_predictions",
-        prediction_id=prediction.id,
-        discord_message_id=discord_message_id,
     )
 
 
 def _score_line_ou(
     fixture: models.Fixture,
     prediction: models.OUModelPrediction,
-    discord_message_id: int | None,
 ) -> WeeklyScoreLine | None:
     actual = _actual_ou(fixture, prediction.threshold)
     if actual is None:
@@ -427,9 +409,6 @@ def _score_line_ou(
         status=(fixture.status_short or fixture.status or "").upper(),
         correct=correct,
         model_family="O/U 2.5",
-        prediction_table="ou_model_predictions",
-        prediction_id=prediction.id,
-        discord_message_id=discord_message_id,
     )
 
 
@@ -530,27 +509,6 @@ def _report_payload(report: WeeklyScoreReport) -> dict[str, object]:
         "correct": report.correct,
         "incorrect": report.incorrect,
         "pending": 0,
-        "model_family_counts": _model_family_counts(report.lines),
-        "counted_predictions": [_counted_prediction_payload(line) for line in report.lines],
-    }
-
-
-def _model_family_counts(lines: list[WeeklyScoreLine]) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    for line in lines:
-        counts[line.model_family] = counts.get(line.model_family, 0) + 1
-    return dict(sorted(counts.items()))
-
-
-def _counted_prediction_payload(line: WeeklyScoreLine) -> dict[str, object]:
-    return {
-        "fixture_id": line.fixture_id,
-        "model_family": line.model_family,
-        "prediction_table": line.prediction_table,
-        "prediction_id": line.prediction_id,
-        "discord_message_id": line.discord_message_id,
-        "status": line.status,
-        "correct": line.correct,
     }
 
 

@@ -78,7 +78,6 @@ def test_daily_scripts_default_to_safe_discord_behavior(repo_root: Path) -> None
     daily_ou = (repo_root / "scripts/daily_ou.sh").read_text(encoding="utf-8")
     assert 'RUN_WINDOW="${WINDOW:-late}"' in daily_ou
     assert "--window" in daily_ou
-    assert "--production-mode" in daily_ou
 
 
 def test_prod_crontab_runs_publication_scripts_with_prod_flags(repo_root: Path) -> None:
@@ -175,79 +174,9 @@ def test_daily_ou_echo_uses_late_window(repo_root: Path) -> None:
     output = result.stdout
     assert "ou run-daily --date 2026-05-02 --window late" in output
     assert "--dry-run" in output
-    assert "--production-mode" not in output
 
 
-def test_daily_ou_live_echo_uses_production_mode(repo_root: Path) -> None:
-    result = subprocess.run(
-        ["scripts/daily_ou.sh"],
-        cwd=repo_root,
-        check=True,
-        capture_output=True,
-        env={
-            "FOOTBALL_PREDICTOR_BIN": "echo",
-            "PYTHON_BIN": sys.executable,
-            "DATE": "2026-05-02",
-            "REFRESH_DATA": "false",
-            "SEND_DISCORD": "true",
-            "DRY_RUN": "false",
-            "PATH": "/usr/bin:/bin",
-        },
-        text=True,
-    )
-
-    output = result.stdout
-    assert "--send-discord" in output
-    assert "--production-mode" in output
-    assert "--dry-run" not in output
-
-
-def test_daily_ou_propagates_runner_failure_after_tee(
-    repo_root: Path,
-    tmp_path: Path,
-) -> None:
-    fake_cli = tmp_path / "fake_ou_runner.sh"
-    fake_cli.write_text(
-        "\n".join(
-            [
-                "#!/bin/sh",
-                "printf '%s\\n' '{\"status\":\"failed\",\"source\":\"fake-ou-runner\"}'",
-                "printf '%s\\n' 'fake O/U runner failed' >&2",
-                "exit 42",
-            ]
-        ),
-        encoding="utf-8",
-    )
-    fake_cli.chmod(0o755)
-    summary_path = tmp_path / "ou_summary.json"
-
-    result = subprocess.run(
-        ["scripts/daily_ou.sh"],
-        cwd=repo_root,
-        check=False,
-        capture_output=True,
-        env={
-            "FOOTBALL_PREDICTOR_BIN": str(fake_cli),
-            "PYTHON_BIN": sys.executable,
-            "DATE": "2026-05-02",
-            "REFRESH_DATA": "false",
-            "DRY_RUN": "true",
-            "JSON_OUTPUT": str(summary_path),
-            "PATH": "/usr/bin:/bin",
-        },
-        text=True,
-    )
-
-    assert result.returncode == 42
-    assert '{"status":"failed","source":"fake-ou-runner"}' in result.stdout
-    assert "fake O/U runner failed" in result.stderr
-    assert "O/U daily runner failed with status=42" in result.stderr
-    assert summary_path.read_text(encoding="utf-8").strip() == (
-        '{"status":"failed","source":"fake-ou-runner"}'
-    )
-
-
-def test_daily_late_echo_defaults_to_v3_shadow_dry_run_command(repo_root: Path) -> None:
+def test_daily_late_echo_defaults_to_v3_production_command(repo_root: Path) -> None:
     result = subprocess.run(
         ["scripts/daily_late.sh"],
         cwd=repo_root,
@@ -269,37 +198,11 @@ def test_daily_late_echo_defaults_to_v3_shadow_dry_run_command(repo_root: Path) 
     assert "predict-today-v3 --date 2026-05-02 --window late" in output
     assert "--model-dir data/models/v3" in output
     assert "--v2-model-dir data/models/v2-late" in output
-    assert "--production-mode" not in output
+    assert "--production-mode" in output
     assert "--json-output reports/daily/2026-05-02_late_v3_summary.json" in output
     assert "--no-refresh-data" in output
     assert "--dry-run" in output
     assert "Daily late summary written to reports/daily/2026-05-02_late_v3_summary.json" in output
-
-
-def test_daily_late_echo_live_v3_uses_production_mode(repo_root: Path) -> None:
-    result = subprocess.run(
-        ["scripts/daily_late.sh"],
-        cwd=repo_root,
-        check=True,
-        capture_output=True,
-        env={
-            "FOOTBALL_PREDICTOR_BIN": "echo",
-            "PYTHON_BIN": sys.executable,
-            "DATE": "2026-05-02",
-            "WINDOW": "late",
-            "REFRESH_DATA": "false",
-            "SEND_DISCORD": "true",
-            "DRY_RUN": "false",
-            "PATH": "/usr/bin:/bin",
-        },
-        text=True,
-    )
-
-    output = result.stdout
-    assert "predict-today-v3 --date 2026-05-02 --window late" in output
-    assert "--send-discord" in output
-    assert "--production-mode" in output
-    assert "--dry-run" not in output
 
 
 def test_daily_late_echo_uses_v2_rollback_command(repo_root: Path) -> None:

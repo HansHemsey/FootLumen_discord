@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -12,15 +11,11 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from football_predictor.backtesting.confidence_calibration import (
-    THRESHOLD_VERSION,
-    ConfidenceThresholdConfig,
-    build_confidence_threshold_artifact,
-)
 from football_predictor.ou_model.backtesting.ou_metrics import (
     binary_brier_score,
     binary_log_loss,
     calibration_bins_binary,
+    closing_line_value,
     roi_simulation,
 )
 from football_predictor.ou_model.modeling.ou_train import (
@@ -28,7 +23,6 @@ from football_predictor.ou_model.modeling.ou_train import (
     select_ou_feature_names,
     train_ou_model_from_frames,
 )
-from football_predictor.ou_model.prediction.ou_service import _ou_confidence_score
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +61,6 @@ class OUFoldResult:
     metrics_per_model: dict[str, JsonDict]
     roi_per_model: dict[str, dict[str, JsonDict]]  # model -> edge_threshold -> roi_dict
     calibration_bins: list[JsonDict]
-    confidence_thresholds: JsonDict = field(default_factory=dict)
 
 
 @dataclass
@@ -77,7 +70,6 @@ class OUBacktestResult:
     aggregate: JsonDict
     dataset_path: str | None = None
     output_dir: str | None = None
-    confidence_thresholds: JsonDict = field(default_factory=dict)
 
 
 def _fold_splits(
@@ -113,19 +105,18 @@ def _metrics_for_predictions(
     kelly_fraction: float,
 ) -> tuple[JsonDict, dict[str, JsonDict]]:
     """Return (base_metrics, roi_per_threshold)."""
-    p_over_array = np.asarray(p_over, dtype=float)
     base: JsonDict = {
-        "brier_score": binary_brier_score(list(y_true), list(p_over_array)),
-        "log_loss": binary_log_loss(list(y_true), list(p_over_array)),
+        "brier_score": binary_brier_score(list(y_true), list(p_over)),
+        "log_loss": binary_log_loss(list(y_true), list(p_over)),
         "over_rate": float(y_true.mean()),
-        "mean_p_over": float(p_over_array.mean()),
+        "mean_p_over": float(p_over.mean()),
         "n_rows": int(len(y_true)),
     }
     roi_per_threshold: dict[str, JsonDict] = {}
     for et in edge_thresholds:
         roi_per_threshold[f"edge_{et:.2f}"] = roi_simulation(
             list(y_true),
-            list(p_over_array),
+            list(p_over),
             odd_over,
             odd_under,
             edge_threshold=et,
@@ -231,6 +222,7 @@ def _run_single_fold(
     roi_per_model["ensemble"] = r
 
     # Expert breakdowns
+    from football_predictor.ou_model.modeling.ou_poisson import poisson_ou_predict
     expert_preds: dict[str, list[float]] = {
         "poisson": [], "logistic": [], "lgbm": [], "xgb": [], "catboost": [],
     }
@@ -251,7 +243,7 @@ def _run_single_fold(
 
     # Market-only baseline
     market_p_list: list[float] = []
-    for oo, ou in zip(odd_over_list, odd_under_list, strict=True):
+    for oo, ou in zip(odd_over_list, odd_under_list):
         if oo is not None and ou is not None and oo > 1 and ou > 1:
             market_p_list.append(_market_p_over(oo, ou))
         else:
@@ -266,16 +258,6 @@ def _run_single_fold(
     roi_per_model["market"] = r
 
     cal_bins = calibration_bins_binary(list(y_test), list(p_ensemble), n_bins=10)
-    threshold_calibration_frame = cal_df if len(cal_df) > 0 else valid_df
-    confidence_thresholds = build_confidence_threshold_artifact(
-        validation_records=_ou_confidence_records(model, threshold_calibration_frame, available),
-        test_records=_ou_confidence_records(model, test_df, available),
-        config=ConfidenceThresholdConfig(model_family="ou25"),
-        periods={
-            "validation": _period_payload(threshold_calibration_frame),
-            "test": _period_payload(test_df),
-        },
-    )
 
     return OUFoldResult(
         fold=fold_idx,
@@ -286,7 +268,6 @@ def _run_single_fold(
         metrics_per_model=metrics_per_model,
         roi_per_model=roi_per_model,
         calibration_bins=cal_bins,
-        confidence_thresholds=confidence_thresholds,
     )
 
 
@@ -318,361 +299,6 @@ def _aggregate_fold_results(folds: list[OUFoldResult]) -> JsonDict:
     return agg
 
 
-def _ou_confidence_records(
-    model: Any,
-    frame: pd.DataFrame,
-    feature_names: list[str],
-) -> list[JsonDict]:
-    if frame.empty:
-        return []
-    X = frame[feature_names].fillna(0) if feature_names else pd.DataFrame(index=frame.index)
-    p_over_values = model.predict_proba_over(X)
-    quality_scale = _quality_score_scale(frame)
-    records: list[JsonDict] = []
-    for index, (_, row) in enumerate(frame.iterrows()):
-        p_over = float(p_over_values[index])
-        p_over = max(0.0, min(1.0, p_over))
-        actual = int(row[TARGET_COL])
-        odd_over = _optional_float(row.get("ou_market_odd_over"))
-        odd_under = _optional_float(row.get("ou_market_odd_under"))
-        market_p = _market_probability_or_default(odd_over, odd_under)
-        edge_over = p_over - market_p
-        quality_score = _row_quality_score(row, scale=quality_scale)
-        data_quality = _publication_quality_payload(row, quality_score)
-        stake, profit = _flat_stake_profit(
-            actual=actual,
-            p_over=p_over,
-            market_p_over=market_p,
-            odd_over=odd_over,
-            odd_under=odd_under,
-        )
-        records.append(
-            {
-                "fixture_id": _json_value(row.get("fixture_id")),
-                "league_id": _json_value(row.get("league_id")),
-                "season": _json_value(row.get("season")),
-                "actual": actual,
-                "predicted": 1 if p_over >= 0.5 else 0,
-                "correct": (1 if p_over >= 0.5 else 0) == actual,
-                "confidence_score": _row_confidence_score(row, p_over, edge_over),
-                "data_quality": data_quality,
-                "p_over": p_over,
-                "p_max": max(p_over, 1.0 - p_over),
-                "edge_abs": abs(edge_over),
-                "gap": abs(p_over - 0.5) * 2,
-                "log_loss": _binary_loss(actual, p_over),
-                "brier_score": (p_over - actual) ** 2,
-                "baseline_predicted": 1 if market_p >= 0.5 else 0,
-                "baseline_correct": (1 if market_p >= 0.5 else 0) == actual,
-                "baseline_log_loss": _binary_loss(actual, market_p),
-                "baseline_brier_score": (market_p - actual) ** 2,
-                "stake": stake,
-                "profit": profit,
-            }
-        )
-    return records
-
-
-def _aggregate_confidence_thresholds(folds: list[OUFoldResult]) -> JsonDict:
-    artifacts = [fold.confidence_thresholds for fold in folds if fold.confidence_thresholds]
-    highs = [
-        _optional_float(item.get("thresholds", {}).get("global", {}).get("high"))
-        for item in artifacts
-    ]
-    very_highs = [
-        _optional_float(item.get("thresholds", {}).get("global", {}).get("very_high"))
-        for item in artifacts
-    ]
-    highs = [item for item in highs if item is not None]
-    very_highs = [item for item in very_highs if item is not None]
-    return {
-        "threshold_version": THRESHOLD_VERSION,
-        "model_family": "ou25",
-        "production_approved": bool(artifacts) and all(
-            item.get("production_approved") is True for item in artifacts
-        ),
-        "thresholds": {
-            "global": {
-                "high": float(np.median(highs)) if highs else None,
-                "very_high": float(np.median(very_highs)) if very_highs else None,
-            }
-        },
-        "folds": artifacts,
-    }
-
-
-def _period_payload(frame: pd.DataFrame) -> JsonDict:
-    if frame.empty:
-        return {"row_count": 0, "start": None, "end": None}
-    dates = pd.to_datetime(frame[DATE_COL], utc=True)
-    return {
-        "row_count": int(len(frame)),
-        "start": dates.min().isoformat(),
-        "end": dates.max().isoformat(),
-    }
-
-
-def _row_confidence_score(row: pd.Series, p_over: float, edge_over: float) -> float:
-    existing = _optional_float(row.get("confidence_score"))
-    if existing is not None:
-        return existing
-    return _ou_confidence_score(p_over, edge_over)
-
-
-def _publication_quality_payload(row: pd.Series, score: float | None) -> JsonDict:
-    payload: JsonDict = {}
-    if score is not None:
-        payload["publication_data_quality_score"] = score
-    blockers = _parse_blockers(row.get("publication_blockers"))
-    if blockers:
-        payload["publication_blockers"] = blockers
-    return payload
-
-
-def _row_quality_score(row: pd.Series, *, scale: float) -> float | None:
-    for key in (
-        "publication_data_quality_score",
-        "ou_data_quality_score",
-        "overall_data_quality_score",
-        "data_quality_score",
-    ):
-        value = _optional_float(row.get(key))
-        if value is not None:
-            return max(0.0, min(100.0, value * scale))
-    return None
-
-
-def _quality_score_scale(frame: pd.DataFrame) -> float:
-    values: list[float] = []
-    for key in (
-        "publication_data_quality_score",
-        "ou_data_quality_score",
-        "overall_data_quality_score",
-        "data_quality_score",
-    ):
-        if key not in frame.columns:
-            continue
-        values.extend(
-            value
-            for value in (_optional_float(item) for item in frame[key].tolist())
-            if value is not None
-        )
-    return 100.0 if values and max(values) <= 1.0 else 1.0
-
-
-def _parse_blockers(value: Any) -> list[str]:
-    if value is None:
-        return []
-    if isinstance(value, list | tuple | set):
-        return [str(item) for item in value if str(item).strip()]
-    if isinstance(value, str) and value.strip():
-        try:
-            parsed = json.loads(value)
-        except json.JSONDecodeError:
-            return [value]
-        if isinstance(parsed, list):
-            return [str(item) for item in parsed if str(item).strip()]
-    return []
-
-
-def _flat_stake_profit(
-    *,
-    actual: int,
-    p_over: float,
-    market_p_over: float,
-    odd_over: float | None,
-    odd_under: float | None,
-) -> tuple[float | None, float | None]:
-    if odd_over is None or odd_under is None or odd_over <= 1 or odd_under <= 1:
-        return None, None
-    edge_over = p_over - market_p_over
-    edge_under = market_p_over - p_over
-    if edge_over <= 0 and edge_under <= 0:
-        return None, None
-    if edge_over >= edge_under:
-        won = actual == 1
-        odd = odd_over
-    else:
-        won = actual == 0
-        odd = odd_under
-    return 1.0, (odd - 1.0) if won else -1.0
-
-
-def _market_probability_or_default(
-    odd_over: float | None,
-    odd_under: float | None,
-) -> float:
-    if odd_over is not None and odd_under is not None and odd_over > 1 and odd_under > 1:
-        return _market_p_over(odd_over, odd_under)
-    return 0.5
-
-
-def _binary_loss(actual: int, probability: float) -> float:
-    p = min(max(float(probability), 1e-15), 1 - 1e-15)
-    return -(actual * math.log(p) + (1 - actual) * math.log(1 - p))
-
-
-def _json_value(value: Any) -> Any:
-    if pd.isna(value):
-        return None
-    if isinstance(value, np.generic):
-        return value.item()
-    return value
-
-
-def _optional_float(value: Any) -> float | None:
-    try:
-        resolved = float(value)
-    except (TypeError, ValueError):
-        return None
-    if not math.isfinite(resolved):
-        return None
-    return resolved
-
-
-def _published_only_report_from_thresholds(confidence_thresholds: JsonDict) -> JsonDict:
-    folds = confidence_thresholds.get("folds", [])
-    fold_reports: list[JsonDict] = []
-    if isinstance(folds, list):
-        for index, artifact in enumerate(folds, start=1):
-            if not isinstance(artifact, dict):
-                continue
-            test_metrics = artifact.get("metrics", {}).get("test", {})
-            fold_reports.append(
-                {
-                    "fold": index,
-                    "production_approved": artifact.get("production_approved"),
-                    "scopes": {
-                        "internal_all": _ou_scope_metrics(
-                            test_metrics.get("internal_all", {}),
-                            test_metrics.get("baseline_internal_all", {}),
-                        ),
-                        "published_only": _ou_scope_metrics(
-                            test_metrics.get("published_only", {}),
-                            test_metrics.get("baseline_on_published", {}),
-                        ),
-                    },
-                    "groups": {
-                        "league": _ou_group_metrics(test_metrics.get("by_league", {})),
-                        "season": _ou_group_metrics(test_metrics.get("by_season", {})),
-                        "confidence_label": {
-                            label: _ou_scope_metrics(metrics, {})
-                            for label, metrics in test_metrics.get("labels", {}).items()
-                            if isinstance(metrics, dict)
-                        },
-                        "data_quality": _ou_group_metrics(
-                            test_metrics.get("by_data_quality_bin", {})
-                        ),
-                    },
-                }
-            )
-    return {
-        "model_family": "ou25",
-        "policy": {
-            "threshold_version": confidence_thresholds.get("threshold_version"),
-            "thresholds": confidence_thresholds.get("thresholds", {}).get("global", {}),
-            "production_approved": confidence_thresholds.get("production_approved"),
-        },
-        "aggregate": {
-            "fold_count": len(fold_reports),
-            "published_rows": sum(
-                int(
-                    report.get("scopes", {})
-                    .get("published_only", {})
-                    .get("ensemble", {})
-                    .get("row_count")
-                    or 0
-                )
-                for report in fold_reports
-            ),
-        },
-        "folds": fold_reports,
-    }
-
-
-def _ou_scope_metrics(ensemble: JsonDict, market: JsonDict) -> JsonDict:
-    return {
-        "ensemble": ensemble if isinstance(ensemble, dict) else {},
-        "market": market if isinstance(market, dict) else {},
-        "comparison": {
-            "log_loss_delta_ensemble_minus_market": _delta(
-                ensemble.get("log_loss") if isinstance(ensemble, dict) else None,
-                market.get("log_loss") if isinstance(market, dict) else None,
-            ),
-            "brier_delta_ensemble_minus_market": _delta(
-                ensemble.get("brier_score") if isinstance(ensemble, dict) else None,
-                market.get("brier_score") if isinstance(market, dict) else None,
-            ),
-            "accuracy_delta_ensemble_minus_market": _delta(
-                ensemble.get("accuracy") if isinstance(ensemble, dict) else None,
-                market.get("accuracy") if isinstance(market, dict) else None,
-            ),
-            "roi_ensemble": ensemble.get("roi") if isinstance(ensemble, dict) else None,
-        },
-    }
-
-
-def _ou_group_metrics(groups: JsonDict) -> JsonDict:
-    if not isinstance(groups, dict):
-        return {}
-    output: JsonDict = {}
-    for value, payload in groups.items():
-        if not isinstance(payload, dict):
-            continue
-        output[str(value)] = {
-            "row_count": payload.get("row_count"),
-            "metrics": _ou_scope_metrics(
-                payload.get("published_only", {}),
-                payload.get("baseline_on_published", {}),
-            ),
-        }
-    return output
-
-
-def _delta(left: Any, right: Any) -> float | None:
-    left_value = _optional_float(left)
-    right_value = _optional_float(right)
-    if left_value is None or right_value is None:
-        return None
-    return left_value - right_value
-
-
-def _published_only_markdown(report: JsonDict) -> str:
-    lines = [
-        "# Backtest Published-Only O/U 2.5",
-        "",
-        "## Policy",
-        "",
-        f"- Model family: `{report.get('model_family')}`",
-        f"- Threshold version: `{report.get('policy', {}).get('threshold_version')}`",
-        f"- Production approved: `{report.get('policy', {}).get('production_approved')}`",
-        "",
-        "## Folds",
-        "",
-        "| Fold | Scope | Rows | Ensemble log loss | Market log loss | Ensemble ROI |",
-        "| ---: | --- | ---: | ---: | ---: | ---: |",
-    ]
-    for fold in report.get("folds", []):
-        for scope_name, payload in fold.get("scopes", {}).items():
-            ensemble = payload.get("ensemble", {})
-            market = payload.get("market", {})
-            lines.append(
-                f"| {fold.get('fold')} | {scope_name} | {ensemble.get('row_count', 0)} | "
-                f"{_fmt(ensemble.get('log_loss'))} | {_fmt(market.get('log_loss'))} | "
-                f"{_fmt(ensemble.get('roi'))} |"
-            )
-    return "\n".join(lines).rstrip() + "\n"
-
-
-def _fmt(value: Any) -> str:
-    if value is None:
-        return ""
-    try:
-        return f"{float(value):.4f}"
-    except (TypeError, ValueError):
-        return str(value)
-
-
 def run_ou_backtest(
     dataset_path: Path,
     *,
@@ -697,11 +323,7 @@ def run_ou_backtest(
         raise ValueError(f"Dataset missing date column '{DATE_COL}'")
 
     frame = frame.sort_values(DATE_COL).reset_index(drop=True)
-    logger.info(
-        "Running O/U backtest: %d total rows, %d splits",
-        len(frame),
-        resolved_config.n_splits,
-    )
+    logger.info("Running O/U backtest: %d total rows, %d splits", len(frame), resolved_config.n_splits)
 
     fold_splits = _fold_splits(frame, resolved_config.n_splits, resolved_config.min_train_rows)
     if not fold_splits:
@@ -716,14 +338,6 @@ def run_ou_backtest(
         folds.append(fold_result)
 
     aggregate = _aggregate_fold_results(folds)
-    confidence_thresholds = _aggregate_confidence_thresholds(folds)
-    published_only_report = _published_only_report_from_thresholds(confidence_thresholds)
-    aggregate["confidence_thresholds"] = {
-        "production_approved": confidence_thresholds.get("production_approved"),
-        "global": confidence_thresholds.get("thresholds", {}).get("global", {}),
-        "fold_count": len(confidence_thresholds.get("folds", [])),
-    }
-    aggregate["published_only"] = published_only_report.get("aggregate", {})
 
     result = OUBacktestResult(
         config=resolved_config,
@@ -731,7 +345,6 @@ def run_ou_backtest(
         aggregate=aggregate,
         dataset_path=str(dataset_path),
         output_dir=str(output_dir) if output_dir else None,
-        confidence_thresholds=confidence_thresholds,
     )
 
     if output_dir is not None:
@@ -754,25 +367,10 @@ def _save_backtest_results(result: OUBacktestResult, output_dir: Path) -> None:
                 "test_date_end": f.test_date_end,
                 "metrics": f.metrics_per_model,
                 "roi": f.roi_per_model,
-                "confidence_thresholds": f.confidence_thresholds,
             }
             for f in result.folds
         ],
         "dataset_path": result.dataset_path,
-        "confidence_thresholds": result.confidence_thresholds,
-        "published_only_report": _published_only_report_from_thresholds(
-            result.confidence_thresholds
-        ),
     }
     (output_dir / "backtest_results.json").write_text(json.dumps(summary, indent=2, default=str))
-    (output_dir / "confidence_thresholds.json").write_text(
-        json.dumps(result.confidence_thresholds, indent=2, default=str)
-    )
-    published_report = summary["published_only_report"]
-    (output_dir / "published_only_report.json").write_text(
-        json.dumps(published_report, indent=2, default=str)
-    )
-    (output_dir / "published_only_report.md").write_text(
-        _published_only_markdown(published_report)
-    )
     logger.info("Saved backtest results to %s", output_dir / "backtest_results.json")

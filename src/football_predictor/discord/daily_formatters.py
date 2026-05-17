@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from football_predictor.discord.formatter import CODE_CLOSE, CODE_OPEN
-from football_predictor.utils.secrets import sanitize_secret_text
 from football_predictor.utils.time import format_in_timezone
 
 DISCORD_HARD_LIMIT = 2000
@@ -44,7 +43,7 @@ def format_standings_messages(
     max_chars: int = DISCORD_SAFE_LIMIT,
 ) -> list[str]:
     header = [
-        f"📊 CLASSEMENT - {_clean(competition)}",
+        f"📊 CLASSEMENT - {competition}",
         f"Saison : {_value(season)}",
         f"Mise à jour : {_datetime_label(updated_at, timezone_name)}",
     ]
@@ -82,7 +81,7 @@ def format_calendar_messages(
     max_chars: int = DISCORD_SAFE_LIMIT,
 ) -> list[str]:
     header = [
-        f"🗓️ CALENDRIER - {_clean(competition)}",
+        f"🗓️ CALENDRIER - {competition}",
         f"Journée : {_value(round_name)}",
         f"Saison : {_value(season)}",
     ]
@@ -109,8 +108,8 @@ def format_daily_matches_messages(
     max_chars: int = DISCORD_SAFE_LIMIT,
 ) -> list[str]:
     header = [
-        f"📅 MATCHS DU JOUR - {_clean(competition)}",
-        f"Date : {_clean(match_date)}",
+        f"📅 MATCHS DU JOUR - {competition}",
+        f"Date : {match_date}",
     ]
     table = [
         "Heure  Match                                           Statut",
@@ -240,7 +239,7 @@ def _fixture_row(row: FixtureLine, timezone_name: str, *, include_date: bool) ->
 def _status_or_score(row: FixtureLine) -> str:
     if row.home_goals is not None and row.away_goals is not None:
         return f"{row.home_goals}-{row.away_goals}"
-    return _clean(row.status or "-")
+    return row.status or "-"
 
 
 def _datetime_label(value: datetime | None, timezone_name: str) -> str:
@@ -250,7 +249,7 @@ def _datetime_label(value: datetime | None, timezone_name: str) -> str:
 
 
 def _value(value: object) -> str:
-    return _clean(value) if value is not None else "non disponible"
+    return str(value) if value is not None else "non disponible"
 
 
 def _int(value: int | None, width: int) -> str:
@@ -262,15 +261,9 @@ def _signed(value: int | None, width: int) -> str:
 
 
 def _clip(value: object, width: int) -> str:
-    text = _clean(value)
+    text = str(value).replace("\n", " ").strip()
     if len(text) <= width:
         return text
     if width <= 1:
         return text[:width]
     return text[: width - 1] + "…"
-
-
-def _clean(value: object) -> str:
-    text = str(value).replace("```", "'''").replace("\r", " ").replace("\n", " ").strip()
-    text = sanitize_secret_text(text, replacement="[secret masqué]")
-    return " ".join(text.split())

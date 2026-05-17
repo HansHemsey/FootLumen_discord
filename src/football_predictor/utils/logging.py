@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import logging as stdlib_logging
+import re
 import sys
 from collections.abc import Mapping
 from typing import Any
-
-from football_predictor.utils.secrets import SECRET_REDACTION, sanitize_secret_text
 
 SENSITIVE_KEY_PARTS = (
     "authorization",
@@ -17,8 +16,13 @@ SENSITIVE_KEY_PARTS = (
     "webhook",
     "x-apisports-key",
 )
-REDACTED_VALUE = SECRET_REDACTION
+REDACTED_VALUE = "<redacted>"
 DEFAULT_LOG_FORMAT = "%(levelname)s %(name)s - %(message)s"
+SECRET_TEXT_PATTERNS = (
+    re.compile(r"https://discord(?:app)?\.com/api/webhooks/[^\s'\"<>]+", re.IGNORECASE),
+    re.compile(r"(?i)(Bearer)\s+[A-Za-z0-9._~+/=-]+"),
+    re.compile(r"(?i)((?:api[_-]?key|token|secret|webhook)[=:]\s*)[^\s,;]+"),
+)
 
 
 def configure_logging(level: int | str = stdlib_logging.INFO) -> stdlib_logging.Logger:
@@ -73,7 +77,15 @@ def sanitize_value(value: Any) -> Any:
 
 def sanitize_text(value: str) -> str:
     """Mask secret-looking fragments inside free-form text."""
-    return sanitize_secret_text(value, replacement=REDACTED_VALUE)
+    sanitized = value
+    for pattern in SECRET_TEXT_PATTERNS:
+        if pattern.pattern.startswith("(?i)((?:api"):
+            sanitized = pattern.sub(r"\1<redacted>", sanitized)
+        elif pattern.pattern.startswith("(?i)(Bearer"):
+            sanitized = pattern.sub(r"\1 <redacted>", sanitized)
+        else:
+            sanitized = pattern.sub("<redacted>", sanitized)
+    return sanitized
 
 
 def log_event(

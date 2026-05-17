@@ -21,8 +21,6 @@ from sklearn.metrics import (  # type: ignore[import-untyped]
     average_precision_score,
     brier_score_loss,
     log_loss,
-    precision_score,
-    recall_score,
     roc_auc_score,
 )
 from sklearn.pipeline import Pipeline  # type: ignore[import-untyped]
@@ -281,10 +279,6 @@ def evaluate_draw_risk_frame(
         "brier_score": float(brier_score_loss(y_true, probabilities)),
         "roc_auc": _roc_auc(y_true, probabilities),
         "pr_auc": _pr_auc(y_true, probabilities),
-        "precision_draw": float(precision_score(y_true, predictions, zero_division=0)),
-        "recall_draw": float(recall_score(y_true, predictions, zero_division=0)),
-        "actual_draw_rate": float(np.mean(y_true)),
-        "predicted_draw_rate": float(np.mean(predictions)),
         "mean_predicted_draw": float(np.mean(probabilities)),
     }
     bins, ece = _calibration_bins(y_true, probabilities)

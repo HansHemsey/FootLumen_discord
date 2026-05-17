@@ -26,7 +26,6 @@ def test_settings_default_reference_paths() -> None:
     assert settings.api_football_players_cache_path == Path(
         "docs/api_football_players_cache.json"
     )
-    assert settings.publication_min_data_quality_score == 60.0
 
 
 def test_reference_paths_exist(repo_root: Path) -> None:

@@ -34,7 +34,7 @@ un layout `src/`, `typer`, `pydantic-settings`, `pytest`, `ruff` et `mypy`.
 ```bash
 python -m venv .venv
 . .venv/bin/activate
-pip install -e ".[dev,ml]"
+pip install -e ".[dev]"
 cp .env.example .env
 ```
 
@@ -130,9 +130,6 @@ make train-backtest-all
 
 # Dataset multi-ligues, entrainement et backtest O/U 2.5.
 make train-backtest-ou
-
-# Backtest offline qui simule la production M-30 pour V3 et O/U.
-football-predictor backtest-production-like --league-id 39 --season 2025 --format both
 ```
 
 `config/competitions.yaml` reste la config de production quotidienne : elle contient les
@@ -247,8 +244,6 @@ crontab -l
 
 Elle publie réellement dans Discord avec `SEND_DISCORD=true DRY_RUN=false`, utilise les
 scripts prod, verrouille chaque routine avec `lockf` et écrit les logs dans `logs/cron/`.
-`lockf` est un verrou BSD/macOS ; sur VPS Linux, adapter cette crontab avec `flock` avant
-installation en production.
 
 Résumé des crons installés :
 
@@ -303,7 +298,7 @@ Flux recommande sans consommer de quota API :
 ```bash
 python -m venv .venv
 . .venv/bin/activate
-pip install -e ".[dev,ml]"
+pip install -e ".[dev]"
 cp .env.example .env
 football-predictor init-db
 football-predictor seed-reference-from-docs \
@@ -400,7 +395,6 @@ football-predictor doctor --strict
 football-predictor doctor --json
 football-predictor data-quality --league 39 --season 2025
 football-predictor data-quality --fixture <fixture_id> --json
-football-predictor data-quality --week-of YYYY-MM-DD --model-family v3 --markdown-output reports/data_quality_week.md
 football-predictor version
 football-predictor healthcheck
 football-predictor init-db
@@ -473,22 +467,6 @@ football-predictor backtest \
   --output-dir reports/backtest_v2_late \
   --retrain-v2-model-version v2-late \
   --format both
-football-predictor backtest-production-like \
-  --league-id 39 \
-  --season 2025 \
-  --v3-model-dir data/models/v3 \
-  --v2-model-dir data/models/v2-late \
-  --output-dir reports/production_like \
-  --format both
-football-predictor backtest-season-confidence \
-  --league-id 39 \
-  --league-id 61 \
-  --season 2025 \
-  --train-season 2022 \
-  --train-season 2023 \
-  --train-season 2024 \
-  --output-dir reports/season_confidence/2025_sample \
-  --format both
 football-predictor predict \
   --fixture <fixture_id> \
   --model-dir data/models/v2-late \
@@ -547,13 +525,9 @@ valeurs vérifiées dans les référentiels JSON ou dans la base locale.
 L'exemple `league 39` correspond à la Premier League 2025 et existe dans
 `docs/api_football_reference.json`; il reste à adapter selon les compétitions suivies.
 `predict-today-v3` reste en shadow mode par défaut pour les appels manuels. Ajouter
-`--production-mode` autorise le chemin production V3 seulement si
-`data/models/v3/confidence_thresholds.json` est un artefact backtest approuvé
-(`production_approved=true`) avec au moins un label dans `approved_labels` ; un envoi
-Discord réel exige aussi `--send-discord` et l'absence de `--dry-run` / `--print-only`.
-Utiliser `--dry-run --print-only` pour vérifier le rendu Discord V3 sans publication. Le
-pipeline O/U applique la même règle avec `data/models/ou-v1/confidence_thresholds.json` et
-`ou run-daily --production-mode`.
+`--production-mode` autorise le chemin production V3 ; un envoi Discord réel exige aussi
+`--send-discord` et l'absence de `--dry-run` / `--print-only`. Utiliser
+`--dry-run --print-only` pour vérifier le rendu Discord V3 sans publication.
 
 Les commandes `ingest-fixtures --league/--season`, `ingest-fixtures --date` et
 `ingest-standings --league/--season` utilisent les docs locaux par défaut. Les variantes
@@ -586,11 +560,9 @@ sort avec un code non zéro seulement sur erreur critique.
 
 `data-quality` observe la couverture locale déjà stockée en DB, sans ingestion ni recalcul
 de features. Le rapport peut être global, filtré par fixture, par date, ou par
-`--week-of`, `--league/--season` et `--model-family all|v3|ou25`. Il résume fixtures
-futures/terminées, odds, standings, injuries, lineups, stats joueurs, prédictions API,
-derniers `fetched_at`, nombre de snapshots, fraîcheur par source et readiness de
-publication basée sur `publication_data_quality_score`. Les sorties locales sont
-disponibles via `--json-output` et `--markdown-output`.
+`--league/--season`. Il résume fixtures futures/terminées, odds, standings, injuries,
+lineups, stats joueurs, prédictions API, derniers `fetched_at`, nombre de
+`FeatureSnapshot` et score moyen `overall_data_quality_score`.
 
 ## Base De Données
 
@@ -737,37 +709,19 @@ revient à `data/models/v1`, puis aux fallbacks. Avec V2, les probabilités par 
 persistées dans `ModelPrediction.payload_json.expert_probabilities`. Les appels API live ne
 sont faits qu'avec `--refresh-data`, jamais implicitement.
 
-Depuis Sprint 10, `scripts/daily_late.sh` utilise la V3 par défaut
-(`MODEL_DIR=data/models/v3`, `V2_MODEL_DIR=data/models/v2-late`). Le script n'ajoute
-`--production-mode` que pour un vrai envoi live (`SEND_DISCORD=true`, `DRY_RUN=false`,
-`PRINT_ONLY=false`). Un envoi live V3 exige un artefact
-`data/models/v3/confidence_thresholds.json` approuvé par backtest (`production_approved=true`) ;
-sans cet artefact, le mode production est refusé avant prédiction. Le shadow mode,
-`--dry-run` et `--print-only` restent autorisés pour vérifier le rendu, collecter des
-prédictions internes et auditer la persistance locale. Le rollback officiel est :
+Depuis Sprint 10, `scripts/daily_late.sh` publie les prédictions M-30 avec la V3 par
+défaut (`MODEL_DIR=data/models/v3`, `V2_MODEL_DIR=data/models/v2-late`). La promotion est
+volontaire malgré un backtest V3 non validé ; surveiller les premiers runs réels et la
+couverture odds/API/lineups rafraîchie à M-30. Le rollback officiel est :
 
 ```bash
 PREDICTION_ENGINE=v2 SEND_DISCORD=true DRY_RUN=false scripts/daily_late.sh
 ```
 
 La publication publique applique le même filtre pour V3 1X2 et O/U 2.5 : seuls les labels
-calibrés et approuvés `High` ou `Very High` peuvent être envoyés dans Discord, avec un
-`publication_data_quality_score >= PUBLICATION_MIN_DATA_QUALITY_SCORE`. Si l'artefact
-n'approuve que `Very High`, les prédictions `High` restent internes. Les prédictions `Low`,
-`Medium`, `Uncertain`, les scores qualité insuffisants, les labels non approuvés ou les
-`publication_blockers` sont persistés pour suivi interne avec le statut
+`High` et `Very High` sont envoyés dans Discord. Les prédictions `Low`, `Medium`,
+`Uncertain` ou assimilées sont persistées pour suivi interne avec le statut
 `confidence_skipped`.
-
-Le backtest `backtest-production-like` est le contrôle offline de référence : il sélectionne
-des fixtures terminées, fixe `prediction_time = fixture.date - 30 minutes`, ignore toute
-donnée postérieure, applique la même policy de publication que la production et produit des
-métriques `internal_all` et `published_only` pour V3 et O/U.
-
-La commande `backtest-season-confidence` est un rapport holdout saison : elle entraîne V3 et
-O/U sur des saisons antérieures, évalue uniquement les matchs terminés de la saison cible à
-M-30, puis sort les scores High/Very High par championnat. Le rapport distingue les lignes
-réellement publiables selon la policy production des lignes `confidence-only` qui ignorent
-le gate data quality pour auditer la valeur brute du label de confiance.
 
 La commande `predict-today` automatise les prédictions d'une date sans serveur web. Elle
 peut être appelée par cron ou par une tâche planifiée. Les fenêtres filtrent les fixtures
@@ -796,17 +750,12 @@ scripts/daily_morning.sh
 
 # Update avant match : V3 par defaut, refresh explicite, Discord reel seulement si dry-run desactive.
 SEND_DISCORD=true DRY_RUN=false scripts/daily_late.sh
-
-# O/U 2.5 late : même gate High/Very High + data quality, dry-run par defaut.
-SEND_DISCORD=true DRY_RUN=false scripts/daily_ou.sh
 ```
 
 La déduplication Discord est faite par `fixture_id + window` pour les vrais messages
 `predictions`. En V3, elle n'empêche pas de créer une nouvelle `V3ModelPrediction`, mais
-évite un second envoi réel pour la même fenêtre. O/U ajoute une clé sémantique
-`ou25:{fixture_id}:{window}:{model_version}:ou_prediction`, ce qui bloque un second envoi
-live même si le rendu markdown change. `--force` contourne ces protections ; `--dry-run` et
-`--print-only` ne bloquent jamais un futur envoi réel.
+évite un second envoi réel pour la même fenêtre. `--force` contourne cette protection ;
+`--dry-run` et `--print-only` ne bloquent jamais un futur envoi réel.
 
 Le formatter Discord produit un bloc `md` ferme, en français, limite à 2000 caractères. Il
 inclut le match, la compétition, la date, les probabilités, la confiance, les facteurs clés,
@@ -861,11 +810,9 @@ SEND_DISCORD=true DRY_RUN=false scripts/publish_weekly_score.sh
 ```
 
 Il compte uniquement les pronostics réellement publiés dans Discord et dont le match est
-terminé : V2 legacy via `model_prediction_id`, V3 via `v3_model_prediction_id` et O/U 2.5
-via `ou_model_prediction_id`. Les anciennes lignes restent compatibles via fallback
-`payload_json`. Les prédictions internes non publiées pour confiance insuffisante,
-`dry_run`, `print_only`, `duplicate_skipped` ou `confidence_skipped` ne sont pas affichées.
-Le bilan est
+terminé : V2 legacy, V3 via `payload_json["v3_model_prediction_id"]`, et O/U 2.5 via
+`payload_json["ou_model_prediction_id"]`. Les prédictions internes non publiées pour
+confiance insuffisante, `dry_run` ou `print_only` ne sont pas affichées. Le bilan est
 calculé sur la semaine ISO lundi-dimanche en Europe/Paris, puis remplace seulement le
 message du même `week_key`. Le lundi matin, il met aussi à jour la semaine précédente
 afin de capter les résultats du dimanche arrivés dans la nuit, puis crée le message de la

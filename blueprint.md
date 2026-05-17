@@ -12,23 +12,11 @@ Le projet vise à développer un outil Python de prédiction de matchs de footba
 L’outil doit :
 
 - prédire le résultat 1X2 d’un match : victoire domicile, match nul, victoire extérieur ;
-- maintenir V3 1X2 comme moteur quotidien par défaut, V2 comme rollback et O/U 2.5 comme
-  pipeline complémentaire ;
 - produire des probabilités calibrées : `P(Home)`, `P(Draw)`, `P(Away)` ;
 - intégrer les données équipe, joueur, forme récente, domicile/extérieur, statistiques détaillées, blessures, absences, XI probable, odds bookmakers et prédictions API-Football ;
 - éviter toute fuite de données en calculant les features uniquement avec les données disponibles avant l’heure de prédiction ;
 - publier une prédiction claire dans Discord via webhook, sous forme de bloc markdown ;
 - être exploitable en CLI depuis VSCode, un terminal, Docker ou une tâche planifiée.
-
-Publication produit actuelle :
-
-- seuls les pronostics `High` ou `Very High` avec
-  `publication_data_quality_score >= PUBLICATION_MIN_DATA_QUALITY_SCORE` et sans
-  `publication_blockers` peuvent être envoyés réellement dans Discord ;
-- les prédictions `Low`, `Medium`, `Uncertain` ou insuffisamment fiables restent internes
-  avec une raison normalisée de non-publication ;
-- le score-pronos-semaine compte uniquement les messages Discord réellement `sent`, jamais
-  les dry-run, print-only, doublons ignorés ou prédictions internes.
 
 ---
 

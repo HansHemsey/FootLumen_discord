@@ -21,23 +21,15 @@ from sqlalchemy.orm import Session
 from football_predictor.config.competitions import CompetitionConfig
 from football_predictor.db import models
 from football_predictor.discord.formatter import format_prediction_markdown
-from football_predictor.discord.service import DiscordDeliveryService
+from football_predictor.discord.service import DiscordDeliveryService, DiscordSendResult
 from football_predictor.discord.v3_formatter import format_prediction_v3_markdown
 from football_predictor.ingestion.fixtures import FixtureIngestionService
 from football_predictor.ingestion.ingest_match_details import FixtureDetailsIngestionService
 from football_predictor.ingestion.ingest_odds import OddsIngestionService
-from football_predictor.prediction.model_approval import (
-    load_runtime_confidence_thresholds,
-    require_production_model_approval,
-)
-from football_predictor.prediction.publication_flow import (
-    CandidatePrediction,
-    StoredPredictionRef,
-    deliver_candidate_prediction,
-    evaluate_and_persist_candidate,
-)
 from football_predictor.prediction.publication_policy import (
-    DEFAULT_MIN_DATA_QUALITY_SCORE,
+    CONFIDENCE_SKIP_REASON,
+    is_publishable_confidence,
+    normalize_confidence_label,
 )
 from football_predictor.prediction.scheduler import (
     DailyPredictionWindow,
@@ -288,7 +280,6 @@ def run_daily_predictions(
     save_raw: bool = False,
     limit: int | None = None,
     now: datetime | None = None,
-    min_data_quality_score: float = DEFAULT_MIN_DATA_QUALITY_SCORE,
 ) -> DailyPredictionSummary:
     """Predict all eligible fixtures for a date and return a compact summary."""
     resolved_window = parse_daily_window(window)
@@ -394,56 +385,27 @@ def run_daily_predictions(
                 "run_key": run_key,
                 "refresh_warnings": refresh_warnings,
             }
-            candidate = CandidatePrediction(
-                model_family="v2",
-                fixture_id=fixture.fixture_id,
-                league_id=fixture.league_id,
-                season=fixture.season,
-                confidence_label=output.confidence_label,
-                confidence_score=output.confidence_score,
-                data_quality_json=output.data_quality_json,
-                prediction_time=prediction_time,
-                stored_prediction=StoredPredictionRef("v2", output.model_prediction_id),
-                render_markdown=lambda output=output: format_prediction_markdown(output),
-                model_prediction_id=output.model_prediction_id,
-                payload_metadata=metadata,
-            )
+            _annotate_model_prediction(session, output.model_prediction_id, metadata)
             if send_discord:
-                delivery_result = deliver_candidate_prediction(
-                    session,
+                send_result = _send_prediction(
                     discord_delivery,
-                    candidate,
+                    output,
+                    fixture,
                     dry_run=dry_run,
                     print_only=print_only,
                     force=force,
-                    min_data_quality_score=min_data_quality_score,
+                    metadata=metadata,
                 )
-                if delivery_result.status == "confidence_skipped":
-                    results.append(
-                        _result(
-                            fixture,
-                            "confidence_skipped",
-                            prediction_time,
-                            model_prediction_id=output.model_prediction_id,
-                            reason=delivery_result.non_publication_reason,
-                        )
-                    )
-                    continue
                 results.append(
                     _result(
                         fixture,
-                        delivery_result.status,
+                        send_result.status,
                         prediction_time,
                         model_prediction_id=output.model_prediction_id,
-                        discord_message_id=delivery_result.discord_message_id,
+                        discord_message_id=send_result.discord_message_id,
                     )
                 )
             else:
-                evaluate_and_persist_candidate(
-                    session,
-                    candidate,
-                    min_data_quality_score=min_data_quality_score,
-                )
                 results.append(
                     _result(
                         fixture,
@@ -494,7 +456,6 @@ def run_daily_predictions_v3(
     limit: int | None = None,
     now: datetime | None = None,
     shadow_mode: bool = True,
-    min_data_quality_score: float = DEFAULT_MIN_DATA_QUALITY_SCORE,
 ) -> DailyPredictionSummary:
     """Run V3 daily predictions in shadow mode by default.
 
@@ -510,20 +471,14 @@ def run_daily_predictions_v3(
     resolved_leagues = tuple(league_ids or _enabled_competition_leagues(competitions))
     run_key = daily_run_key(target_date.isoformat(), resolved_window, resolved_leagues, season)
 
-    if shadow_mode and send_discord and not dry_run and not print_only:
-        raise PredictionError(
-            "V3 shadow mode does not allow live Discord sends; use dry_run or print_only"
-        )
-    if not shadow_mode:
-        require_production_model_approval(model_dir, model_family="v3_1x2")
-    runtime_thresholds = load_runtime_confidence_thresholds(
-        model_dir,
-        model_family="v3_1x2",
-    )
     if refresh_data and api_client is None:
         raise PredictionError("refresh_data=True requires an API-Football client")
     if send_discord and discord_delivery is None:
         raise PredictionError("send_discord=True requires a DiscordDeliveryService")
+    if shadow_mode and send_discord and not dry_run and not print_only:
+        raise PredictionError(
+            "V3 shadow mode does not allow live Discord sends; use dry_run or print_only"
+        )
 
     if refresh_data and api_client is not None:
         _refresh_fixtures_for_date(
@@ -609,11 +564,6 @@ def run_daily_predictions_v3(
                 refresh_data=False,
                 save_raw=save_raw,
             )
-            raw_confidence_label = output.confidence_label
-            calibrated_confidence_label = runtime_thresholds.label_for_score(
-                output.confidence_score,
-                raw_confidence_label,
-            )
             metadata = {
                 "daily_window": resolved_window.value,
                 "automation_window": resolved_window.value,
@@ -623,44 +573,23 @@ def run_daily_predictions_v3(
                 "refresh_warnings": refresh_warnings,
                 "model_family": "v3",
                 "shadow_mode": shadow_mode,
-                "raw_confidence_label": raw_confidence_label,
-                "calibrated_confidence_label": calibrated_confidence_label,
-                **runtime_thresholds.as_metadata(),
             }
-            candidate = CandidatePrediction(
-                model_family="v3",
-                fixture_id=fixture.fixture_id,
-                league_id=fixture.league_id,
-                season=fixture.season,
-                confidence_label=calibrated_confidence_label,
-                confidence_score=output.confidence_score,
-                data_quality_json=output.data_quality_json,
-                prediction_time=prediction_time,
-                stored_prediction=StoredPredictionRef("v3", output.v3_model_prediction_id),
-                render_markdown=lambda output=output: format_prediction_v3_markdown(
-                    output,
-                    timezone_name=timezone_name,
-                ),
-                model_prediction_id=None,
-                v3_model_prediction_id=output.v3_model_prediction_id,
-                approved_labels=runtime_thresholds.approved_labels,
-                payload_metadata=metadata,
-                discord_payload_metadata={
-                    "v3_model_prediction_id": output.v3_model_prediction_id,
-                    "v3_feature_snapshot_id": output.v3_feature_snapshot_id,
-                },
-            )
+            _annotate_v3_model_prediction(session, output.v3_model_prediction_id, metadata)
             if send_discord:
-                delivery_result = deliver_candidate_prediction(
-                    session,
-                    discord_delivery,
-                    candidate,
-                    dry_run=dry_run,
-                    print_only=print_only,
-                    force=force,
-                    min_data_quality_score=min_data_quality_score,
-                )
-                if delivery_result.status == "confidence_skipped":
+                if (
+                    not dry_run
+                    and not print_only
+                    and not is_publishable_confidence(output.confidence_label)
+                ):
+                    logger.info(
+                        "V3 Discord publication skipped: fixture_id=%s confidence_label=%s "
+                        "confidence_score=%s expected=%s window=%s",
+                        fixture.fixture_id,
+                        normalize_confidence_label(output.confidence_label),
+                        output.confidence_score,
+                        "High|Very High",
+                        resolved_window.value,
+                    )
                     results.append(
                         _result(
                             fixture,
@@ -668,26 +597,31 @@ def run_daily_predictions_v3(
                             prediction_time,
                             v3_model_prediction_id=output.v3_model_prediction_id,
                             v3_feature_snapshot_id=output.v3_feature_snapshot_id,
-                            reason=delivery_result.non_publication_reason,
+                            reason=CONFIDENCE_SKIP_REASON,
                         )
                     )
                     continue
+                send_result = _send_prediction_v3(
+                    discord_delivery,
+                    output,
+                    fixture,
+                    dry_run=dry_run,
+                    print_only=print_only,
+                    force=force,
+                    metadata=metadata,
+                    timezone_name=timezone_name,
+                )
                 results.append(
                     _result(
                         fixture,
-                        delivery_result.status,
+                        send_result.status,
                         prediction_time,
                         v3_model_prediction_id=output.v3_model_prediction_id,
                         v3_feature_snapshot_id=output.v3_feature_snapshot_id,
-                        discord_message_id=delivery_result.discord_message_id,
+                        discord_message_id=send_result.discord_message_id,
                     )
                 )
             else:
-                evaluate_and_persist_candidate(
-                    session,
-                    candidate,
-                    min_data_quality_score=min_data_quality_score,
-                )
                 results.append(
                     _result(
                         fixture,
@@ -841,6 +775,104 @@ def _safe_refresh(warnings: list[str], label: str, action: Callable[[], Any]) ->
         action()
     except Exception as exc:
         warnings.append(f"{label}: {exc}")
+
+
+def _send_prediction(
+    delivery: DiscordDeliveryService | None,
+    output: PredictionOutput,
+    fixture: models.Fixture,
+    *,
+    dry_run: bool,
+    print_only: bool,
+    force: bool,
+    metadata: JsonDict,
+) -> DiscordSendResult:
+    if delivery is None:
+        raise PredictionError("send_discord=True requires a DiscordDeliveryService")
+    result = delivery.send_markdown(
+        format_prediction_markdown(output),
+        league_id=fixture.league_id,
+        season=fixture.season,
+        channel_key="predictions",
+        message_type="prediction",
+        fixture_id=fixture.fixture_id,
+        model_prediction_id=output.model_prediction_id,
+        dry_run=dry_run,
+        print_only=print_only,
+        force=force,
+    )
+    if result.discord_message_id is not None:
+        message = delivery.session.get(models.DiscordMessage, result.discord_message_id)
+        if message is not None:
+            payload = dict(message.payload_json) if isinstance(message.payload_json, dict) else {}
+            payload.update(metadata)
+            message.payload_json = payload
+    return result
+
+
+def _send_prediction_v3(
+    delivery: DiscordDeliveryService | None,
+    output: PredictionV3Output,
+    fixture: models.Fixture,
+    *,
+    dry_run: bool,
+    print_only: bool,
+    force: bool,
+    metadata: JsonDict,
+    timezone_name: str,
+) -> DiscordSendResult:
+    if delivery is None:
+        raise PredictionError("send_discord=True requires a DiscordDeliveryService")
+    payload_metadata = {
+        **metadata,
+        "v3_model_prediction_id": output.v3_model_prediction_id,
+        "v3_feature_snapshot_id": output.v3_feature_snapshot_id,
+    }
+    return delivery.send_markdown(
+        format_prediction_v3_markdown(output, timezone_name=timezone_name),
+        league_id=fixture.league_id,
+        season=fixture.season,
+        channel_key="predictions",
+        message_type="prediction",
+        fixture_id=fixture.fixture_id,
+        model_prediction_id=None,
+        dry_run=dry_run,
+        print_only=print_only,
+        force=force,
+        payload_metadata=payload_metadata,
+    )
+
+
+def _annotate_model_prediction(
+    session: Session,
+    model_prediction_id: int | None,
+    metadata: JsonDict,
+) -> None:
+    if model_prediction_id is None:
+        return
+    prediction = session.get(models.ModelPrediction, model_prediction_id)
+    if prediction is None:
+        return
+    payload = dict(prediction.payload_json) if isinstance(prediction.payload_json, dict) else {}
+    payload.update(metadata)
+    prediction.payload_json = payload
+    session.flush()
+
+
+def _annotate_v3_model_prediction(
+    session: Session,
+    v3_model_prediction_id: int | None,
+    metadata: JsonDict,
+) -> None:
+    if v3_model_prediction_id is None:
+        return
+    prediction = session.get(models.V3ModelPrediction, v3_model_prediction_id)
+    if prediction is None:
+        return
+    payload = dict(prediction.payload_json) if isinstance(prediction.payload_json, dict) else {}
+    payload.update(metadata)
+    prediction.payload_json = payload
+    session.flush()
 
 
 def _has_sent_prediction_window(

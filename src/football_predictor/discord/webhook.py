@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 
 from football_predictor.discord.exceptions import DiscordWebhookError
-from football_predictor.utils.secrets import hash_secret, sanitize_secret_text
+from football_predictor.utils.secrets import hash_secret
 
 NO_MENTIONS: dict[str, list[str]] = {"parse": []}
 
@@ -99,8 +99,4 @@ def _response_payload(response: httpx.Response) -> dict[str, object]:
 
 def _safe_response_text(response: httpx.Response) -> str:
     text = response.text[:200]
-    return (
-        sanitize_secret_text(text, replacement="<redacted>")
-        .replace("\n", " ")
-        .replace("\r", " ")
-    )
+    return text.replace("\n", " ").replace("\r", " ")

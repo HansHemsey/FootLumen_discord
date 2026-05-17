@@ -310,34 +310,6 @@ Exports V1 :
   données de seuils de confiance réutilisables pour de futurs graphiques ;
 - `backtest_report.md` : résumé lisible des mêmes résultats.
 
-### Backtest Production-Like M-30
-
-Le backtest production-like reconstruit le flux opérationnel `late` sans appel réseau :
-il lit la base locale, sélectionne uniquement des fixtures terminées, fixe
-`prediction_time = fixture_date - 30 minutes`, génère les datasets V3 et O/U, puis applique
-la même policy de publication que la production pour produire les métriques internes et
-`published-only`.
-
-Commande :
-
-```bash
-football-predictor backtest-production-like \
-  --league-id 39 \
-  --season 2025 \
-  --v3-model-dir data/models/v3 \
-  --v2-model-dir data/models/v2-late \
-  --output-dir reports/production_like \
-  --format both
-```
-
-Rapports écrits :
-
-- `production_like_backtest_report.json` : rapport combiné V3/O-U, datasets générés,
-  métriques internes/publiées et contrôles anti-leakage ;
-- `production_like_backtest_report.md` : résumé lisible ;
-- `datasets/v3_m30.parquet` et `datasets/ou25_m30.parquet` : datasets offline utilisés
-  pour les évaluations.
-
 ## Modélisation V2 Late M-30
 
 La V2 est pensée pour les prédictions `late` M-30 et reste le rollback officiel de
@@ -561,9 +533,8 @@ football-predictor predict-v3 \
 ```
 
 Le message utilise le formatter V3 dédié, reste routé vers `message_type="prediction"` et
-stocke `v3_model_prediction_id` dans la colonne dédiée `DiscordMessage.v3_model_prediction_id`.
-`model_prediction_id` reste réservé aux prédictions V2 ; `payload_json` conserve les mêmes
-références en fallback pour les anciennes lignes et l'audit.
+stocke `v3_model_prediction_id` dans `DiscordMessage.payload_json` plutôt que dans
+`model_prediction_id`, car cette FK reste réservée aux prédictions V2.
 
 ### V3 Quotidien Et Production Discord
 
@@ -598,67 +569,15 @@ SEND_DISCORD=true DRY_RUN=false scripts/daily_late.sh
 PREDICTION_ENGINE=v2 SEND_DISCORD=true DRY_RUN=false scripts/daily_late.sh
 ```
 
-La promotion V3 n'est autorisée que si le répertoire modèle contient un artefact
-`confidence_thresholds.json` approuvé par backtest. En shadow, dry-run ou print-only, V3 peut
-tourner sans artefact approuvé pour collecter des prédictions internes et vérifier les
-rendues. Les probabilités et le taux de réussite doivent rester surveillés après activation,
-avec une attention particulière aux sources live M-30 : odds, prédictions API, lineups et
-blessures.
+La promotion V3 est volontaire malgré un backtest non validé. Les probabilités et le taux
+de réussite doivent donc être surveillés après activation, avec une attention particulière
+aux sources live M-30 : odds, prédictions API, lineups et blessures.
 
 La publication Discord n'est pas automatique pour toutes les prédictions calculées. La
-règle métier commune V3 1X2 et O/U 2.5 est : publier uniquement les confiances calibrées
-`High` et `Very High`, avec `publication_data_quality_score >=
-PUBLICATION_MIN_DATA_QUALITY_SCORE`, aucun `publication_blockers` et un label présent dans
-`approved_labels`. Les prédictions `Medium`, `Low`, `Uncertain`, non normalisables,
-insuffisamment fiables ou non approuvées restent stockées en base avec
-`confidence_skipped` et ne sont pas prises en compte dans le score public hebdomadaire.
-
-Les seuils `High` et `Very High` doivent être validés par backtest avant promotion. Les
-backtests V3 et O/U écrivent un artefact `confidence_thresholds.json` contenant :
-
-- `model_family` (`v3_1x2` ou `ou25`) ;
-- `threshold_version` ;
-- seuils globaux `High` / `Very High` ;
-- `approved_labels`, c'est-à-dire les labels autorisés en production après validation
-  indépendante par volume et performance ;
-- métriques validation/test par label et `published_only` ;
-- funnel de publication (`publication_funnel`) avec volumes avant/après data quality,
-  blockers et raisons par ligue ;
-- overrides par ligue uniquement si le volume validation est suffisant ;
-- contrat data quality (`data_quality_contract`) exigeant
-  `publication_data_quality_score` et `data_quality_version="dq_v2"` pour approuver la
-  production ;
-- `production_approved`.
-
-Les mêmes backtests écrivent aussi `published_only_report.json` et
-`published_only_report.md`. Ces rapports appliquent la policy de production sur le fold test
-et séparent :
-
-- `internal_all` : toutes les prédictions calculées ;
-- `published_only` : uniquement les prédictions qui auraient été envoyées Discord ;
-- les métriques par ligue, saison, label de confiance et tranche de data quality.
-
-Pour V3, le rapport compare `v3_stacker_full`, `v2_existing`, `odds_only`,
-`api_prediction_only` et `poisson_baseline` sur le même sous-ensemble publié, en utilisant le
-même baseline de référence que l'artefact de seuils. Pour O/U, il compare l'ensemble O/U au
-baseline marché.
-
-La calibration des seuils est apprise sur validation chronologique uniquement et évaluée
-sur test. Les labels sont approuvés indépendamment : un artefact peut autoriser seulement
-`Very High` si `High` n'a pas assez de volume ou ne bat pas les baselines. La publication
-simulée applique la même policy que la production : `evaluate_publication()` avec
-`PUBLICATION_MIN_DATA_QUALITY_SCORE`, les blockers qualité et `approved_labels`. Sans
-artefact approuvé dans le répertoire modèle, les chemins production V3 1X2 et O/U 2.5 sont
-refusés avant prédiction et sans appel réseau. Le shadow mode, `--dry-run` et `--print-only`
-restent disponibles pour valider le rendu et la persistance locale.
-
-Règles de recalibration :
-
-- recalibrer mensuellement ou après environ 250 prédictions réglées ;
-- utiliser seulement les prédictions point-in-time de matchs terminés ;
-- conserver les anciens artefacts pour rollback ;
-- remplacer les seuils actifs uniquement si `production_approved=true` et si
-  `approved_labels` contient au moins un label exploitable.
+règle métier commune V3 1X2 et O/U 2.5 est : publier uniquement les confiances `High` et
+`Very High`. Les prédictions `Medium`, `Low`, `Uncertain` ou non normalisables restent
+stockées en base avec `confidence_skipped` et ne sont pas prises en compte dans le score
+public hebdomadaire.
 
 Pour valider le rendu Discord V3 sans envoi réel :
 
@@ -669,12 +588,9 @@ football-predictor predict-today-v3 \
   --print-only
 ```
 
-Un envoi Discord V3 réel depuis la CLI exige `--production-mode --send-discord`,
-`--dry-run=false` / `--print-only=false`, et
-`<model_dir>/confidence_thresholds.json` avec `production_approved=true`. Sans
-`--production-mode`, `predict-v3` et `predict-today-v3` restent bloqués pour les envois
-live. La routine V3 ajoute ce flag uniquement pour un vrai envoi live ; la routine O/U suit
-la même règle via `ou run-daily --production-mode`.
+Un envoi Discord V3 réel depuis la CLI exige `--production-mode --send-discord` et
+`--dry-run=false` / `--print-only=false`. Sans `--production-mode`, `predict-today-v3`
+reste bloqué pour les envois live.
 
 ## Règles Anti Data Leakage
 

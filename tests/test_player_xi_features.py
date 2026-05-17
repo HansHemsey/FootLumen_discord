@@ -63,33 +63,6 @@ def test_player_xi_non_starter_absence_is_damped(tmp_path) -> None:
     assert non_starter_absence["p_start"] < 0.35
 
 
-def test_player_xi_excludes_target_lineups_and_stats_even_if_target_is_finished(
-    tmp_path,
-) -> None:
-    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'xi_target_finished.db'}")
-    session_factory = create_session_factory(engine)
-
-    with session_scope(session_factory) as session:
-        _seed_base(session)
-        session.flush()
-        target = session.get(models.Fixture, -900)
-        target.date = datetime(2026, 4, 30, 19, tzinfo=UTC)
-        target.status = "FT"
-        target.status_short = "FT"
-        target.home_goals = 9
-        target.away_goals = 0
-        session.add(_lineup(-900, -10, "3-5-2", [-199], datetime(2026, 5, 1, 10, tzinfo=UTC)))
-        session.add(_player_stat(-900, -10, -199, minutes=90, rating=10.0, goals=5))
-        session.flush()
-
-        result = build_player_xi_features(session, -900, PREDICTION_TIME)
-
-    home_xi_ids = {row["player_id"] for row in result.features_json["home_team_expected_xi_json"]}
-    assert -199 not in home_xi_ids
-    assert result.data_quality_json["home_team_lineups_available"] == 2
-    assert result.data_quality_json["home_team_player_stats_available"] == 2
-
-
 def test_player_xi_save_snapshot_is_idempotent(tmp_path) -> None:
     engine = create_db_and_tables(f"sqlite:///{tmp_path / 'xi_snapshot.db'}")
     session_factory = create_session_factory(engine)

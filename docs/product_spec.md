@@ -28,15 +28,6 @@ toujours présenter une prédiction comme probabiliste, jamais comme certaine.
 - envoyer un message Discord en français via webhook ;
 - continuer avec des fallbacks quand une source optionnelle manque.
 
-État opérationnel actuel :
-
-- V3 1X2 est le moteur quotidien par défaut pour la fenêtre `late` ;
-- V2 1X2 reste le rollback officiel et un signal consommable par V3 ;
-- O/U 2.5 est un pipeline séparé avec la même exigence de publication sélective ;
-- une publication Discord réelle est autorisée uniquement pour `High` ou `Very High`,
-  `publication_data_quality_score >= PUBLICATION_MIN_DATA_QUALITY_SCORE` et aucun
-  `publication_blockers`.
-
 ## Sortie De Prédiction
 
 Une prédiction doit contenir au minimum :
@@ -137,11 +128,6 @@ les absences ou XI disponibles, les points forts/faibles, la fiabilité des donn
 conclusion prudente. Le channel `resultats` reçoit un bilan après `FT/AET/PEN` avec score
 final, résultat 1X2 et comparaison avec la prédiction pré-match quand elle existe. Ces deux
 channels conservent l'historique et ne sont pas nettoyés par le remplacement quotidien.
-
-Le channel global `score_pronos_semaine` publie un bilan hebdomadaire des seuls pronostics
-réellement envoyés dans Discord : `status="sent"`, `dry_run=false`, `print_only=false`,
-match terminé et message de prédiction V2, V3 ou O/U. Les prédictions internes, les doublons
-ignorés et les publications bloquées par confidence/data quality ne sont jamais comptées.
 
 Les URLs webhook réelles doivent rester dans `config/discord_webhooks.local.yaml`, dans des
 variables d'environnement ou dans un secret manager futur. Les fichiers example ne doivent

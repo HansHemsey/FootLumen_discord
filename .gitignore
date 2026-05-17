@@ -1,16 +1,8 @@
 .DS_Store
 .env
-.env.*
-!.env.example
 config/discord_webhooks.local.yaml
 config/discord_channels.local.yaml
-config/*.local.yaml
 *.secrets.yaml
-*.credentials.json
-*.pem
-*.key
-*.p12
-*.crt
 .venv/
 __pycache__/
 .pytest_cache/

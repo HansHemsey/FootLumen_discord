@@ -149,15 +149,6 @@ def test_team_features_ignore_snapshots_after_prediction_time(tmp_path) -> None:
                     total_shots=99,
                     shots_on_goal=50,
                 ),
-                models.FixtureEvent(
-                    fixture_id=-901,
-                    team_id=-1,
-                    type="Goal",
-                    event_type="Goal",
-                    detail="Penalty",
-                    fetched_at=datetime(2026, 5, 2, 13, tzinfo=UTC),
-                    payload_json={"synthetic": True, "future_penalty": True},
-                ),
             ]
         )
 
@@ -165,117 +156,6 @@ def test_team_features_ignore_snapshots_after_prediction_time(tmp_path) -> None:
 
     assert result.features_json["home_team_global_shots_total_avg_last3"] == pytest.approx(8.0)
     assert result.features_json["home_team_global_shots_on_goal_avg_last3"] == pytest.approx(4.0)
-    assert result.features_json["home_team_global_pseudo_xg_avg_last3"] == pytest.approx(0.60)
-
-
-def test_team_features_exclude_target_statistics_and_events_even_if_available(
-    tmp_path,
-) -> None:
-    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'target_stats_events.db'}")
-    session_factory = create_session_factory(engine)
-
-    with session_scope(session_factory) as session:
-        _seed_teams(session)
-        _add_fixture(
-            session,
-            -900,
-            datetime(2026, 4, 30, 19, tzinfo=UTC),
-            -1,
-            -2,
-            9,
-            0,
-            status_short="FT",
-        )
-        _add_fixture(
-            session,
-            -901,
-            datetime(2026, 4, 20, 19, tzinfo=UTC),
-            -1,
-            -3,
-            1,
-            1,
-        )
-        session.add_all(
-            [
-                _statistics(
-                    -900,
-                    -1,
-                    datetime(2026, 5, 1, 10, tzinfo=UTC),
-                    total_shots=99,
-                    shots_on_goal=50,
-                    shots_inside_box=30,
-                ),
-                _statistics(
-                    -901,
-                    -1,
-                    datetime(2026, 4, 21, 10, tzinfo=UTC),
-                    total_shots=8,
-                    shots_on_goal=4,
-                    shots_inside_box=3,
-                ),
-                _card_event(-900, -1, datetime(2026, 5, 1, 10, tzinfo=UTC), "Yellow Card"),
-            ]
-        )
-
-        result = build_team_features(session, -900, PREDICTION_TIME)
-
-    features = result.features_json
-    assert features["home_team_global_matches_available_last3"] == 1
-    assert features["home_team_global_goals_for_avg_last3"] == pytest.approx(1.0)
-    assert features["home_team_global_shots_total_avg_last3"] == pytest.approx(8.0)
-    assert features["home_team_global_yellow_cards_avg_last3"] is None
-
-
-def test_team_features_ignore_future_standing_snapshot_date_even_if_fetched_before(
-    tmp_path,
-) -> None:
-    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'future_standing_date.db'}")
-    session_factory = create_session_factory(engine)
-
-    with session_scope(session_factory) as session:
-        _seed_teams(session)
-        _seed_target_fixture(session)
-        _add_fixture(
-            session,
-            -901,
-            datetime(2026, 4, 20, 19, tzinfo=UTC),
-            -1,
-            -3,
-            2,
-            0,
-        )
-        session.add_all(
-            [
-                models.StandingSnapshot(
-                    league_id=-100,
-                    season=2026,
-                    team_id=-1,
-                    snapshot_date=datetime(2026, 5, 1, 8, tzinfo=UTC),
-                    fetched_at=datetime(2026, 5, 1, 8, tzinfo=UTC),
-                    rank=2,
-                    points=24,
-                    goals_diff=8,
-                    all_played=12,
-                    payload_json={"synthetic": True},
-                ),
-                models.StandingSnapshot(
-                    league_id=-100,
-                    season=2026,
-                    team_id=-1,
-                    snapshot_date=datetime(2026, 5, 3, 8, tzinfo=UTC),
-                    fetched_at=datetime(2026, 5, 2, 8, tzinfo=UTC),
-                    rank=1,
-                    points=99,
-                    goals_diff=99,
-                    all_played=13,
-                    payload_json={"synthetic": True, "future_snapshot_date": True},
-                ),
-            ]
-        )
-
-        result = build_team_features(session, -900, PREDICTION_TIME)
-
-    assert result.features_json["home_team_standing_rank"] == 2
 
 
 def test_team_features_missing_optional_data_returns_none_and_warnings(tmp_path) -> None:

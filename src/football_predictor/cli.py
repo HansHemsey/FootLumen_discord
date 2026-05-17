@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import replace
 from datetime import date as date_type
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -15,7 +14,6 @@ import typer
 from dotenv import dotenv_values
 from rich.console import Console
 from rich.table import Table
-from sqlalchemy import select
 
 from football_predictor import __version__
 from football_predictor.api.api_football_client import ApiFootballClient
@@ -23,7 +21,6 @@ from football_predictor.backtesting.dataset import build_training_dataset, parse
 from football_predictor.backtesting.evaluator import BacktestConfig, ReportFormat, run_backtest
 from football_predictor.config import Settings, get_settings
 from football_predictor.config.competitions import CompetitionConfig, load_competition_config
-from football_predictor.db import models
 from football_predictor.db.models import Fixture
 from football_predictor.db.session import (
     create_db_engine,
@@ -77,22 +74,6 @@ from football_predictor.prediction import (
     PredictionService,
     run_daily_predictions,
     run_daily_predictions_v3,
-)
-from football_predictor.prediction.model_approval import (
-    load_runtime_confidence_thresholds,
-    require_production_model_approval,
-)
-from football_predictor.prediction.publication_flow import (
-    CandidatePrediction,
-    StoredPredictionRef,
-    deliver_candidate_prediction,
-    evaluate_and_persist_candidate,
-    publication_metadata,
-)
-from football_predictor.prediction.publication_policy import (
-    PublicationDecision,
-    evaluate_publication,
-    publication_decision_payload,
 )
 from football_predictor.prediction.service import RESULT_LABELS_FR, PredictionOutput
 from football_predictor.reference.loaders import load_api_football_reference, load_players_reference
@@ -474,10 +455,8 @@ def _print_data_quality_report(report: dict) -> None:
         "Scope: "
         f"fixture={scope.get('fixture_id')} "
         f"date={scope.get('date')} "
-        f"week_of={scope.get('week_of')} "
         f"league={scope.get('league_id')} "
-        f"season={scope.get('season')} "
-        f"model_family={scope.get('model_family')}"
+        f"season={scope.get('season')}"
     )
     table = Table(title="Data Quality")
     table.add_column("Metric")
@@ -490,58 +469,6 @@ def _print_data_quality_report(report: dict) -> None:
         else:
             table.add_row(key, str(value))
     console.print(table)
-
-
-def _data_quality_markdown(report: dict) -> str:
-    scope = report.get("scope", {})
-    readiness = report.get("publication_readiness", {})
-    alerts = report.get("alerts", [])
-    lines = [
-        "# Data Quality Report",
-        "",
-        "## Scope",
-        "",
-        f"- fixture_id: {scope.get('fixture_id')}",
-        f"- date: {scope.get('date')}",
-        f"- week_of: {scope.get('week_of')}",
-        f"- league_id: {scope.get('league_id')}",
-        f"- season: {scope.get('season')}",
-        f"- model_family: {scope.get('model_family')}",
-        "",
-        "## Publication Readiness",
-        "",
-        f"- fixtures_ready: {report.get('fixtures_ready')}",
-        f"- fixtures_blocked: {report.get('fixtures_blocked')}",
-        f"- average_score: {readiness.get('average_publication_data_quality_score')}",
-        f"- missing_score_count: {readiness.get('missing_score_count')}",
-        "",
-        "## Alerts",
-        "",
-    ]
-    lines.extend(f"- {alert}" for alert in alerts)
-    if not alerts:
-        lines.append("- none")
-    lines.extend(
-        [
-            "",
-            "## Source Freshness",
-            "",
-            "| Source | Snapshots | Fresh | Checked | Avg score | Latest fetched at |",
-            "|---|---:|---:|---:|---:|---|",
-        ]
-    )
-    source_freshness = report.get("source_freshness", {})
-    if isinstance(source_freshness, dict):
-        for source, payload in sorted(source_freshness.items()):
-            if not isinstance(payload, dict):
-                continue
-            lines.append(
-                "| "
-                f"{source} | {payload.get('snapshots')} | {payload.get('fresh_count')} | "
-                f"{payload.get('checked_count')} | {payload.get('average_score')} | "
-                f"{payload.get('latest_fetched_at')} |"
-            )
-    return "\n".join(lines) + "\n"
 
 
 @app.command("version")
@@ -572,21 +499,9 @@ def doctor(
 def data_quality_command(
     fixture_id: int | None = typer.Option(None, "--fixture", help="Scope report to a fixture."),
     report_date: str | None = typer.Option(None, "--date", help="Scope report to YYYY-MM-DD."),
-    week_of: str | None = typer.Option(None, "--week-of", help="Scope report to a 7-day week."),
     league_id: int | None = typer.Option(None, "--league", help="Scope report to a league."),
     season: int | None = typer.Option(None, "--season", help="Scope report to a season."),
-    model_family: str = typer.Option("all", "--model-family", help="all, v3 or ou25."),
     json_output: bool = typer.Option(False, "--json", help="Output a machine-readable report."),
-    json_output_path: Path | None = typer.Option(
-        None,
-        "--json-output",
-        help="Write machine-readable report to a JSON file.",
-    ),
-    markdown_output: Path | None = typer.Option(
-        None,
-        "--markdown-output",
-        help="Write a Markdown data-quality report.",
-    ),
 ) -> None:
     """Report local DB coverage for prediction inputs without network calls."""
     settings = get_settings()
@@ -596,17 +511,6 @@ def data_quality_command(
             parsed_date = date_type.fromisoformat(report_date)
         except ValueError as exc:
             raise typer.BadParameter("--date must use YYYY-MM-DD format") from exc
-    parsed_week = None
-    if week_of is not None:
-        try:
-            parsed_week = date_type.fromisoformat(week_of)
-        except ValueError as exc:
-            raise typer.BadParameter("--week-of must use YYYY-MM-DD format") from exc
-    if parsed_date is not None and parsed_week is not None:
-        raise typer.BadParameter("--date and --week-of are mutually exclusive")
-    normalized_model_family = model_family.casefold()
-    if normalized_model_family not in {"all", "v3", "ou25"}:
-        raise typer.BadParameter("--model-family must be one of: all, v3, ou25")
     if league_id is not None and season is None:
         raise typer.BadParameter("--season is required with --league")
 
@@ -628,20 +532,11 @@ def data_quality_command(
             session,
             fixture_id=fixture_id,
             target_date=parsed_date,
-            week_of=parsed_week,
             league_id=league_id,
             season=season,
-            model_family=normalized_model_family,
         )
-    rendered_json = json.dumps(report, indent=2, sort_keys=True)
-    if json_output_path is not None:
-        json_output_path.parent.mkdir(parents=True, exist_ok=True)
-        json_output_path.write_text(rendered_json + "\n", encoding="utf-8")
-    if markdown_output is not None:
-        markdown_output.parent.mkdir(parents=True, exist_ok=True)
-        markdown_output.write_text(_data_quality_markdown(report), encoding="utf-8")
     if json_output:
-        typer.echo(rendered_json)
+        typer.echo(json.dumps(report, indent=2, sort_keys=True))
     else:
         _print_data_quality_report(report)
 
@@ -1064,42 +959,6 @@ def _print_prediction_v3_summary(prediction: Any, timezone_name: str) -> None:
         console.print(f"{index}. {explanation}")
 
 
-def _publication_metadata(decision: PublicationDecision) -> dict[str, Any]:
-    return publication_metadata(decision)
-
-
-def _annotate_model_publication(
-    session: Any,
-    model_prediction_id: int | None,
-    metadata: dict[str, Any],
-) -> None:
-    if model_prediction_id is None:
-        return
-    prediction = session.get(models.ModelPrediction, model_prediction_id)
-    if prediction is None:
-        return
-    payload = dict(prediction.payload_json) if isinstance(prediction.payload_json, dict) else {}
-    payload.update(metadata)
-    prediction.payload_json = payload
-    session.flush()
-
-
-def _annotate_v3_publication(
-    session: Any,
-    v3_model_prediction_id: int | None,
-    metadata: dict[str, Any],
-) -> None:
-    if v3_model_prediction_id is None:
-        return
-    prediction = session.get(models.V3ModelPrediction, v3_model_prediction_id)
-    if prediction is None:
-        return
-    payload = dict(prediction.payload_json) if isinstance(prediction.payload_json, dict) else {}
-    payload.update(metadata)
-    prediction.payload_json = payload
-    session.flush()
-
-
 @app.command()
 def predict(
     fixture: int = typer.Option(..., "--fixture", help="API-Football fixture_id from local docs."),
@@ -1205,15 +1064,7 @@ def predict_v3(
     send_discord: bool = typer.Option(
         False,
         "--send-discord",
-        help=(
-            "Send the V3 markdown prediction to Discord. Requires --production-mode "
-            "for live sends."
-        ),
-    ),
-    shadow_mode: bool = typer.Option(
-        True,
-        "--shadow-mode/--production-mode",
-        help="Shadow mode blocks live Discord sends; production mode requires approved backtest.",
+        help="Send the V3 markdown prediction to Discord.",
     ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Persist Discord route without sending."),
     print_only: bool = typer.Option(
@@ -1235,17 +1086,6 @@ def predict_v3(
 ) -> None:
     """Predict a single fixture with V3 and optional Discord delivery."""
     settings = get_settings()
-    if shadow_mode and send_discord and not dry_run and not print_only:
-        raise typer.BadParameter(
-            "V3 shadow mode blocks live Discord sends; use --production-mode or "
-            "--dry-run/--print-only"
-        )
-    if not shadow_mode:
-        require_production_model_approval(model_dir, model_family="v3_1x2")
-    runtime_thresholds = load_runtime_confidence_thresholds(
-        model_dir,
-        model_family="v3_1x2",
-    )
     if send_discord or dry_run or print_only:
         reference, channels_config, webhooks_config = _load_discord_routing(
             settings,
@@ -1293,50 +1133,12 @@ def predict_v3(
                 refresh_data=False,
                 save_raw=save_raw,
             )
-        raw_confidence_label = prediction.confidence_label
-        calibrated_confidence_label = runtime_thresholds.label_for_score(
-            prediction.confidence_score,
-            raw_confidence_label,
+        markdown = format_prediction_v3_markdown(
+            prediction,
+            timezone_name=settings.app_timezone,
         )
-        rendered_markdown: str | None = None
-
-        def render_markdown() -> str:
-            nonlocal rendered_markdown
-            if rendered_markdown is None:
-                rendered_markdown = format_prediction_v3_markdown(
-                    prediction,
-                    timezone_name=settings.app_timezone,
-                )
-            return rendered_markdown
-
-        candidate = CandidatePrediction(
-            model_family="v3",
-            fixture_id=fixture,
-            league_id=None,
-            season=None,
-            confidence_label=calibrated_confidence_label,
-            confidence_score=prediction.confidence_score,
-            data_quality_json=prediction.data_quality_json,
-            prediction_time=prediction.prediction_time,
-            stored_prediction=StoredPredictionRef("v3", prediction.v3_model_prediction_id),
-            render_markdown=render_markdown,
-            model_prediction_id=None,
-            v3_model_prediction_id=prediction.v3_model_prediction_id,
-            approved_labels=runtime_thresholds.approved_labels,
-            payload_metadata={
-                "model_family": "v3",
-                "v3_model_prediction_id": prediction.v3_model_prediction_id,
-                "v3_feature_snapshot_id": prediction.v3_feature_snapshot_id,
-                "shadow_mode": shadow_mode,
-                "raw_confidence_label": raw_confidence_label,
-                "calibrated_confidence_label": calibrated_confidence_label,
-                **runtime_thresholds.as_metadata(),
-            },
-            discord_payload_metadata={
-                "v3_model_prediction_id": prediction.v3_model_prediction_id,
-                "v3_feature_snapshot_id": prediction.v3_feature_snapshot_id,
-            },
-        )
+        if print_only and not json_output:
+            console.print(markdown)
         if send_discord or dry_run or print_only:
             fixture_row = session.get(Fixture, fixture)
             competition_key = _competition_key_from_fixture(reference, fixture_row, None)
@@ -1360,51 +1162,32 @@ def predict_v3(
                 legacy_webhook_url=settings.discord_webhook_url,
                 timeout=settings.discord_timeout_seconds,
             )
-            candidate = replace(
-                candidate,
+            result = delivery.send_markdown(
+                markdown,
                 competition_key=competition_key,
                 league_id=route_league_id,
                 season=route_season,
-            )
-            if print_only and not json_output:
-                console.print(render_markdown())
-            delivery_result = deliver_candidate_prediction(
-                session,
-                delivery,
-                candidate,
+                channel_key="predictions",
+                message_type="prediction",
+                fixture_id=fixture,
+                model_prediction_id=None,
                 dry_run=dry_run,
                 print_only=print_only,
                 force=force,
-                min_data_quality_score=settings.publication_min_data_quality_score,
+                payload_metadata={
+                    "model_family": "v3",
+                    "v3_model_prediction_id": prediction.v3_model_prediction_id,
+                    "v3_feature_snapshot_id": prediction.v3_feature_snapshot_id,
+                },
             )
-            send_result = delivery_result.send_result
             discord_payload = {
-                "status": delivery_result.status,
-                "discord_message_id": delivery_result.discord_message_id,
-                "webhook_hash": send_result.webhook_hash if send_result is not None else None,
-                "channel": (
-                    send_result.route.channel_key if send_result is not None else "predictions"
-                ),
-                "reason": delivery_result.non_publication_reason,
-                "publication_decision": publication_decision_payload(
-                    delivery_result.decision
-                ),
-                "model_family": "v3",
-                "v3_model_prediction_id": prediction.v3_model_prediction_id,
-                "v3_feature_snapshot_id": prediction.v3_feature_snapshot_id,
+                "status": result.status,
+                "discord_message_id": result.discord_message_id,
+                "webhook_hash": result.webhook_hash,
+                "channel": result.route.channel_key,
             }
-        else:
-            evaluate_and_persist_candidate(
-                session,
-                candidate,
-                min_data_quality_score=settings.publication_min_data_quality_score,
-            )
 
     payload = prediction.to_dict()
-    payload["raw_confidence_label"] = raw_confidence_label
-    payload["calibrated_confidence_label"] = calibrated_confidence_label
-    payload["threshold_artifact_status"] = runtime_thresholds.status
-    payload["approved_labels"] = list(runtime_thresholds.approved_labels)
     if discord_payload is not None:
         payload["discord"] = discord_payload
     if json_output:
@@ -1497,59 +1280,34 @@ def predict_and_send(
         markdown = format_prediction_markdown(prediction, settings.app_timezone)
         if print_only:
             console.print(markdown)
-        publication_decision = evaluate_publication(
-            prediction.confidence_label,
-            prediction.data_quality_json,
-            min_data_quality_score=settings.publication_min_data_quality_score,
-        )
-        publication_metadata = _publication_metadata(publication_decision)
-        _annotate_model_publication(
+        delivery = DiscordDeliveryService(
             session,
-            prediction.model_prediction_id,
-            publication_metadata,
+            channels_config=channels_config,
+            webhooks_config=webhooks_config,
+            legacy_webhook_url=settings.discord_webhook_url,
+            timeout=settings.discord_timeout_seconds,
         )
-        if not dry_run and not print_only and not publication_decision.allowed:
-            result_status = "confidence_skipped"
-            result_channel = channel
-            result_webhook_hash = "none"
-        else:
-            delivery = DiscordDeliveryService(
-                session,
-                channels_config=channels_config,
-                webhooks_config=webhooks_config,
-                legacy_webhook_url=settings.discord_webhook_url,
-                timeout=settings.discord_timeout_seconds,
-            )
-            result = delivery.send_markdown(
-                markdown,
-                competition_key=_competition_key_from_fixture(
-                    reference,
-                    fixture_row,
-                    competition_key,
-                ),
-                league_id=fixture_row.league_id if fixture_row is not None else None,
-                season=fixture_row.season if fixture_row is not None else None,
-                channel_key=channel,
-                message_type="prediction",
-                fixture_id=fixture,
-                model_prediction_id=prediction.model_prediction_id,
-                dry_run=dry_run,
-                print_only=print_only,
-                force=force,
-                payload_metadata=publication_metadata,
-            )
-            result_status = result.status
-            result_channel = result.route.channel_key
-            result_webhook_hash = result.webhook_hash or "none"
-    reason_suffix = (
-        f" reason={publication_decision.reason}"
-        if result_status == "confidence_skipped"
-        else ""
-    )
+        result = delivery.send_markdown(
+            markdown,
+            competition_key=_competition_key_from_fixture(
+                reference,
+                fixture_row,
+                competition_key,
+            ),
+            league_id=fixture_row.league_id if fixture_row is not None else None,
+            season=fixture_row.season if fixture_row is not None else None,
+            channel_key=channel,
+            message_type="prediction",
+            fixture_id=fixture,
+            model_prediction_id=prediction.model_prediction_id,
+            dry_run=dry_run,
+            print_only=print_only,
+            force=force,
+        )
     console.print(
         "Discord route "
-        f"status={result_status} channel={result_channel} "
-        f"webhook_hash={result_webhook_hash}{reason_suffix}"
+        f"status={result.status} channel={result.route.channel_key} "
+        f"webhook_hash={result.webhook_hash or 'none'}"
     )
 
 
@@ -1599,13 +1357,9 @@ def discord_send(
             print_only=print_only,
             force=force,
             timezone_name=settings.app_timezone,
-            min_data_quality_score=settings.publication_min_data_quality_score,
         )
-    reason = result.response_json.get("reason") if isinstance(result.response_json, dict) else None
-    reason_suffix = f" reason={reason}" if reason else ""
     console.print(
-        "Discord prediction "
-        f"status={result.status} webhook_hash={result.webhook_hash or 'none'}{reason_suffix}"
+        f"Discord prediction status={result.status} webhook_hash={result.webhook_hash or 'none'}"
     )
 
 
@@ -2180,7 +1934,6 @@ def predict_today(
                 limit=limit,
                 save_raw=save_raw,
                 now=cutoff,
-                min_data_quality_score=settings.publication_min_data_quality_score,
             )
         finally:
             if api_client is not None:
@@ -2340,7 +2093,6 @@ def predict_today_v3(
                 save_raw=save_raw,
                 now=cutoff,
                 shadow_mode=shadow_mode,
-                min_data_quality_score=settings.publication_min_data_quality_score,
             )
         finally:
             if api_client is not None:
@@ -3383,230 +3135,6 @@ def backtest_v3(
     )
 
 
-@app.command("backtest-production-like")
-def backtest_production_like(
-    league_id: list[int] = typer.Option(
-        [],
-        "--league-id",
-        help="League id to include. Repeat for multiple leagues.",
-    ),
-    season: list[int] = typer.Option(
-        [],
-        "--season",
-        help="Season to include. Repeat for multiple seasons.",
-    ),
-    output_dir: Path = typer.Option(
-        Path("reports/production_like"),
-        "--output-dir",
-        "--report",
-        help="Directory where combined production-like reports are written.",
-    ),
-    v3_model_dir: Path = typer.Option(
-        Path("data/models/v3"),
-        "--v3-model-dir",
-        help="Directory containing V3 component artifacts.",
-    ),
-    v2_model_dir: Path | None = typer.Option(
-        None,
-        "--v2-model-dir",
-        help="Optional V2 model directory used for comparison.",
-    ),
-    date_from: str | None = typer.Option(
-        None,
-        "--date-from",
-        help="Inclusive fixture kickoff lower bound, ISO datetime.",
-    ),
-    date_to: str | None = typer.Option(
-        None,
-        "--date-to",
-        help="Inclusive fixture kickoff upper bound, ISO datetime.",
-    ),
-    limit: int | None = typer.Option(None, "--limit"),
-    output_format: str = typer.Option(
-        "both",
-        "--format",
-        help="Combined report format: json, markdown, or both.",
-    ),
-    retrain_v3: bool = typer.Option(
-        False,
-        "--retrain-v3/--no-retrain-v3",
-        help="Retrain V3 from the generated M-30 dataset before evaluating.",
-    ),
-    ou_splits: int = typer.Option(5, "--ou-splits"),
-    ou_min_train_rows: int = typer.Option(300, "--ou-min-train-rows"),
-) -> None:
-    """Run an offline production-like M-30 backtest for V3 and O/U."""
-    normalized_format = output_format.casefold()
-    if normalized_format not in {"json", "markdown", "both"}:
-        raise typer.BadParameter("--format must be json, markdown, or both")
-    if not league_id:
-        raise typer.BadParameter("--league-id is required")
-    if not season:
-        raise typer.BadParameter("--season is required")
-
-    from football_predictor.backtesting.production_like import (
-        ProductionLikeBacktestConfig,
-        run_production_like_backtest,
-    )
-
-    settings = get_settings()
-    _, session_factory = _engine_and_session(settings)
-    with session_scope(session_factory) as session:
-        result = run_production_like_backtest(
-            session,
-            config=ProductionLikeBacktestConfig(
-                league_ids=league_id,
-                seasons=season,
-                output_dir=output_dir,
-                v3_model_dir=v3_model_dir,
-                v2_model_dir=v2_model_dir,
-                ou_model_dir=settings.ou_model_dir,
-                ou_bet_id=settings.market_ou25_bet_id,
-                prediction_offset_minutes=30,
-                min_data_quality_score=settings.publication_min_data_quality_score,
-                date_from=parse_datetime(date_from),
-                date_to=parse_datetime(date_to),
-                limit=limit,
-                report_format=cast(Any, normalized_format),
-                retrain_v3=retrain_v3,
-                ou_n_splits=ou_splits,
-                ou_min_train_rows=ou_min_train_rows,
-            ),
-        )
-    console.print(
-        {
-            "v3_rows": result.v3_rows,
-            "ou_rows": result.ou_rows,
-            "datasets": {name: str(path) for name, path in result.dataset_paths.items()},
-            "reports": {name: str(path) for name, path in result.report_paths.items()},
-            "leakage_checks": result.payload.get("leakage_checks", {}),
-        }
-    )
-
-
-@app.command("backtest-season-confidence")
-def backtest_season_confidence(
-    league_id: list[int] = typer.Option(
-        [],
-        "--league-id",
-        help="League id to include. Repeat for multiple leagues.",
-    ),
-    season: int = typer.Option(
-        ...,
-        "--season",
-        help="Finished season to evaluate.",
-    ),
-    train_season: list[int] = typer.Option(
-        [],
-        "--train-season",
-        help=(
-            "Prior season used for training. Repeat for multiple seasons. "
-            "Defaults to all local seasons before --season for the selected leagues."
-        ),
-    ),
-    output_dir: Path = typer.Option(
-        Path("reports/season_confidence"),
-        "--output-dir",
-        "--report",
-        help="Directory where season confidence reports are written.",
-    ),
-    v2_model_dir: Path | None = typer.Option(
-        None,
-        "--v2-model-dir",
-        help="Optional V2 model directory used for V3 comparison.",
-    ),
-    output_format: str = typer.Option(
-        "both",
-        "--format",
-        help="Report format: json, markdown, or both.",
-    ),
-    ou_fit_boosting: bool = typer.Option(
-        True,
-        "--ou-fit-boosting/--ou-fast",
-        help="Fit optional O/U boosting experts when available.",
-    ),
-    reuse_datasets: bool = typer.Option(
-        False,
-        "--reuse-datasets/--rebuild-datasets",
-        help="Reuse already generated local M-30 datasets in --output-dir.",
-    ),
-) -> None:
-    """Evaluate High/Very High V3 and O/U predictions on a finished season holdout."""
-    normalized_format = output_format.casefold()
-    if normalized_format not in {"json", "markdown", "both"}:
-        raise typer.BadParameter("--format must be json, markdown, or both")
-    if not league_id:
-        raise typer.BadParameter("--league-id is required")
-
-    from football_predictor.backtesting.season_confidence import (
-        SeasonConfidenceBacktestConfig,
-        run_season_confidence_backtest,
-    )
-
-    settings = get_settings()
-    _, session_factory = _engine_and_session(settings)
-    with session_scope(session_factory) as session:
-        resolved_train_seasons = train_season or _available_train_seasons(
-            session,
-            league_ids=league_id,
-            test_season=season,
-        )
-        result = run_season_confidence_backtest(
-            session,
-            config=SeasonConfidenceBacktestConfig(
-                league_ids=league_id,
-                test_season=season,
-                train_seasons=resolved_train_seasons,
-                output_dir=output_dir,
-                v2_model_dir=v2_model_dir,
-                ou_bet_id=settings.market_ou25_bet_id,
-                prediction_offset_minutes=30,
-                min_data_quality_score=settings.publication_min_data_quality_score,
-                report_format=cast(Any, normalized_format),
-                ou_fit_boosting=ou_fit_boosting,
-                reuse_existing_datasets=reuse_datasets,
-            ),
-        )
-    console.print(
-        {
-            "mode": result.payload.get("mode"),
-            "test_season": result.payload.get("config", {}).get("test_season"),
-            "train_seasons": result.payload.get("config", {}).get("train_seasons"),
-            "datasets": {name: str(path) for name, path in result.dataset_paths.items()},
-            "reports": {name: str(path) for name, path in result.report_paths.items()},
-            "v3_summary": result.payload.get("reports", {})
-            .get("v3_1x2", {})
-            .get("summary", {}),
-            "ou_summary": result.payload.get("reports", {})
-            .get("ou25", {})
-            .get("summary", {}),
-        }
-    )
-
-
-def _available_train_seasons(
-    session: Any,
-    *,
-    league_ids: list[int],
-    test_season: int,
-) -> list[int]:
-    seasons = session.scalars(
-        select(models.Fixture.season)
-        .where(
-            models.Fixture.league_id.in_(league_ids),
-            models.Fixture.season < test_season,
-        )
-        .distinct()
-        .order_by(models.Fixture.season.asc())
-    ).all()
-    resolved = [int(season) for season in seasons]
-    if not resolved:
-        raise typer.BadParameter(
-            "No local train seasons found before --season; pass --train-season explicitly."
-        )
-    return resolved
-
-
 @app.command()
 def backtest(
     dataset: Path = typer.Option(..., "--dataset", help="CSV or Parquet backtest dataset."),
@@ -3838,11 +3366,6 @@ def ou_run_daily(
     print_only: bool = typer.Option(False, "--print-only"),
     limit: int | None = typer.Option(None, "--limit"),
     edge_threshold: float = typer.Option(0.02, "--edge-threshold"),
-    shadow_mode: bool = typer.Option(
-        True,
-        "--shadow-mode/--production-mode",
-        help="Shadow mode blocks live Discord sends; production mode requires approved backtest.",
-    ),
 ) -> None:
     """Run O/U 2.5 predictions for all fixtures on a given date."""
     from football_predictor.ou_model.prediction.ou_run_daily import run_daily_ou_predictions
@@ -3850,12 +3373,6 @@ def ou_run_daily(
     settings = get_settings()
     engine, session_factory = _engine_and_session(settings)
     target_date = date_type.fromisoformat(date_str) if date_str else None
-    resolved_model_dir = model_dir or settings.ou_model_dir
-    if shadow_mode and send_discord and not dry_run and not print_only:
-        raise typer.BadParameter(
-            "O/U shadow mode blocks live Discord sends; use --production-mode or "
-            "--dry-run/--print-only"
-        )
 
     discord_delivery = None
     if send_discord:
@@ -3874,7 +3391,7 @@ def ou_run_daily(
             discord_delivery=discord_delivery,
             league_ids=league_id or None,
             season=season,
-            model_dir=resolved_model_dir,
+            model_dir=model_dir,
             ou_bet_id=settings.market_ou25_bet_id,
             send_discord=send_discord,
             dry_run=dry_run,
@@ -3882,8 +3399,6 @@ def ou_run_daily(
             window=window,
             limit=limit,
             edge_threshold=edge_threshold,
-            min_data_quality_score=settings.publication_min_data_quality_score,
-            shadow_mode=shadow_mode,
         )
 
     console.print(json.dumps(summary.as_dict(), indent=2, default=str))

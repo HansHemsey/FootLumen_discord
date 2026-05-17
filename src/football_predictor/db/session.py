@@ -45,12 +45,9 @@ def _ensure_sqlite_discord_columns(engine: Engine) -> None:
         "message_type": "VARCHAR(80)",
         "dry_run": "BOOLEAN DEFAULT 0",
         "print_only": "BOOLEAN DEFAULT 0",
-        "v3_model_prediction_id": "INTEGER",
-        "ou_model_prediction_id": "INTEGER",
         "webhook_url_hash": "VARCHAR(16)",
         "message_hash": "VARCHAR(64)",
         "webhook_hash": "VARCHAR(16)",
-        "dedupe_key": "VARCHAR(160)",
         "message_markdown": "TEXT",
         "route_json": "JSON",
         "payload_json": "JSON",
@@ -71,9 +68,6 @@ def _ensure_sqlite_discord_columns(engine: Engine) -> None:
             "ix_discord_messages_season": "season",
             "ix_discord_messages_channel_key": "channel_key",
             "ix_discord_messages_message_type": "message_type",
-            "ix_discord_messages_v3_model_prediction_id": "v3_model_prediction_id",
-            "ix_discord_messages_ou_model_prediction_id": "ou_model_prediction_id",
-            "ix_discord_messages_dedupe_key": "dedupe_key",
         }.items():
             connection.execute(
                 text(

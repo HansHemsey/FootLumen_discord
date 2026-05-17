@@ -237,25 +237,7 @@ def test_data_quality_report_counts_local_snapshots(tmp_path: Path) -> None:
                     prediction_time=fetched_at,
                     feature_version="diagnostics_test",
                     features_json={},
-                    data_quality_json={
-                        "data_quality_version": "dq_v2",
-                        "overall_data_quality_score": 72,
-                        "publication_data_quality_score": 72,
-                        "publication_blockers": [],
-                        "source_quality_json": {
-                            "odds_1x2": {
-                                "available": True,
-                                "checked": True,
-                                "fresh": True,
-                                "latest_fetched_at": fetched_at.isoformat(),
-                                "age_minutes": 0,
-                                "age_hours": 0,
-                                "count": 1,
-                                "score": 20,
-                                "warnings": [],
-                            }
-                        },
-                    },
+                    data_quality_json={"overall_data_quality_score": 72},
                 ),
             ]
         )
@@ -279,10 +261,6 @@ def test_data_quality_report_counts_local_snapshots(tmp_path: Path) -> None:
     assert report["availability"]["reference_docs_available"] is True
     assert report["overall_data_quality_score"] == 72
     assert report["average_overall_data_quality_score"] == 72
-    assert report["source_freshness"]["odds_1x2"]["fresh_count"] == 1
-    assert report["publication_readiness"]["ready_count"] == 1
-    assert report["fixtures_ready"] == 1
-    assert report["fixtures_blocked"] == 0
 
 
 def test_data_quality_cli_rejects_unknown_positive_league(
@@ -336,108 +314,6 @@ def test_data_quality_cli_json_empty_db(tmp_path: Path, repo_root: Path) -> None
     payload = json.loads(result.stdout)
     assert payload["fixtures_total"] == 0
     assert payload["odds_snapshots"] == 0
-
-
-def test_data_quality_cli_week_markdown_and_json_outputs(
-    tmp_path: Path,
-    repo_root: Path,
-) -> None:
-    db_path = tmp_path / "quality_outputs.db"
-    engine = create_db_engine(f"sqlite:///{db_path}")
-    init_db(engine)
-    session_factory = create_session_factory(engine)
-    kickoff = datetime(2026, 5, 6, 15, tzinfo=UTC)
-    with session_factory() as session:
-        session.add_all(
-            [
-                models.Team(team_id=-101, name="Synthetic Home"),
-                models.Team(team_id=-102, name="Synthetic Away"),
-                models.Fixture(
-                    fixture_id=-3001,
-                    league_id=-10,
-                    season=2099,
-                    date=kickoff,
-                    status_short="NS",
-                    home_team_id=-101,
-                    away_team_id=-102,
-                    home_team="Synthetic Home",
-                    away_team="Synthetic Away",
-                ),
-                models.FeatureSnapshot(
-                    fixture_id=-3001,
-                    prediction_time=kickoff,
-                    feature_version="v3.0",
-                    features_json={},
-                    data_quality_json={
-                        "data_quality_version": "dq_v2",
-                        "publication_data_quality_score": 85,
-                        "publication_blockers": [],
-                        "source_quality_json": {
-                            "odds_1x2": {
-                                "available": True,
-                                "checked": True,
-                                "fresh": True,
-                                "latest_fetched_at": kickoff.isoformat(),
-                                "count": 1,
-                                "score": 20,
-                                "warnings": [],
-                            }
-                        },
-                    },
-                ),
-                models.FeatureSnapshot(
-                    fixture_id=-3001,
-                    prediction_time=kickoff,
-                    feature_version="v1",
-                    features_json={},
-                    data_quality_json={
-                        "publication_data_quality_score": 10,
-                        "publication_blockers": [],
-                    },
-                ),
-            ]
-        )
-        session.commit()
-
-    get_settings.cache_clear()
-    json_path = tmp_path / "quality.json"
-    markdown_path = tmp_path / "quality.md"
-    result = CliRunner().invoke(
-        app,
-        [
-            "data-quality",
-            "--week-of",
-            "2026-05-04",
-            "--model-family",
-            "v3",
-            "--json",
-            "--json-output",
-            str(json_path),
-            "--markdown-output",
-            str(markdown_path),
-        ],
-        env={
-            "DATABASE_URL": f"sqlite:///{db_path}",
-            "API_FOOTBALL_REFERENCE_PATH": str(repo_root / "docs/api_football_reference.json"),
-            "API_FOOTBALL_PLAYERS_REFERENCE_PATH": str(
-                repo_root / "docs/api_football_players_reference.json"
-            ),
-            "API_FOOTBALL_PLAYERS_CACHE_PATH": str(
-                repo_root / "docs/api_football_players_cache.json"
-            ),
-        },
-    )
-    get_settings.cache_clear()
-
-    assert result.exit_code == 0, result.stdout
-    payload = json.loads(result.stdout)
-    assert payload["scope"]["week_of"] == "2026-05-04"
-    assert payload["scope"]["model_family"] == "v3"
-    assert payload["publication_readiness"]["ready_count"] == 1
-    assert json.loads(json_path.read_text(encoding="utf-8"))["fixtures_ready"] == 1
-    markdown = markdown_path.read_text(encoding="utf-8")
-    assert "# Data Quality Report" in markdown
-    assert "odds_1x2" in markdown
 
 
 def test_log_event_masks_secret_context(caplog) -> None:

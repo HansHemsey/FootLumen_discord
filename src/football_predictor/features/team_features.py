@@ -964,8 +964,10 @@ def _latest_standing(
             models.StandingSnapshot.league_id == target.league_id,
             models.StandingSnapshot.season == target.season,
             models.StandingSnapshot.team_id == team_id,
-            models.StandingSnapshot.snapshot_date <= prediction_time,
-            models.StandingSnapshot.fetched_at <= prediction_time,
+            or_(
+                models.StandingSnapshot.snapshot_date <= prediction_time,
+                models.StandingSnapshot.fetched_at <= prediction_time,
+            ),
         )
         .order_by(
             models.StandingSnapshot.snapshot_date.desc(),

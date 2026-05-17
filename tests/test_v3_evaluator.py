@@ -32,9 +32,6 @@ def test_run_v3_backtest_retrains_and_writes_comparison_reports(tmp_path: Path) 
     assert result.periods["test"].row_count == 48
     assert result.report_paths["json"].exists()
     assert result.report_paths["markdown"].exists()
-    assert result.report_paths["confidence_thresholds"].exists()
-    assert result.report_paths["published_only_json"].exists()
-    assert result.report_paths["published_only_markdown"].exists()
     assert result.report_paths["markdown"].name == "comparison_vs_v2.md"
 
     metrics = result.metrics_by_model
@@ -54,8 +51,6 @@ def test_run_v3_backtest_retrains_and_writes_comparison_reports(tmp_path: Path) 
     assert metrics["v3_stacker_full"]["log_loss"] >= 0.0
     assert metrics["v3_stacker_full"]["brier_score"] >= 0.0
     assert "draw_metrics" in metrics["v3_stacker_full"]
-    assert "draw_behavior" in metrics["v3_stacker_full"]
-    assert "log_loss_by_class" in metrics["v3_stacker_full"]
     assert "no_draw_metrics" in metrics["v3_stacker_full"]
     assert metrics["v2_existing"]["available"] is True
     assert result.success_criteria["status"] in {"passed", "failed"}
@@ -65,72 +60,9 @@ def test_run_v3_backtest_retrains_and_writes_comparison_reports(tmp_path: Path) 
 
     parsed = json.loads(result.report_paths["json"].read_text(encoding="utf-8"))
     assert parsed["success_criteria"]["status"] == result.success_criteria["status"]
-    assert parsed["confidence_thresholds"]["model_family"] == "v3_1x2"
-    assert parsed["confidence_thresholds"]["data_quality_contract"][
-        "has_publication_data_quality_score"
-    ] is False
-    assert parsed["confidence_thresholds"]["production_approved"] is False
-    assert parsed["confidence_thresholds"]["selection"]["source_split"] == "validation"
-    thresholds = json.loads(
-        result.report_paths["confidence_thresholds"].read_text(encoding="utf-8")
-    )
-    assert thresholds["thresholds"]["global"]["high"] < (
-        thresholds["thresholds"]["global"]["very_high"]
-    )
-    published_only = json.loads(
-        result.report_paths["published_only_json"].read_text(encoding="utf-8")
-    )
-    assert published_only["scopes"]["published_only"]["v3_stacker_full"]["row_count"] <= (
-        published_only["scopes"]["internal_all"]["v3_stacker_full"]["row_count"]
-    )
-    assert {
-        "v3_stacker_full",
-        "v2_existing",
-        "odds_only",
-        "api_prediction_only",
-        "poisson_baseline",
-    }.issubset(
-        published_only["scopes"]["published_only"]
-    )
-    assert "v3_stacker_full_vs_api_prediction_only" in (
-        published_only["comparisons"]["published_only"]
-    )
-    assert "v3_stacker_full_vs_poisson_baseline" in (
-        published_only["comparisons"]["published_only"]
-    )
-    assert "confidence_label" in published_only["groups"]
-    assert "data_quality" in published_only["groups"]
     markdown = result.report_paths["markdown"].read_text(encoding="utf-8")
     assert "Backtest V3 - Comparaison" in markdown
     assert "v3_stacker_full" in markdown
-    assert "Calibration Publication" in markdown
-    published_markdown = result.report_paths["published_only_markdown"].read_text(
-        encoding="utf-8"
-    )
-    assert "Backtest Published-Only V3" in published_markdown
-
-
-def test_v3_backtest_can_approve_only_dataset_with_dq_v2_contract(tmp_path: Path) -> None:
-    dataset_path = tmp_path / "v3_dataset.csv"
-    model_dir = tmp_path / "models" / "v3"
-    report_dir = tmp_path / "reports"
-    frame = _synthetic_v3_backtest_frame(240, include_v2=True)
-    frame["publication_data_quality_score"] = 95
-    frame["data_quality_version"] = "dq_v2"
-    frame.to_csv(dataset_path, index=False)
-
-    result = run_v3_backtest(
-        dataset_path,
-        model_dir,
-        output_dir=report_dir,
-        config=V3BacktestConfig(retrain_v3=True),
-    )
-
-    contract = result.payload["confidence_thresholds"]["data_quality_contract"]
-    assert contract["approval_eligible"] is True
-    assert result.payload["confidence_thresholds"]["approval_checks"][
-        "data_quality_contract"
-    ]["passed"] is True
 
 
 def test_v3_success_criteria_are_not_evaluable_without_v2_signal(tmp_path: Path) -> None:
@@ -186,9 +118,6 @@ def test_backtest_v3_cli_smoke_runs_on_synthetic_dataset(tmp_path: Path) -> None
     assert result.exit_code == 0, result.stdout
     assert (report_dir / "v3_backtest_report.json").exists()
     assert (report_dir / "comparison_vs_v2.md").exists()
-    assert (report_dir / "confidence_thresholds.json").exists()
-    assert (report_dir / "published_only_report.json").exists()
-    assert (report_dir / "published_only_report.md").exists()
     assert "v3_log_loss" in result.stdout
 
 

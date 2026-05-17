@@ -15,7 +15,6 @@ from football_predictor.features.odds_features import (
     compute_odds_movement,
     decimal_odds_to_implied_probabilities,
     extract_1x2_values,
-    market_probabilities_for_fixture,
 )
 
 
@@ -126,42 +125,6 @@ def test_compute_odds_movement_excludes_future_snapshots(tmp_path) -> None:
     assert movement.delta_home == pytest.approx(((1.80 + 1.85) / 2) - ((1.90 + 1.92) / 2))
     assert movement.delta_draw == pytest.approx(((3.80 + 3.70) / 2) - ((3.90 + 3.85) / 2))
     assert movement.delta_away == pytest.approx(((4.50 + 4.40) / 2) - ((4.70 + 4.60) / 2))
-
-
-def test_market_probabilities_ignore_future_and_live_snapshots(tmp_path) -> None:
-    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'market_probabilities.db'}")
-    session_factory = create_session_factory(engine)
-
-    with session_scope(session_factory) as session:
-        _seed_fixture(session)
-        live_snapshot = _odds_snapshot(
-            8,
-            datetime(2026, 5, 2, 10, 30, tzinfo=UTC),
-            1.01,
-            99.0,
-            99.0,
-        )
-        live_snapshot.is_live = True
-        session.add_all(
-            [
-                _odds_snapshot(8, datetime(2026, 5, 2, 9, tzinfo=UTC), 1.90, 3.90, 4.70),
-                _odds_snapshot(8, datetime(2026, 5, 2, 10, tzinfo=UTC), 1.80, 3.80, 4.50),
-                live_snapshot,
-                _odds_snapshot(8, datetime(2026, 5, 2, 13, tzinfo=UTC), 1.01, 99.0, 99.0),
-            ]
-        )
-
-        market = market_probabilities_for_fixture(
-            session,
-            fixture_id=1378969,
-            prediction_time=datetime(2026, 5, 2, 11, tzinfo=UTC),
-            bet_id=1,
-        )
-
-    assert market is not None
-    assert market.fetched_at == datetime(2026, 5, 2, 10, tzinfo=UTC)
-    assert market.probabilities.p_home < 0.80
-    assert market.movement.odd_home_delta == pytest.approx(1.80 - 1.90)
 
 
 def test_cli_odds_features_reads_local_snapshots(tmp_path) -> None:

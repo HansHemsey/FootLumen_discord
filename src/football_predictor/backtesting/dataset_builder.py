@@ -31,8 +31,6 @@ def build_training_dataset(
     limit: int | None = None,
     feature_version: str = "v1",
     prediction_offset_minutes: int | None = None,
-    date_from: datetime | None = None,
-    date_to: datetime | None = None,
 ) -> pd.DataFrame:
     """Build a point-in-time training dataset from local DB snapshots.
 
@@ -45,14 +43,7 @@ def build_training_dataset(
         offset = timedelta(minutes=prediction_offset_minutes)
     else:
         offset = timedelta(hours=prediction_offset_hours)
-    for fixture in _finished_fixtures(
-        session,
-        league_ids,
-        seasons,
-        limit=limit,
-        date_from=date_from,
-        date_to=date_to,
-    ):
+    for fixture in _finished_fixtures(session, league_ids, seasons, limit=limit):
         if fixture.date is None:
             continue
         prediction_time = ensure_aware_utc(fixture.date) - offset
@@ -109,8 +100,6 @@ def _finished_fixtures(
     seasons: list[int],
     *,
     limit: int | None,
-    date_from: datetime | None = None,
-    date_to: datetime | None = None,
 ) -> list[models.Fixture]:
     stmt = (
         select(models.Fixture)
@@ -124,10 +113,6 @@ def _finished_fixtures(
         )
         .order_by(models.Fixture.date.asc())
     )
-    if date_from is not None:
-        stmt = stmt.where(models.Fixture.date >= ensure_aware_utc(date_from))
-    if date_to is not None:
-        stmt = stmt.where(models.Fixture.date <= ensure_aware_utc(date_to))
     if limit is not None:
         stmt = stmt.limit(limit)
     return list(session.execute(stmt).scalars())

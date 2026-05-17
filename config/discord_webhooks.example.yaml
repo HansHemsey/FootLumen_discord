@@ -1,56 +1,24 @@
 # Example only. Do not put real webhook URLs in this file.
-# Put real values in config/discord_webhooks.local.yaml or environment variables.
-# Keep discussions absent/disabled unless an automation explicitly supports it.
 webhooks:
   global:
     score_pronos_semaine:
-      webhook_url_env: DISCORD_WEBHOOK_SCORE_PRONOS_SEMAINE
+      webhook_url: "REPLACE_WITH_WEBHOOK_URL"
       enabled: true
-
-  cdm_2026:
-    classement: {webhook_url_env: DISCORD_WEBHOOK_CDM_2026_CLASSEMENT, enabled: true}
-    calendrier: {webhook_url_env: DISCORD_WEBHOOK_CDM_2026_CALENDRIER, enabled: true}
-    matchs_du_jour: {webhook_url_env: DISCORD_WEBHOOK_CDM_2026_MATCHS_DU_JOUR, enabled: true}
-    analyses: {webhook_url_env: DISCORD_WEBHOOK_CDM_2026_ANALYSES, enabled: true}
-    predictions: {webhook_url_env: DISCORD_WEBHOOK_CDM_2026_PREDICTIONS, enabled: true}
-    resultats: {webhook_url_env: DISCORD_WEBHOOK_CDM_2026_RESULTATS, enabled: true}
-
   ligue1:
-    classement: {webhook_url_env: DISCORD_WEBHOOK_LIGUE1_CLASSEMENT, enabled: true}
-    calendrier: {webhook_url_env: DISCORD_WEBHOOK_LIGUE1_CALENDRIER, enabled: true}
-    matchs_du_jour: {webhook_url_env: DISCORD_WEBHOOK_LIGUE1_MATCHS_DU_JOUR, enabled: true}
-    analyses: {webhook_url_env: DISCORD_WEBHOOK_LIGUE1_ANALYSES, enabled: true}
-    predictions: {webhook_url_env: DISCORD_WEBHOOK_LIGUE1_PREDICTIONS, enabled: true}
-    resultats: {webhook_url_env: DISCORD_WEBHOOK_LIGUE1_RESULTATS, enabled: true}
-
+    predictions:
+      webhook_url: "REPLACE_WITH_WEBHOOK_URL"
+      enabled: true
+    analyses:
+      webhook_url: "REPLACE_WITH_WEBHOOK_URL"
+      enabled: true
   premier_league:
-    classement: {webhook_url_env: DISCORD_WEBHOOK_PREMIER_LEAGUE_CLASSEMENT, enabled: true}
-    calendrier: {webhook_url_env: DISCORD_WEBHOOK_PREMIER_LEAGUE_CALENDRIER, enabled: true}
-    matchs_du_jour: {webhook_url_env: DISCORD_WEBHOOK_PREMIER_LEAGUE_MATCHS_DU_JOUR, enabled: true}
-    analyses: {webhook_url_env: DISCORD_WEBHOOK_PREMIER_LEAGUE_ANALYSES, enabled: true}
-    predictions: {webhook_url_env: DISCORD_WEBHOOK_PREMIER_LEAGUE_PREDICTIONS, enabled: true}
-    resultats: {webhook_url_env: DISCORD_WEBHOOK_PREMIER_LEAGUE_RESULTATS, enabled: true}
-
-  liga:
-    classement: {webhook_url_env: DISCORD_WEBHOOK_LIGA_CLASSEMENT, enabled: true}
-    calendrier: {webhook_url_env: DISCORD_WEBHOOK_LIGA_CALENDRIER, enabled: true}
-    matchs_du_jour: {webhook_url_env: DISCORD_WEBHOOK_LIGA_MATCHS_DU_JOUR, enabled: true}
-    analyses: {webhook_url_env: DISCORD_WEBHOOK_LIGA_ANALYSES, enabled: true}
-    predictions: {webhook_url_env: DISCORD_WEBHOOK_LIGA_PREDICTIONS, enabled: true}
-    resultats: {webhook_url_env: DISCORD_WEBHOOK_LIGA_RESULTATS, enabled: true}
-
-  bundesliga:
-    classement: {webhook_url_env: DISCORD_WEBHOOK_BUNDESLIGA_CLASSEMENT, enabled: true}
-    calendrier: {webhook_url_env: DISCORD_WEBHOOK_BUNDESLIGA_CALENDRIER, enabled: true}
-    matchs_du_jour: {webhook_url_env: DISCORD_WEBHOOK_BUNDESLIGA_MATCHS_DU_JOUR, enabled: true}
-    analyses: {webhook_url_env: DISCORD_WEBHOOK_BUNDESLIGA_ANALYSES, enabled: true}
-    predictions: {webhook_url_env: DISCORD_WEBHOOK_BUNDESLIGA_PREDICTIONS, enabled: true}
-    resultats: {webhook_url_env: DISCORD_WEBHOOK_BUNDESLIGA_RESULTATS, enabled: true}
-
-  serie_a:
-    classement: {webhook_url_env: DISCORD_WEBHOOK_SERIE_A_CLASSEMENT, enabled: true}
-    calendrier: {webhook_url_env: DISCORD_WEBHOOK_SERIE_A_CALENDRIER, enabled: true}
-    matchs_du_jour: {webhook_url_env: DISCORD_WEBHOOK_SERIE_A_MATCHS_DU_JOUR, enabled: true}
-    analyses: {webhook_url_env: DISCORD_WEBHOOK_SERIE_A_ANALYSES, enabled: true}
-    predictions: {webhook_url_env: DISCORD_WEBHOOK_SERIE_A_PREDICTIONS, enabled: true}
-    resultats: {webhook_url_env: DISCORD_WEBHOOK_SERIE_A_RESULTATS, enabled: true}
+    predictions:
+      webhook_url: "REPLACE_WITH_WEBHOOK_URL"
+      enabled: true
+    resultats:
+      webhook_url: "REPLACE_WITH_WEBHOOK_URL"
+      enabled: true
+  cdm_2026:
+    calendrier:
+      webhook_url: "REPLACE_WITH_WEBHOOK_URL"
+      enabled: true

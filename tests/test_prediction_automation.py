@@ -7,7 +7,6 @@ from typing import Any
 
 import httpx
 import pytest
-from sqlalchemy import select
 from typer.testing import CliRunner
 
 from football_predictor.api.api_football_client import ApiFootballPayload
@@ -35,20 +34,9 @@ TARGET_DATE = PREDICTION_TIME.date()
 
 
 class FakePredictionService:
-    def __init__(
-        self,
-        session,
-        *,
-        fail_fixture_ids: set[int] | None = None,
-        confidence_label: str = "High",
-        confidence_score: float = 72.0,
-        data_quality_score: float = 75.0,
-    ) -> None:
+    def __init__(self, session, *, fail_fixture_ids: set[int] | None = None) -> None:
         self.session = session
         self.fail_fixture_ids = fail_fixture_ids or set()
-        self.confidence_label = confidence_label
-        self.confidence_score = confidence_score
-        self.data_quality_score = data_quality_score
         self.calls = 0
 
     def predict_fixture(
@@ -73,7 +61,7 @@ class FakePredictionService:
             prediction_time=cutoff,
             feature_version=f"automation_fake_{fixture_id}_{self.calls}",
             features_json={"synthetic": True},
-            data_quality_json={"overall_data_quality_score": self.data_quality_score},
+            data_quality_json={"overall_data_quality_score": 50},
         )
         self.session.add(feature)
         self.session.flush()
@@ -88,11 +76,11 @@ class FakePredictionService:
             predicted_outcome="HOME",
             predicted_result="HOME",
             confidence=45.0,
-            confidence_label=self.confidence_label,
-            confidence_score=self.confidence_score,
+            confidence_label="Medium",
+            confidence_score=45.0,
             explanation_json=["Synthetic automation prediction"],
             explanations_json=["Synthetic automation prediction"],
-            data_quality_json={"overall_data_quality_score": self.data_quality_score},
+            data_quality_json={"overall_data_quality_score": 50},
             payload_json={"synthetic": True},
         )
         self.session.add(prediction)
@@ -105,11 +93,11 @@ class FakePredictionService:
             prediction_time=cutoff,
             probabilities=ProbabilityTriple(0.50, 0.25, 0.25),
             predicted_result="HOME",
-            confidence_label=self.confidence_label,
-            confidence_score=self.confidence_score,
+            confidence_label="Medium",
+            confidence_score=45.0,
             explanations=["Synthetic automation prediction"],
             data_quality=DataQuality(),
-            data_quality_json={"overall_data_quality_score": self.data_quality_score},
+            data_quality_json={"overall_data_quality_score": 50},
             model_version="synthetic-automation",
             feature_snapshot_id=feature.id,
             model_prediction_id=prediction.id,
@@ -397,61 +385,6 @@ def test_automation_discord_dedupe_and_dry_run_semantics(tmp_path: Path) -> None
     assert _status_for_fixture(duplicate, -3) == "duplicate_skipped"
     assert _status_for_fixture(forced, -3) == "sent"
     assert calls == 2
-
-
-def test_automation_live_skips_non_publishable_prediction_without_discord_send(
-    tmp_path: Path,
-) -> None:
-    calls = 0
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal calls
-        calls += 1
-        return httpx.Response(204)
-
-    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'automation_policy.db'}")
-    session_factory = create_session_factory(engine)
-    fake_service = FakePredictionService(
-        None,
-        confidence_label="High",
-        confidence_score=72.0,
-        data_quality_score=59.0,
-    )  # type: ignore[arg-type]
-
-    with (
-        httpx.Client(transport=httpx.MockTransport(handler)) as client,
-        session_scope(session_factory) as session,
-    ):
-        fake_service.session = session
-        _seed_fixtures(session, league_id=-100, season=2026)
-        service = PredictionAutomationService(
-            session,
-            reference=ApiFootballReference({"competitions": [], "references": {}}),
-            competitions=(_competition(-100),),
-            discord_delivery=DiscordDeliveryService(
-                session,
-                legacy_webhook_url="https://example.invalid/automation-webhook",
-                http_client=client,
-            ),
-            prediction_service_factory=lambda _session: fake_service,
-        )
-        summary = service.run(
-            AutomationRunConfig(
-                target_date=TARGET_DATE,
-                prediction_time=PREDICTION_TIME,
-                window=PredictionWindow.LATE,
-                send_discord=True,
-            )
-        )
-        prediction = session.scalar(select(models.ModelPrediction))
-
-    assert _status_for_fixture(summary, -3) == "confidence_skipped"
-    assert summary.confidence_skipped == 1
-    assert calls == 0
-    assert prediction is not None
-    assert prediction.payload_json["non_publication_reason"] == (
-        "data_quality_below_publish_threshold"
-    )
 
 
 def test_predict_today_cli_writes_json_summary(

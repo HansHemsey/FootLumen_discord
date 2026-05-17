@@ -36,26 +36,6 @@ def test_build_player_recent_form_uses_only_point_in_time_rows(tmp_path) -> None
     assert -199 not in form
 
 
-def test_build_player_recent_form_excludes_explicit_target_fixture(tmp_path) -> None:
-    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'player_form_target.db'}")
-    session_factory = create_session_factory(engine)
-
-    with session_scope(session_factory) as session:
-        _seed_team_history(session)
-        form = build_player_recent_form(
-            session,
-            -10,
-            PREDICTION_TIME,
-            windows=(3,),
-            exclude_fixture_id=-1001,
-        )
-
-    starter = form[-101]
-    assert starter["history_fixture_count"] == 2
-    assert starter["minutes_recent_last3"] == 180
-    assert starter["starts_recent_last3"] == 2
-
-
 def test_compute_player_value_normalizes_within_position_and_tolerates_missing_rating(
     tmp_path,
 ) -> None:

@@ -192,47 +192,6 @@ def test_alembic_upgrade_head_creates_initial_schema(tmp_path: Path, repo_root: 
     assert "alembic_version" in tables
     assert "fixtures" in tables
     assert "model_predictions" in tables
-    inspector = inspect(engine)
-    columns = {column["name"] for column in inspector.get_columns("discord_messages")}
-    assert {
-        "v3_model_prediction_id",
-        "ou_model_prediction_id",
-        "dedupe_key",
-    }.issubset(columns)
-    indexes = {index["name"] for index in inspector.get_indexes("discord_messages")}
-    assert {
-        "ix_discord_messages_v3_model_prediction_id",
-        "ix_discord_messages_ou_model_prediction_id",
-        "ix_discord_messages_dedupe_key",
-    }.issubset(indexes)
-
-
-def test_alembic_downgrade_removes_discord_prediction_links(
-    tmp_path: Path,
-    repo_root: Path,
-) -> None:
-    database_url = f"sqlite:///{tmp_path / 'alembic_discord_links_down.db'}"
-    alembic_cfg = Config(str(repo_root / "alembic.ini"))
-    alembic_cfg.set_main_option("script_location", str(repo_root / "alembic"))
-    alembic_cfg.set_main_option("sqlalchemy.url", database_url)
-
-    command.upgrade(alembic_cfg, "head")
-    engine = create_db_engine(database_url)
-    columns_after_upgrade = {
-        column["name"] for column in inspect(engine).get_columns("discord_messages")
-    }
-    assert "v3_model_prediction_id" in columns_after_upgrade
-    assert "ou_model_prediction_id" in columns_after_upgrade
-    assert "dedupe_key" in columns_after_upgrade
-
-    command.downgrade(alembic_cfg, "0004_v3_model_tables")
-    engine = create_db_engine(database_url)
-    columns_after_downgrade = {
-        column["name"] for column in inspect(engine).get_columns("discord_messages")
-    }
-    assert "v3_model_prediction_id" not in columns_after_downgrade
-    assert "ou_model_prediction_id" not in columns_after_downgrade
-    assert "dedupe_key" not in columns_after_downgrade
 
 
 def _has_columns(inspector, table_name: str, expected_columns: set[str]) -> bool:

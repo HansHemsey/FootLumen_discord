@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from football_predictor.db import models
@@ -24,7 +24,6 @@ def build_h2h_features(
     prediction_time: datetime,
     *,
     league_id: int | None = None,
-    exclude_fixture_id: int | None = None,
 ) -> JsonDict:
     """Build H2H goals history features between two specific teams."""
     cutoff = ensure_aware_utc(prediction_time)
@@ -35,18 +34,13 @@ def build_h2h_features(
             models.Fixture.date < cutoff,
             models.Fixture.home_goals.is_not(None),
             models.Fixture.away_goals.is_not(None),
-            or_(
-                models.Fixture.status.in_(list(_FINISHED)),
-                models.Fixture.status_short.in_(list(_FINISHED)),
-            ),
+            models.Fixture.status.in_(list(_FINISHED)),
             models.Fixture.home_team_id.in_([home_team_id, away_team_id]),
             models.Fixture.away_team_id.in_([home_team_id, away_team_id]),
         )
         .order_by(models.Fixture.date.desc())
         .limit(10)
     )
-    if exclude_fixture_id is not None:
-        stmt = stmt.where(models.Fixture.fixture_id != exclude_fixture_id)
     h2h_fixtures = list(session.execute(stmt).scalars())
     h2h_fixtures = [
         f for f in h2h_fixtures
@@ -77,9 +71,7 @@ def build_h2h_features(
 
     selected5 = total_goals[:5]
     if selected5:
-        features["h2h_over25_rate_last5"] = sum(
-            1 for g in selected5 if g > _THRESHOLD
-        ) / len(selected5)
+        features["h2h_over25_rate_last5"] = sum(1 for g in selected5 if g > _THRESHOLD) / len(selected5)
     else:
         features["h2h_over25_rate_last5"] = None
 

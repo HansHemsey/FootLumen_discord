@@ -24,15 +24,10 @@ from football_predictor.ou_model.prediction.ou_service import (
     OUPredictionOutput,
     OUPredictionService,
 )
-from football_predictor.prediction.model_approval import require_production_model_approval
-from football_predictor.prediction.publication_flow import (
-    CandidatePrediction,
-    StoredPredictionRef,
-    deliver_candidate_prediction,
-    evaluate_and_persist_candidate,
-)
 from football_predictor.prediction.publication_policy import (
-    DEFAULT_MIN_DATA_QUALITY_SCORE,
+    CONFIDENCE_SKIP_REASON,
+    is_publishable_confidence,
+    normalize_confidence_label,
 )
 from football_predictor.prediction.scheduler import (
     DailyPredictionWindow,
@@ -90,7 +85,6 @@ class OUDailyFixtureResult:
 class OUDailyPredictionSummary:
     target_date: date
     window: DailyPredictionWindow
-    shadow_mode: bool = True
     results: list[OUDailyFixtureResult] = field(default_factory=list)
 
     @property
@@ -121,7 +115,6 @@ class OUDailyPredictionSummary:
         return {
             "target_date": self.target_date.isoformat(),
             "window": self.window.value,
-            "shadow_mode": self.shadow_mode,
             "total": self.total,
             "success": self.success,
             "failed": self.failed,
@@ -180,8 +173,6 @@ def run_daily_ou_predictions(
     now: datetime | None = None,
     limit: int | None = None,
     edge_threshold: float = 0.02,
-    min_data_quality_score: float = DEFAULT_MIN_DATA_QUALITY_SCORE,
-    shadow_mode: bool = True,
 ) -> OUDailyPredictionSummary:
     """Predict O/U 2.5 for all eligible fixtures on a date."""
     resolved_window = parse_daily_window(window)
@@ -189,13 +180,6 @@ def run_daily_ou_predictions(
     local_tz = ZoneInfo(timezone_name)
     target_date = fixture_date or current_time.astimezone(local_tz).date()
 
-    if shadow_mode and send_discord and not dry_run and not print_only:
-        raise ValueError(
-            "O/U shadow mode does not allow live Discord sends; use --production-mode "
-            "or --dry-run/--print-only"
-        )
-    if not shadow_mode:
-        require_production_model_approval(model_dir, model_family="ou25")
     if send_discord and discord_delivery is None:
         raise ValueError("send_discord=True requires a DiscordDeliveryService")
 
@@ -243,102 +227,76 @@ def run_daily_ou_predictions(
             prediction: OUPredictionOutput = resolved_service.predict_fixture_ou(
                 fixture.fixture_id,
                 prediction_time,
-                save_to_db=True,
-            )
-            payload_metadata = {
-                "model_family": "ou25",
-                "ou_model_prediction_id": prediction.ou_model_prediction_id,
-                "daily_window": resolved_window.value,
-                "automation_window": resolved_window.value,
-                "automation_date": target_date.isoformat(),
-                "prediction_time": prediction_time.isoformat(),
-                "shadow_mode": shadow_mode,
-            }
-            rendered_markdown: str | None = None
-
-            def render_markdown(
-                prediction: OUPredictionOutput = prediction,
-                fixture: models.Fixture = fixture,
-            ) -> str:
-                nonlocal rendered_markdown
-                if rendered_markdown is None:
-                    rendered_markdown = format_ou_prediction_markdown(
-                        prediction,
-                        fixture,
-                        timezone_name=timezone_name,
-                        edge_display_threshold=edge_threshold,
-                    )
-                return rendered_markdown
-
-            candidate = CandidatePrediction(
-                model_family="ou25",
-                fixture_id=fixture.fixture_id,
-                league_id=fixture.league_id,
-                season=fixture.season,
-                confidence_label=prediction.confidence_label,
-                confidence_score=prediction.confidence_score,
-                data_quality_json=prediction.data_quality_json,
-                prediction_time=prediction_time,
-                stored_prediction=StoredPredictionRef("ou25", prediction.ou_model_prediction_id),
-                render_markdown=render_markdown,
-                message_type="ou_prediction",
-                model_prediction_id=None,
-                ou_model_prediction_id=prediction.ou_model_prediction_id,
-                dedupe_key=_ou_dedupe_key(
-                    fixture.fixture_id,
-                    resolved_window,
-                    prediction.model_version,
-                ),
-                payload_metadata=payload_metadata,
+                save_to_db=not dry_run,
             )
 
             status = "predicted"
             if send_discord and discord_delivery is not None:
-                try:
-                    if print_only:
-                        print(render_markdown())
-                    delivery_result = deliver_candidate_prediction(
-                        session,
-                        discord_delivery,
-                        candidate,
-                        dry_run=dry_run,
-                        print_only=print_only,
-                        min_data_quality_score=min_data_quality_score,
+                if (
+                    not dry_run
+                    and not print_only
+                    and not is_publishable_confidence(prediction.confidence_label)
+                ):
+                    logger.info(
+                        "O/U Discord publication skipped: fixture_id=%s "
+                        "confidence_label=%s confidence_score=%s expected=%s "
+                        "window=%s",
+                        fixture.fixture_id,
+                        normalize_confidence_label(prediction.confidence_label),
+                        prediction.confidence_score,
+                        "High|Very High",
+                        resolved_window.value,
                     )
-                    discord_sent = delivery_result.discord_sent
-                    discord_message_id = delivery_result.discord_message_id
-                    status = delivery_result.status
-                    reason = (
-                        delivery_result.non_publication_reason
-                        if delivery_result.status == "confidence_skipped"
-                        else None
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "Discord send failed for fixture %d: %s",
-                        fixture.fixture_id, exc,
-                    )
+                    status = "confidence_skipped"
+                    reason = CONFIDENCE_SKIP_REASON
+                else:
+                    try:
+                        md = format_ou_prediction_markdown(
+                            prediction,
+                            fixture,
+                            timezone_name=timezone_name,
+                            edge_display_threshold=edge_threshold,
+                        )
+                        if print_only:
+                            print(md)
+                        send_result = discord_delivery.send_markdown(
+                            md,
+                            league_id=fixture.league_id,
+                            season=fixture.season,
+                            channel_key="predictions",
+                            message_type="ou_prediction",
+                            fixture_id=fixture.fixture_id,
+                            model_prediction_id=None,
+                            dry_run=dry_run,
+                            print_only=print_only,
+                            payload_metadata={
+                                "model_family": "ou25",
+                                "ou_model_prediction_id": prediction.ou_model_prediction_id,
+                                "daily_window": resolved_window.value,
+                                "automation_window": resolved_window.value,
+                                "automation_date": target_date.isoformat(),
+                                "prediction_time": prediction_time.isoformat(),
+                            },
+                        )
+                        discord_sent = send_result.status == "sent"
+                        discord_message_id = send_result.discord_message_id
+                        status = send_result.status
+                    except Exception as exc:
+                        logger.warning(
+                            "Discord send failed for fixture %d: %s",
+                            fixture.fixture_id, exc,
+                        )
             elif print_only:
-                evaluate_and_persist_candidate(
-                    session,
-                    candidate,
-                    min_data_quality_score=min_data_quality_score,
+                md = format_ou_prediction_markdown(
+                    prediction,
+                    fixture,
+                    timezone_name=timezone_name,
+                    edge_display_threshold=edge_threshold,
                 )
-                print(render_markdown())
+                print(md)
                 status = "print_only"
             elif dry_run:
-                evaluate_and_persist_candidate(
-                    session,
-                    candidate,
-                    min_data_quality_score=min_data_quality_score,
-                )
                 status = "dry_run"
-            else:
-                evaluate_and_persist_candidate(
-                    session,
-                    candidate,
-                    min_data_quality_score=min_data_quality_score,
-                )
 
             results.append(OUDailyFixtureResult(
                 fixture_id=fixture.fixture_id,
@@ -370,14 +328,5 @@ def run_daily_ou_predictions(
     return OUDailyPredictionSummary(
         target_date=target_date,
         window=resolved_window,
-        shadow_mode=shadow_mode,
         results=results,
     )
-
-
-def _ou_dedupe_key(
-    fixture_id: int,
-    window: DailyPredictionWindow,
-    model_version: str,
-) -> str:
-    return f"ou25:{fixture_id}:{window.value}:{model_version}:ou_prediction"

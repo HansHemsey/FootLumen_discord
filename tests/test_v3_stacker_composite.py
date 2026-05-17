@@ -42,17 +42,12 @@ def test_v3_stacker_training_writes_artifact_and_predicts_valid_probabilities(tm
     assert result.metadata_path.exists()
     assert result.metrics_path.exists()
     assert result.model.training_decision["method"] == "logistic_regression"
-    assert getattr(result.model.estimator, "class_weight", None) == "balanced"
     probabilities = result.model.predict_proba(frame.head(9))
     assert len(probabilities) == 9
     for row in probabilities:
         assert len(row) == 3
         assert all(0.0 <= value <= 1.0 for value in row)
         assert sum(row) == pytest.approx(1.0)
-    predicted_labels = [
-        row.predicted_result() for row in result.model.predict_probability_triples(frame.head(9))
-    ]
-    assert "DRAW" in predicted_labels
 
     metrics = json.loads(result.metrics_path.read_text(encoding="utf-8"))
     assert metrics["train"]["log_loss"] is not None

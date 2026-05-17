@@ -2,21 +2,27 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from football_predictor.discord.formatter import (
-    CODE_CLOSE,
-    CODE_OPEN,
-    DISCORD_LIMIT,
-    truncate_discord_message,
-)
-from football_predictor.utils.secrets import sanitize_secret_text
 from football_predictor.utils.time import ensure_aware_utc
 
+DISCORD_LIMIT = 1900
+CODE_OPEN = "```md"
+CODE_CLOSE = "```"
+_TRUNCATION = "... message tronqué ..."
 _NA = "N/A"
+_SECRET_PATTERNS = (
+    re.compile(r"https://(?:canary\.|ptb\.)?discord(?:app)?\.com/api/webhooks/\S+", re.I),
+    re.compile(
+        r"\b(?:api[_-]?key|api[_-]?football[_-]?key|token|secret)\s*[:=]\s*['\"]?[^'\"\s]+",
+        re.I,
+    ),
+    re.compile(r"\b[A-Za-z0-9_-]{24,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{20,}\b"),
+)
 
 
 def format_ou_prediction_markdown(
@@ -73,7 +79,7 @@ def format_ou_prediction_markdown(
         lines += ["", "✅ QUALITÉ DATA", *quality_lines]
 
     lines += ["", "⚠️ Modèle probabiliste à M-30, pas une certitude.", CODE_CLOSE]
-    return truncate_discord_message("\n".join(lines), max_chars=limit)
+    return _truncate("\n".join(lines), limit)
 
 
 def _ou_probability_row(label: str, model_value: float | None, market_value: float | None) -> str:
@@ -221,5 +227,22 @@ def _number(value: Any, *, default: float | None = None) -> float | None:
 
 def _clean(value: Any) -> str:
     text = str(value).replace("```", "'''").replace("\r", " ").strip()
-    text = sanitize_secret_text(text, replacement="[secret masqué]")
+    for pattern in _SECRET_PATTERNS:
+        text = pattern.sub("[secret masqué]", text)
     return " ".join(text.split()) or _NA
+
+
+def _truncate(message: str, limit: int) -> str:
+    if len(message) <= limit:
+        return message
+    budget = limit - len(CODE_CLOSE) - len(_TRUNCATION) - 2
+    truncated: list[str] = []
+    used = 0
+    for line in message.splitlines()[:-1]:
+        if used + len(line) + 1 > budget:
+            truncated.append(_TRUNCATION)
+            break
+        truncated.append(line)
+        used += len(line) + 1
+    truncated.append(CODE_CLOSE)
+    return "\n".join(truncated)

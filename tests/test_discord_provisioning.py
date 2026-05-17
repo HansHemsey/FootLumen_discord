@@ -9,7 +9,6 @@ from football_predictor.discord.config import load_discord_channels_config
 from football_predictor.discord.exceptions import DiscordWebhookError
 from football_predictor.discord.provisioning import (
     DiscordWebhookProvisioner,
-    ProvisionedWebhook,
     provision_webhooks,
     write_local_webhooks_config,
 )
@@ -179,44 +178,5 @@ def test_write_local_webhooks_config_and_absent_token_error(tmp_path: Path) -> N
         DiscordWebhookProvisioner("")
 
     output = tmp_path / "discord_webhooks.local.yaml"
-    write_local_webhooks_config(
-        output,
-        [
-            ProvisionedWebhook(
-                competition_key="ligue1",
-                league_id=61,
-                season=2025,
-                channel_key="predictions",
-                channel_id="synthetic-channel",
-                webhook_name="synthetic-webhook",
-                webhook_url="https://example.invalid/generated",
-            )
-        ],
-    )
+    write_local_webhooks_config(output, [])
     assert output.read_text(encoding="utf-8").strip()
-    assert output.stat().st_mode & 0o777 == 0o600
-
-
-def test_provisioning_error_masks_secret_response_text() -> None:
-    webhook = "https://discord.com/api/webhooks/123456/synthetic-secret"
-    token = "synthetic-token-value"
-
-    def handler(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            401,
-            text=f"token={token} Bearer {token} {webhook}",
-        )
-
-    with (
-        httpx.Client(transport=httpx.MockTransport(handler)) as client,
-        pytest.raises(DiscordWebhookError) as exc_info,
-    ):
-        DiscordWebhookProvisioner("synthetic-token", client=client).create_webhook(
-            "synthetic-channel",
-            "synthetic-webhook",
-        )
-
-    rendered = str(exc_info.value)
-    assert webhook not in rendered
-    assert token not in rendered
-    assert "<redacted>" in rendered

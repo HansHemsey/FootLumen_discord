@@ -202,14 +202,11 @@ Orchestre une prédiction fixture unique :
 
 `run_daily.py` et `scheduler.py` orchestrent les prédictions du jour sans serveur web. La
 CLI `predict-today` sélectionne les fixtures futures d'une date en timezone applicative,
-calcule un `prediction_time` par fixture (`early = fixture.date - 24h`,
-`mid = fixture.date - 6h`, `late = heure courante pour les matchs qui commencent dans les
-30 prochaines minutes`, `now = heure courante`), valide les ligues via le référentiel local,
+calcule un `prediction_time` par fixture (`early = fixture.date - 24h`, `mid = -6h`,
+`late = -40min`, `now = heure courante`), valide les ligues via le référentiel local,
 rafraîchit l'API uniquement avec `--refresh-data`, continue fixture par fixture en cas
-d'erreur, puis produit un résumé JSON. Le backtest production-like est le flux qui simule
-strictement `prediction_time = fixture.date - 30 minutes` pour les fixtures historiques.
-L'envoi Discord est optionnel et dédupliqué par `fixture_id + model_version + window` pour
-les prédictions 1X2, avec une clé sémantique O/U dédiée.
+d'erreur, puis produit un résumé JSON. L'envoi Discord est optionnel et dédupliqué par
+`fixture_id + model_version + window`.
 
 ### `discord/`
 
@@ -225,12 +222,6 @@ Sous-modules :
 - `webhook.py` : client `httpx` avec `allowed_mentions={"parse":[]}` ;
 - `provisioning.py` : création optionnelle de webhooks via bot token ;
 - `service.py` : dry-run, print-only, déduplication et persistance `DiscordMessage`.
-
-Les messages prédictifs V3 et O/U sont reliés à leur source par
-`DiscordMessage.v3_model_prediction_id` ou `DiscordMessage.ou_model_prediction_id`, avec
-fallback historique via `payload_json`. Les messages O/U peuvent porter
-`dedupe_key="ou25:{fixture_id}:{window}:{model_version}:ou_prediction"` afin d'éviter un
-second envoi réel si le rendu markdown change.
 
 ### `utils/`
 

@@ -201,76 +201,8 @@ def test_predict_v3_cli_discord_dry_run_persists_v3_metadata(tmp_path: Path) -> 
         message = session.scalar(select(models.DiscordMessage))
     assert message is not None
     assert message.model_prediction_id is None
-    assert message.v3_model_prediction_id == payload["v3_model_prediction_id"]
     assert message.payload_json["model_family"] == "v3"
     assert message.payload_json["v3_model_prediction_id"] == payload["v3_model_prediction_id"]
-    assert message.payload_json["publication_decision"]["allowed"] is False
-    assert message.payload_json["non_publication_reason"] == (
-        "confidence_below_publish_threshold"
-    )
-
-
-def test_predict_v3_cli_blocks_live_discord_without_production_mode() -> None:
-    result = CliRunner().invoke(
-        app,
-        [
-            "predict-v3",
-            "--fixture",
-            "-900",
-            "--send-discord",
-        ],
-    )
-
-    assert result.exit_code != 0
-    assert "shadow mode blocks live Discord sends" in result.output
-
-
-def test_predict_v3_cli_live_discord_skips_non_publishable_prediction(tmp_path: Path) -> None:
-    db_path = tmp_path / "cli_v3_blocked.db"
-    engine = create_db_and_tables(f"sqlite:///{db_path}")
-    session_factory = create_session_factory(engine)
-    model_dir = _write_synthetic_v3_model(tmp_path / "v3-model")
-    _write_approved_artifact(model_dir, "v3_1x2")
-    with session_scope(session_factory) as session:
-        _seed_base(session)
-        _seed_point_in_time_sources(session)
-
-    get_settings.cache_clear()
-    result = CliRunner().invoke(
-        app,
-        [
-            "predict-v3",
-            "--fixture",
-            "-900",
-            "--prediction-time",
-            PREDICTION_TIME.isoformat(),
-            "--model-dir",
-            str(model_dir),
-            "--no-refresh",
-            "--send-discord",
-            "--production-mode",
-            "--discord-webhooks",
-            "config/discord_webhooks.example.yaml",
-            "--json",
-        ],
-        env={
-            "DATABASE_URL": f"sqlite:///{db_path}",
-            "DISCORD_WEBHOOK_URL": "https://example.invalid/v3-blocked",
-            "PUBLICATION_MIN_DATA_QUALITY_SCORE": "100",
-        },
-    )
-    get_settings.cache_clear()
-
-    assert result.exit_code == 0, result.stdout
-    payload = json.loads(result.stdout)
-    assert payload["discord"]["status"] == "confidence_skipped"
-    assert payload["discord"]["reason"] == "confidence_below_publish_threshold"
-    with session_scope(session_factory) as session:
-        message_count = session.scalar(select(func.count()).select_from(models.DiscordMessage))
-        prediction = session.get(models.V3ModelPrediction, payload["v3_model_prediction_id"])
-    assert message_count == 0
-    assert prediction is not None
-    assert prediction.payload_json["non_publication_reason"] == payload["discord"]["reason"]
 
 
 def _write_synthetic_v3_model(path: Path) -> Path:
@@ -292,19 +224,4 @@ def _write_synthetic_v3_model(path: Path) -> Path:
     )
     draw.save(path / "draw_risk" / "model.joblib")
     no_draw.save(path / "no_draw_winner" / "model.joblib")
-    return path
-
-
-def _write_approved_artifact(path: Path, model_family: str) -> Path:
-    (path / "confidence_thresholds.json").write_text(
-        json.dumps(
-            {
-                "threshold_version": "confidence_thresholds_v1",
-                "model_family": model_family,
-                "production_approved": True,
-                "thresholds": {"global": {"high": 60.0, "very_high": 80.0}},
-            }
-        ),
-        encoding="utf-8",
-    )
     return path

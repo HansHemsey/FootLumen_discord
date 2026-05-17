@@ -121,9 +121,7 @@ Ne hardcode pas un ID positif absent des referentiels.
 - Continue quand une source optionnelle manque, avec flags de qualite.
 - Masque tous les secrets dans logs, exceptions, snapshots et docs.
 - Mets a jour `docs/data_contract.md` si une nouvelle feature ou structure de donnees apparait.
-- Mets a jour `README.md`, `docs/operations_guide.md`, `docs/modeling_strategy.md`,
-  `docs/data_contract.md` et `.env.example` si une commande, variable d'environnement,
-  format de rapport ou workflow production change.
+- Mets a jour `README.md` ou les guides si une commande ou variable d'environnement change.
 
 ## Ajout De Nouvelles Features
 
@@ -141,8 +139,6 @@ Ne hardcode pas un ID positif absent des referentiels.
 - Normaliser les probabilites.
 - Sauvegarder artefacts et metadata dans `data/models/`.
 - Comparer au minimum odds-only, Poisson et API-only dans les backtests.
-- Pour un modèle publié en production, fournir un rapport `published-only` et un
-  `confidence_thresholds.json` approuvé ; shadow/dry-run restent autorisés sans approbation.
 
 ## Smoke Et Validation Finale
 
@@ -151,13 +147,6 @@ Avant de considerer un sprint termine :
 ```bash
 make smoke
 make check
-```
-
-Pour un changement touchant V3, O/U, publication ou backtesting production-like, ajouter les
-tests ciblés pertinents, par exemple :
-
-```bash
-pytest tests/test_model_approval.py tests/test_production_like_backtest.py
 ```
 
 Controle aussi :

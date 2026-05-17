@@ -13,18 +13,6 @@ Les secrets restent hors Git :
 Ne jamais afficher une cle API, une URL webhook complete ou un bot token. Les logs peuvent afficher
 un statut configure/non configure et un hash court.
 
-Permissions recommandées sur la machine d'exploitation :
-
-```bash
-[ -f .env ] && chmod 600 .env
-find config -maxdepth 1 -name '*.local.yaml' -exec chmod 600 {} +
-chmod 700 logs data
-```
-
-Les fichiers générés par le provisioning Discord local sont écrits en `0600` quand le système
-de fichiers le permet. Ne jamais copier `.env` ou `config/*.local.yaml` dans un rapport, un
-ticket ou un commit.
-
 ## Fichiers De Reference
 
 Les cinq fichiers suivants doivent etre presents sur la machine d'exploitation :
@@ -40,37 +28,12 @@ docs/api_football_players_cache.json
 `api_football_players_cache.json` est un cache technique de collecte. Le seed metier joueurs doit
 utiliser `api_football_players_reference.json`.
 
-## Routine D'Exploitation
-
-- Lundi matin : `scripts/weekly_ingestion.sh` prépare les fixtures des 7 prochains jours.
-- Chaque matin : `scripts/daily_morning.sh` rafraîchit la DB et publie classement,
-  calendrier, matchs du jour et score-pronos-semaine.
-- H-6 : `scripts/publish_match_analyses.sh` publie seulement les analyses pré-match assez
-  riches pour être utiles.
-- M-30 : `scripts/daily_late.sh` génère V3 1X2 et `scripts/daily_ou.sh` génère O/U 2.5.
-- Après match : `scripts/publish_match_results.sh` publie les résultats `FT/AET/PEN`.
-
-Les vrais envois Discord exigent toujours `SEND_DISCORD=true DRY_RUN=false`. Les pronostics
-faibles ou insuffisamment fiables restent internes et ne sont pas comptés dans le score
-hebdomadaire.
-
 ## Checklist Quotidienne
 
 ```bash
 scripts/football_predictor_cli.sh doctor --strict
 scripts/football_predictor_cli.sh data-quality
 scripts/smoke_test_local.sh
-```
-
-Rapports qualité sans réseau :
-
-```bash
-scripts/football_predictor_cli.sh data-quality --date YYYY-MM-DD --model-family all --json
-scripts/football_predictor_cli.sh data-quality \
-  --week-of YYYY-MM-DD \
-  --model-family v3 \
-  --json-output reports/data_quality_week.json \
-  --markdown-output reports/data_quality_week.md
 ```
 
 Le smoke test local n'appelle ni API-Football ni Discord. Il valide les fichiers de reference, la
@@ -114,13 +77,8 @@ Passe `SEND_DISCORD=true` seulement apres validation des webhooks et des routes.
 ### Production V3 Discord
 
 Depuis Sprint 10, `scripts/daily_late.sh` utilise la V3 par defaut pour le channel
-`predictions`. Le script ajoute `--production-mode` uniquement pour un vrai envoi live :
-`SEND_DISCORD=true`, `DRY_RUN=false` et `PRINT_ONLY=false`. Les appels manuels de
-`predict-today-v3` restent en shadow mode par defaut ; ajouter `--production-mode` pour
-autoriser le chemin production. Le répertoire modèle doit contenir
-`confidence_thresholds.json` avec `production_approved=true`, sinon le runner refuse le mode
-production avant prédiction. Le shadow mode, les dry-runs et les print-only restent utilisables
-sans artefact approuvé pour observer V3 localement.
+`predictions`. Les appels manuels de `predict-today-v3` restent en shadow mode par defaut ;
+ajouter `--production-mode` pour autoriser le chemin production.
 
 ```bash
 football-predictor predict-today-v3 \
@@ -144,28 +102,13 @@ Rollback V2 :
 PREDICTION_ENGINE=v2 SEND_DISCORD=true DRY_RUN=false scripts/daily_late.sh
 ```
 
-En rollback, conserver les artefacts V3/O-U précédents mais les lancer en shadow/dry-run
-jusqu'à ce qu'un nouveau rapport backtest approuvé soit disponible. Le modèle V2 late reste
-dans `data/models/v2-late`; si ce répertoire manque, le pipeline retombe sur les fallbacks
-documentés.
+La V3 est activee en production malgre un backtest non valide. Surveiller les premiers
+runs reels, la calibration des probabilites et la couverture odds/API/lineups issue du
+refresh live M-30. Pour verifier le rendu Discord V3 sans publier :
 
-Le fichier d'approbation est généré par les backtests de calibration. Pour promouvoir un
-nouveau modèle, copier l'artefact approuvé dans le répertoire modèle actif, par exemple
-`data/models/v3/confidence_thresholds.json` ou
-`data/models/ou-v1/confidence_thresholds.json`. L'artefact porte aussi `approved_labels` :
-si seul `Very High` est approuvé, les prédictions `High` restent internes même si leur score
-qualité est suffisant. Si l'artefact manque, est invalide ou n'est pas approuvé, le log
-indique `Production mode refused` avec le modèle, le chemin attendu et la raison, sans
-afficher de secret. Pour verifier le rendu Discord V3 sans publier :
-
-Règle de publication publique : V2, V3 1X2 et O/U 2.5 ne publient dans Discord que les
-pronostics `High` ou `Very High` avec une qualité de données suffisante
-(`PUBLICATION_MIN_DATA_QUALITY_SCORE=60` par défaut). Pour V3/O-U en production, le label
-utilisé par la policy est le label calibré depuis `confidence_score` et l'artefact approuvé.
-Les labels `Low`, `Medium`, `Uncertain`, les labels non approuvés, les scores qualité absents
-et les scores qualité sous le seuil sont persistés en base mais retournent
-`confidence_skipped` avec une raison normalisée. Si `data_quality_json.publication_blockers`
-est non vide, la publication réelle est aussi bloquée avec `data_quality_blocker_present`.
+Règle de publication publique : V3 1X2 et O/U 2.5 ne publient dans Discord que les
+pronostics `High` ou `Very High`. Les labels `Low`, `Medium`, `Uncertain` et assimilés
+sont persistés en base mais retournent `confidence_skipped`.
 
 Les messages V3 1X2 et O/U 2.5 utilisent un rendu compact oriente parieur : pick,
 probabilites modele/marche, ecart de value, facteurs traduits et qualite data. Ce rendu
@@ -212,7 +155,6 @@ CONFIG=config/competitions.yaml
 PREDICTION_ENGINE=v3
 MODEL_DIR=data/models/v3
 V2_MODEL_DIR=data/models/v2-late
-OU_MODEL_DIR=data/models/ou-v1
 SEND_DISCORD=false
 DRY_RUN=true
 FORCE=false
@@ -250,11 +192,6 @@ Le score hebdomadaire compte uniquement les predictions réellement envoyées da
 et dont le match est terminé : V2 legacy, V3 via `v3_model_prediction_id`, et O/U 2.5 via
 `ou_model_prediction_id`. Les prédictions internes non publiées, `dry_run`, `print_only`
 et `confidence_skipped` ne sont jamais incluses.
-Le payload du message `weekly_prediction_score` conserve un audit local avec
-`model_family_counts` et `counted_predictions` pour relier chaque ligne au message Discord
-et a la prediction source réellement comptés. Ce bilan reflète l'état enregistré dans la
-base locale : une suppression manuelle directement dans Discord n'est pas détectable sans
-audit API explicite.
 Il est remplace par `week_key` : une relance dans la même semaine met a jour le message
 de cette semaine, mais ne supprime pas les autres semaines. Le lundi, `daily_morning.sh`
 publie aussi une finalisation de la semaine précédente pour inclure les matchs du dimanche
@@ -386,37 +323,20 @@ REFRESH_ODDS=false
 ```
 
 `DETAILS_LIMIT` reste un plafond par ligue/saison. Pour resoudre les joueurs inconnus dans
-la meme passe, ajoute `RESOLVE_UNKNOWN_PLAYERS=true`, ou lance la resolution separement.
+la meme passe, ajoute `RESOLVE_UNKNOWN_PLAYERS=true`, ou lance la resolution separement
 
 ### Entrainement Et Backtest Multi-Saisons
 
 ```bash
 scripts/train_backtest_all.sh
 scripts/train_backtest_ou.sh
-football-predictor backtest-production-like --league-id 39 --season 2025 --format both
 ```
 
 Ces deux scripts utilisent `config/competitions_history.yaml` par defaut. Le premier
 entraine/backteste le modele 1X2 `data/models/v2-late`; le second entraine/backteste le
 modele Over/Under `data/models/ou-v1`. Les scripts quotidiens continuent d'utiliser
-`config/competitions.yaml`, donc l'historique ne ralentit pas la production. Garde les
-refresh desactives si tu veux economiser le quota.
-
-Contrôle mensuel recommandé :
-
-```bash
-football-predictor backtest-production-like \
-  --league-id 39 \
-  --season 2025 \
-  --v3-model-dir data/models/v3 \
-  --v2-model-dir data/models/v2-late \
-  --output-dir reports/production_like \
-  --format both
-```
-
-Promouvoir un modèle uniquement si le rapport published-only valide les critères, si
-`confidence_thresholds.json` porte `production_approved=true` et si `approved_labels` contient
-au moins un label publiable. Conserver l'artefact précédent pour rollback.
+`config/competitions.yaml`, donc l'historique ne ralentit pas la production.
+avec les refresh desactives si tu veux economiser le quota.
 
 ## Refresh Live Et Quota API
 
@@ -450,32 +370,6 @@ crontab -l
 
 Ce fichier active explicitement `SEND_DISCORD=true DRY_RUN=false` pour les publications
 Discord, garde des verrous `lockf` par routine, et écrit les logs dans `logs/cron/`.
-`lockf` est un verrou BSD/macOS : sur VPS Linux, ne pas installer cette crontab telle quelle
-sans adaptation `flock` ou systemd timer.
-
-Pour Ubuntu/VPS, utiliser `config/prod_linux.crontab`. Cette version pointe vers
-`/opt/football-predictor/app`, utilise `flock`, crée les dossiers de logs/cache et laisse
-V3/O-U en shadow par défaut tant que les artefacts
-`data/models/v3/confidence_thresholds.json` et
-`data/models/ou-v1/confidence_thresholds.json` ne sont pas approuvés. Les routines
-classements, calendriers, matchs du jour, analyses, résultats et score hebdo publient
-réellement avec `SEND_DISCORD=true DRY_RUN=false`.
-
-Installation VPS recommandée :
-
-```bash
-cd /opt/football-predictor/app
-source .venv/bin/activate
-pip install -U pip
-pip install -e ".[ml]"
-mkdir -p logs/cron .cache/matplotlib
-crontab config/prod_linux.crontab
-crontab -l
-```
-
-Après approbation backtest d'un modèle, modifier uniquement les deux lignes shadow V3/O-U
-dans la crontab Linux pour passer `SEND_DISCORD=true DRY_RUN=false`, puis recharger avec
-`crontab config/prod_linux.crontab`.
 
 Exemple local sans refresh, uniquement pour test manuel :
 

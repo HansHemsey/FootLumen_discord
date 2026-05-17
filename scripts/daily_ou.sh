@@ -88,10 +88,6 @@ if bool_flag "$PRINT_ONLY"; then
   set -- "$@" --print-only
 fi
 
-if bool_flag "$SEND_DISCORD" && ! bool_flag "$PUBLISH_DRY_RUN" && ! bool_flag "$PRINT_ONLY"; then
-  set -- "$@" --production-mode
-fi
-
 if [ -n "${LIMIT:-}" ]; then
   set -- "$@" --limit "$LIMIT"
 fi
@@ -100,21 +96,6 @@ if [ -n "${LEAGUE_ID:-}" ]; then
   set -- "$@" --league-id "$LEAGUE_ID"
 fi
 
-STATUS_FILE="$(mktemp "${TMPDIR:-/tmp}/daily_ou_status.XXXXXX")"
-trap 'rm -f "$STATUS_FILE"' EXIT HUP INT TERM
-
-(
-  set +e
-  "$CLI_BIN" "$@"
-  runner_status=$?
-  printf '%s\n' "$runner_status" > "$STATUS_FILE"
-  exit "$runner_status"
-) | tee "$SUMMARY_PATH"
-
-RUNNER_STATUS="$(cat "$STATUS_FILE" 2>/dev/null || printf '%s\n' 1)"
-if [ "$RUNNER_STATUS" -ne 0 ]; then
-  echo "O/U daily runner failed with status=$RUNNER_STATUS — summary at $SUMMARY_PATH" >&2
-  exit "$RUNNER_STATUS"
-fi
+"$CLI_BIN" "$@" | tee "$SUMMARY_PATH"
 
 echo "O/U daily pipeline complete for date=$RUN_DATE — summary at $SUMMARY_PATH"

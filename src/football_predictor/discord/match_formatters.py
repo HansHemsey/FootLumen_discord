@@ -9,7 +9,6 @@ from typing import Any
 from football_predictor.db import models
 from football_predictor.discord.formatter import CODE_CLOSE, CODE_OPEN, truncate_discord_message
 from football_predictor.modeling.probabilities import ProbabilityTriple
-from football_predictor.utils.secrets import sanitize_secret_text
 from football_predictor.utils.time import format_in_timezone
 
 DISCORD_SAFE_LIMIT = 1900
@@ -45,7 +44,7 @@ def format_match_analysis_message(
         CODE_OPEN,
         "🧠 ANALYSE AVANT-MATCH H-6",
         "",
-        f"Match : {_clean(fixture.home_team)} vs {_clean(fixture.away_team)}",
+        f"Match : {fixture.home_team} vs {fixture.away_team}",
         f"Compétition : {_competition_label(fixture, payload)}",
         f"Date : {_datetime_label(fixture.date, timezone_name)}",
         f"Contexte : {_round_label(fixture)}",
@@ -106,7 +105,7 @@ def format_match_result_message(
         CODE_OPEN,
         "✅ RÉSULTAT MATCH",
         "",
-        f"Match : {_clean(fixture.home_team)} vs {_clean(fixture.away_team)}",
+        f"Match : {fixture.home_team} vs {fixture.away_team}",
         f"Compétition : {_competition_label(fixture, payload)}",
         f"Date : {_datetime_label(fixture.date, timezone_name)}",
         f"Score final : {_score_label(home_goals, away_goals)}",
@@ -127,7 +126,7 @@ def format_match_result_message(
 def _competition_label(fixture: models.Fixture, payload: Mapping[str, Any]) -> str:
     value = payload.get("competition")
     if value:
-        return _clean(value)
+        return str(value)
     return f"League {fixture.league_id} - {fixture.season}"
 
 
@@ -139,7 +138,7 @@ def _datetime_label(value: datetime | None, timezone_name: str) -> str:
 
 def _round_label(fixture: models.Fixture) -> str:
     parts = [part for part in (fixture.round, fixture.venue_name, fixture.status_short) if part]
-    return " | ".join(_clean(part) for part in parts) if parts else _UNAVAILABLE
+    return " | ".join(parts) if parts else _UNAVAILABLE
 
 
 def _form_line(label: str, prefix: str, features: Mapping[str, Any]) -> str:
@@ -193,7 +192,7 @@ def _absence_line(label: str, key: str, features: Mapping[str, Any]) -> str:
             name = item.get("name") or item.get("player_name") or item.get("player")
             reason = item.get("reason") or item.get("type") or item.get("status")
             if name:
-                rendered.append(f"{_clean(name)} ({_clean(reason or 'raison n.d.')})")
+                rendered.append(f"{name} ({reason or 'raison n.d.'})")
     return f"- {label} : " + ("; ".join(rendered) if rendered else "non disponible")
 
 
@@ -209,7 +208,7 @@ def _xi_line(features: Mapping[str, Any]) -> str:
     if not any((home_form, away_form, home_stability, away_stability)):
         return "- XI probable : non disponible"
     return (
-        f"- XI : {_clean(home_form or 'n.d.')} vs {_clean(away_form or 'n.d.')}, "
+        f"- XI : {home_form or 'n.d.'} vs {away_form or 'n.d.'}, "
         f"stabilité {_fmt(home_stability)} / {_fmt(away_stability)}"
     )
 
@@ -372,9 +371,3 @@ def _percent(value: float | None) -> str:
 
 def _yes_no(value: Any) -> str:
     return "oui" if bool(value) else "non"
-
-
-def _clean(value: object) -> str:
-    text = str(value).replace("```", "'''").replace("\r", " ").replace("\n", " ").strip()
-    text = sanitize_secret_text(text, replacement="[secret masqué]")
-    return " ".join(text.split()) or _UNAVAILABLE

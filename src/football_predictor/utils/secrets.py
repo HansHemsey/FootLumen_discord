@@ -3,22 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import re
-
-SECRET_REDACTION = "<redacted>"
-_DISCORD_WEBHOOK_RE = re.compile(
-    r"https://(?:canary\.|ptb\.)?discord(?:app)?\.com/api/webhooks/[^\s'\"<>`]+",
-    re.IGNORECASE,
-)
-_BEARER_RE = re.compile(r"\b(Bearer)\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE)
-_SECRET_ASSIGNMENT_RE = re.compile(
-    r"\b((?:api[_-]?football[_-]?key|api[_-]?key|token|secret|webhook|authorization)"
-    r"\s*[:=]\s*)['\"]?[^'\"\s,;<>]+",
-    re.IGNORECASE,
-)
-_DISCORD_TOKEN_RE = re.compile(
-    r"\b[A-Za-z0-9_-]{24,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{20,}\b"
-)
 
 
 def secret_configured(value: str | None) -> bool:
@@ -50,17 +34,6 @@ def mask_secret(value: str | None) -> str:
         return ""
     fingerprint = secret_fingerprint(value)
     return f"<secret:{fingerprint}>"
-
-
-def sanitize_secret_text(value: str, *, replacement: str = SECRET_REDACTION) -> str:
-    """Mask secret-looking fragments inside free-form text."""
-    sanitized = _DISCORD_WEBHOOK_RE.sub(replacement, value)
-    sanitized = _BEARER_RE.sub(lambda match: f"{match.group(1)} {replacement}", sanitized)
-    sanitized = _SECRET_ASSIGNMENT_RE.sub(
-        lambda match: f"{match.group(1)}{replacement}",
-        sanitized,
-    )
-    return _DISCORD_TOKEN_RE.sub(replacement, sanitized)
 
 
 def safe_webhook_label(webhook_url: str | None) -> str:

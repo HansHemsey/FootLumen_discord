@@ -18,15 +18,7 @@ from football_predictor.discord.exceptions import DiscordWebhookError
 from football_predictor.discord.formatter import format_prediction_markdown
 from football_predictor.discord.router import DiscordRoute, resolve_discord_route
 from football_predictor.discord.webhook import DiscordWebhookClient
-from football_predictor.prediction.publication_flow import publication_metadata
-from football_predictor.prediction.publication_policy import (
-    DEFAULT_MIN_DATA_QUALITY_SCORE,
-    PublicationDecision,
-    evaluate_publication,
-    publication_decision_payload,
-)
-from football_predictor.utils.logging import sanitize_value
-from football_predictor.utils.secrets import hash_secret, sanitize_secret_text
+from football_predictor.utils.secrets import hash_secret
 from football_predictor.utils.time import utc_now
 
 
@@ -70,9 +62,6 @@ class DiscordDeliveryService:
         message_type: str = "prediction",
         fixture_id: int | None = None,
         model_prediction_id: int | None = None,
-        v3_model_prediction_id: int | None = None,
-        ou_model_prediction_id: int | None = None,
-        dedupe_key: str | None = None,
         dry_run: bool = False,
         print_only: bool = False,
         force: bool = False,
@@ -80,7 +69,6 @@ class DiscordDeliveryService:
         wait: bool = False,
         payload_metadata: dict[str, Any] | None = None,
     ) -> DiscordSendResult:
-        safe_markdown = sanitize_discord_markdown(markdown)
         route = resolve_discord_route(
             channels_config=self.channels_config,
             webhooks_config=self.webhooks_config,
@@ -94,62 +82,33 @@ class DiscordDeliveryService:
             allow_missing_webhook=dry_run or print_only,
             force=force,
         )
-        message_hash = hash_message(safe_markdown)
+        message_hash = hash_message(markdown)
         webhook_hash = route.webhook_hash
         if not force and webhook_hash is not None:
-            if dedupe_key:
-                existing = self._existing_sent_by_dedupe_key(webhook_hash, dedupe_key)
-                if existing is not None:
-                    row = self._persist_message(
-                        safe_markdown,
-                        route=route,
-                        message_hash=message_hash,
-                        status="duplicate_skipped",
-                        fixture_id=fixture_id,
-                        model_prediction_id=model_prediction_id,
-                        v3_model_prediction_id=v3_model_prediction_id,
-                        ou_model_prediction_id=ou_model_prediction_id,
-                        dedupe_key=dedupe_key,
-                        dry_run=dry_run,
-                        print_only=print_only,
-                        response_json={
-                            "duplicate_of": existing.id,
-                            "duplicate_reason": "dedupe_key",
-                        },
-                        payload_metadata=payload_metadata,
-                    )
-                    return self._result("duplicate_skipped", route, message_hash, row)
-            else:
-                existing = self._existing_sent(webhook_hash, message_hash)
-                if existing is not None:
-                    row = self._persist_message(
-                        safe_markdown,
-                        route=route,
-                        message_hash=message_hash,
-                        status="duplicate_skipped",
-                        fixture_id=fixture_id,
-                        model_prediction_id=model_prediction_id,
-                        v3_model_prediction_id=v3_model_prediction_id,
-                        ou_model_prediction_id=ou_model_prediction_id,
-                        dedupe_key=dedupe_key,
-                        dry_run=dry_run,
-                        print_only=print_only,
-                        response_json={"duplicate_of": existing.id},
-                        payload_metadata=payload_metadata,
-                    )
-                    return self._result("duplicate_skipped", route, message_hash, row)
+            existing = self._existing_sent(webhook_hash, message_hash)
+            if existing is not None:
+                row = self._persist_message(
+                    markdown,
+                    route=route,
+                    message_hash=message_hash,
+                    status="duplicate_skipped",
+                    fixture_id=fixture_id,
+                    model_prediction_id=model_prediction_id,
+                    dry_run=dry_run,
+                    print_only=print_only,
+                    response_json={"duplicate_of": existing.id},
+                    payload_metadata=payload_metadata,
+                )
+                return self._result("duplicate_skipped", route, message_hash, row)
 
         if print_only:
             row = self._persist_message(
-                safe_markdown,
+                markdown,
                 route=route,
                 message_hash=message_hash,
                 status="print_only",
                 fixture_id=fixture_id,
                 model_prediction_id=model_prediction_id,
-                v3_model_prediction_id=v3_model_prediction_id,
-                ou_model_prediction_id=ou_model_prediction_id,
-                dedupe_key=dedupe_key,
                 dry_run=dry_run,
                 print_only=True,
                 response_json={"print_only": True},
@@ -159,15 +118,12 @@ class DiscordDeliveryService:
 
         if dry_run:
             row = self._persist_message(
-                safe_markdown,
+                markdown,
                 route=route,
                 message_hash=message_hash,
                 status="dry_run",
                 fixture_id=fixture_id,
                 model_prediction_id=model_prediction_id,
-                v3_model_prediction_id=v3_model_prediction_id,
-                ou_model_prediction_id=ou_model_prediction_id,
-                dedupe_key=dedupe_key,
                 dry_run=True,
                 print_only=False,
                 response_json={"dry_run": True, "route": route.safe_dict()},
@@ -184,17 +140,14 @@ class DiscordDeliveryService:
             route.webhook_url,
             timeout=self.timeout,
             client=self.http_client,
-        ).send_markdown(safe_markdown, wait=wait)
+        ).send_markdown(markdown, wait=wait)
         row = self._persist_message(
-            safe_markdown,
+            markdown,
             route=route,
             message_hash=message_hash,
             status="sent",
             fixture_id=fixture_id,
             model_prediction_id=model_prediction_id,
-            v3_model_prediction_id=v3_model_prediction_id,
-            ou_model_prediction_id=ou_model_prediction_id,
-            dedupe_key=dedupe_key,
             dry_run=False,
             print_only=False,
             sent_at=utc_now(),
@@ -283,20 +236,6 @@ class DiscordDeliveryService:
         )
         return self.session.execute(stmt).scalars().first()
 
-    def _existing_sent_by_dedupe_key(
-        self,
-        webhook_hash: str,
-        dedupe_key: str,
-    ) -> DiscordMessage | None:
-        stmt = select(DiscordMessage).where(
-            DiscordMessage.webhook_hash == webhook_hash,
-            DiscordMessage.dedupe_key == dedupe_key,
-            DiscordMessage.status == "sent",
-            DiscordMessage.dry_run.is_(False),
-            DiscordMessage.print_only.is_(False),
-        )
-        return self.session.execute(stmt).scalars().first()
-
     def _previous_sent_messages(
         self,
         route: DiscordRoute,
@@ -347,9 +286,6 @@ class DiscordDeliveryService:
         status: str,
         fixture_id: int | None,
         model_prediction_id: int | None,
-        v3_model_prediction_id: int | None,
-        ou_model_prediction_id: int | None,
-        dedupe_key: str | None,
         dry_run: bool,
         print_only: bool,
         response_json: dict[str, Any],
@@ -357,26 +293,10 @@ class DiscordDeliveryService:
         payload_metadata: dict[str, Any] | None = None,
     ) -> DiscordMessage:
         webhook_hash = route.webhook_hash
-        metadata = sanitize_value(payload_metadata or {})
-        if not isinstance(metadata, dict):
-            metadata = {}
-        safe_response_json = sanitize_value(response_json)
-        if not isinstance(safe_response_json, dict):
-            safe_response_json = {}
-        link_metadata = {
-            key: value
-            for key, value in {
-                "v3_model_prediction_id": v3_model_prediction_id,
-                "ou_model_prediction_id": ou_model_prediction_id,
-                "dedupe_key": dedupe_key,
-            }.items()
-            if value is not None
-        }
+        metadata = payload_metadata or {}
         row = DiscordMessage(
             fixture_id=fixture_id,
             model_prediction_id=model_prediction_id,
-            v3_model_prediction_id=v3_model_prediction_id,
-            ou_model_prediction_id=ou_model_prediction_id,
             sent_at=sent_at,
             status=status,
             competition_key=route.competition_key,
@@ -389,17 +309,15 @@ class DiscordDeliveryService:
             webhook_url_hash=webhook_hash,
             webhook_hash=webhook_hash,
             message_hash=message_hash,
-            dedupe_key=dedupe_key,
             message_markdown=markdown,
             route_json=route.safe_dict(),
-            response_json=safe_response_json,
+            response_json=response_json,
             payload_json={
                 "content": markdown,
-                "discord_api_message_id": _response_message_id(safe_response_json),
-                **link_metadata,
+                "discord_api_message_id": _response_message_id(response_json),
                 **metadata,
             },
-            response_text=str(safe_response_json)[:500] if safe_response_json else None,
+            response_text=str(response_json)[:500] if response_json else None,
         )
         self.session.add(row)
         self.session.flush()
@@ -427,11 +345,6 @@ def hash_message(markdown: str) -> str:
     return hashlib.sha256(markdown.encode("utf-8")).hexdigest()
 
 
-def sanitize_discord_markdown(markdown: str) -> str:
-    """Final guardrail before Discord send/persistence."""
-    return sanitize_secret_text(markdown, replacement="[secret masqué]")
-
-
 def discord_api_message_id(row: DiscordMessage) -> str | None:
     payload = row.payload_json if isinstance(row.payload_json, dict) else {}
     response = row.response_json if isinstance(row.response_json, dict) else {}
@@ -453,9 +366,6 @@ def send_discord_message(
     message_type: str,
     fixture_id: int | None = None,
     model_prediction_id: int | None = None,
-    v3_model_prediction_id: int | None = None,
-    ou_model_prediction_id: int | None = None,
-    dedupe_key: str | None = None,
     dry_run: bool = False,
     print_only: bool = False,
     force: bool = False,
@@ -468,9 +378,6 @@ def send_discord_message(
         message_type=message_type,
         fixture_id=fixture_id,
         model_prediction_id=model_prediction_id,
-        v3_model_prediction_id=v3_model_prediction_id,
-        ou_model_prediction_id=ou_model_prediction_id,
-        dedupe_key=dedupe_key,
         dry_run=dry_run,
         print_only=print_only,
         force=force,
@@ -486,19 +393,11 @@ def send_prediction_to_discord(
     print_only: bool = False,
     force: bool = False,
     timezone_name: str = "Europe/Paris",
-    min_data_quality_score: float = DEFAULT_MIN_DATA_QUALITY_SCORE,
 ) -> DiscordSendResult:
     prediction = service.session.get(ModelPrediction, model_prediction_id)
     if prediction is None:
         raise DiscordWebhookError(f"Unknown model_prediction_id={model_prediction_id}")
     fixture = service.session.get(Fixture, prediction.fixture_id)
-    decision = evaluate_publication(
-        prediction.confidence_label,
-        prediction.data_quality_json if isinstance(prediction.data_quality_json, dict) else {},
-        min_data_quality_score=min_data_quality_score,
-    )
-    metadata = _publication_metadata(decision)
-    _annotate_prediction_publication(service.session, prediction, metadata)
     rendered_prediction = SimpleNamespace(
         predicted_outcome=prediction.predicted_outcome or prediction.predicted_result,
         probabilities={
@@ -521,29 +420,6 @@ def send_prediction_to_discord(
         fixture,
         timezone_name=timezone_name,
     )
-    if not dry_run and not print_only and not decision.allowed:
-        route = resolve_discord_route(
-            channels_config=service.channels_config,
-            webhooks_config=service.webhooks_config,
-            league_id=fixture.league_id if fixture else None,
-            season=fixture.season if fixture else None,
-            channel_key="predictions",
-            message_type="prediction",
-            legacy_webhook_url=service.legacy_webhook_url,
-            allow_missing_webhook=True,
-            force=force,
-        )
-        return DiscordSendResult(
-            status="confidence_skipped",
-            route=route,
-            message_hash=hash_message(markdown),
-            webhook_hash=hash_secret(route.webhook_url),
-            response_json={
-                "reason": decision.reason,
-                "publication_decision": publication_decision_payload(decision),
-            },
-            discord_message_id=None,
-        )
     return service.send_markdown(
         markdown,
         competition_key=None,
@@ -556,23 +432,7 @@ def send_prediction_to_discord(
         dry_run=dry_run,
         print_only=print_only,
         force=force,
-        payload_metadata=metadata,
     )
-
-
-def _publication_metadata(decision: PublicationDecision) -> dict[str, Any]:
-    return publication_metadata(decision)
-
-
-def _annotate_prediction_publication(
-    session: Session,
-    prediction: ModelPrediction,
-    metadata: dict[str, Any],
-) -> None:
-    payload = dict(prediction.payload_json) if isinstance(prediction.payload_json, dict) else {}
-    payload.update(metadata)
-    prediction.payload_json = payload
-    session.flush()
 
 
 def send_standings_to_discord(service: DiscordDeliveryService, **kwargs: Any) -> DiscordSendResult:

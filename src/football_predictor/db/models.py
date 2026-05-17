@@ -560,16 +560,6 @@ class DiscordMessage(Base, TimestampMixin):
         nullable=True,
         index=True,
     )
-    v3_model_prediction_id: Mapped[int | None] = mapped_column(
-        ForeignKey("v3_model_predictions.id"),
-        nullable=True,
-        index=True,
-    )
-    ou_model_prediction_id: Mapped[int | None] = mapped_column(
-        ForeignKey("ou_model_predictions.id"),
-        nullable=True,
-        index=True,
-    )
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="pending")
     competition_key: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
@@ -582,7 +572,6 @@ class DiscordMessage(Base, TimestampMixin):
     webhook_url_hash: Mapped[str | None] = mapped_column(String(16), nullable=True)
     message_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     webhook_hash: Mapped[str | None] = mapped_column(String(16), nullable=True)
-    dedupe_key: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
     message_markdown: Mapped[str] = mapped_column(Text)
     route_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
     payload_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)

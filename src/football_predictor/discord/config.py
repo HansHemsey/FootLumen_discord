@@ -19,6 +19,7 @@ CHANNEL_KEYS = (
     "matchs_du_jour",
     "analyses",
     "predictions",
+    "predictions_staff",
     "resultats",
     "score_pronos_semaine",
     "discussions",

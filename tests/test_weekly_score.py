@@ -161,6 +161,60 @@ def test_weekly_score_counts_v3_and_ou_only_when_discord_was_sent(tmp_path: Path
     assert {-31, -32} == {line.fixture_id for line in reports[0].lines}
 
 
+def test_weekly_score_excludes_staff_skipped_prediction_messages(tmp_path: Path) -> None:
+    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'weekly_staff_skipped.db'}")
+    session_factory = create_session_factory(engine)
+
+    with session_scope(session_factory) as session:
+        _seed_prediction(
+            session,
+            fixture_id=-1,
+            kickoff=datetime(2026, 5, 3, 12, 30, tzinfo=UTC),
+            home_goals=2,
+            away_goals=1,
+            predicted="HOME",
+        )
+        _seed_base_fixture(
+            session,
+            fixture_id=-2,
+            kickoff=datetime(2026, 5, 3, 15, tzinfo=UTC),
+            home_goals=1,
+            away_goals=1,
+        )
+        session.add(
+            models.DiscordMessage(
+                fixture_id=-2,
+                model_prediction_id=None,
+                channel_key="predictions_staff",
+                message_type="prediction_skipped",
+                status="sent",
+                dry_run=False,
+                print_only=False,
+                webhook_hash="synthetic-staff",
+                webhook_url_hash="synthetic-staff",
+                message_hash="staff-skipped",
+                message_markdown="```md\nstaff skipped\n```",
+                payload_json={
+                    "automation_window": "late",
+                    "daily_window": "late",
+                    "model_family": "v3",
+                    "skip_reason": "confidence_below_publish_threshold",
+                },
+                route_json={},
+                response_json={},
+            )
+        )
+        reports = build_weekly_score_reports(
+            session,
+            target_date=date(2026, 5, 3),
+            timezone_name="Europe/Paris",
+            include_previous_week_finalization=False,
+        )
+
+    assert reports[0].total_predictions == 1
+    assert [line.fixture_id for line in reports[0].lines] == [-1]
+
+
 def test_weekly_score_replaces_only_same_week_messages(tmp_path: Path) -> None:
     requests: list[tuple[str, str]] = []
 

@@ -5,6 +5,11 @@ global_channels:
     channel_id: "REPLACE_WITH_CHANNEL_ID"
     webhook_name: "football-predictor-score-pronos-semaine"
     enabled: true
+  predictions_staff:
+    channel_name: "staff-predictions-skipped"
+    channel_id: "REPLACE_WITH_CHANNEL_ID"
+    webhook_name: "football-predictor-predictions-staff"
+    enabled: true
 
 competitions:
   cdm_2026:

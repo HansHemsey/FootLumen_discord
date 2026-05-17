@@ -35,6 +35,10 @@ from football_predictor.prediction.scheduler import (
     parse_daily_window,
     prediction_time_for_fixture,
 )
+from football_predictor.prediction.staff_publication import (
+    STAFF_OU_PREDICTION_SKIPPED_MESSAGE_TYPE,
+    send_skipped_prediction_to_staff,
+)
 from football_predictor.reference.lookups import ApiFootballReference, PlayersReference
 from football_predictor.utils.time import ensure_aware_utc, utc_now
 
@@ -249,6 +253,30 @@ def run_daily_ou_predictions(
                     )
                     status = "confidence_skipped"
                     reason = CONFIDENCE_SKIP_REASON
+                    md = format_ou_prediction_markdown(
+                        prediction,
+                        fixture,
+                        timezone_name=timezone_name,
+                        edge_display_threshold=edge_threshold,
+                    )
+                    send_skipped_prediction_to_staff(
+                        discord_delivery,
+                        md,
+                        fixture=fixture,
+                        model_family="ou25",
+                        confidence_label=normalize_confidence_label(prediction.confidence_label),
+                        confidence_score=prediction.confidence_score,
+                        reason=CONFIDENCE_SKIP_REASON,
+                        prediction_time=prediction_time,
+                        automation_window=resolved_window.value,
+                        message_type=STAFF_OU_PREDICTION_SKIPPED_MESSAGE_TYPE,
+                        model_prediction_id=None,
+                        payload_metadata={
+                            "ou_model_prediction_id": prediction.ou_model_prediction_id,
+                            "daily_window": resolved_window.value,
+                            "automation_date": target_date.isoformat(),
+                        },
+                    )
                 else:
                     try:
                         md = format_ou_prediction_markdown(

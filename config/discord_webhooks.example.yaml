@@ -4,6 +4,9 @@ webhooks:
     score_pronos_semaine:
       webhook_url: "REPLACE_WITH_WEBHOOK_URL"
       enabled: true
+    predictions_staff:
+      webhook_url_env: DISCORD_WEBHOOK_PREDICTIONS_STAFF
+      enabled: true
   ligue1:
     predictions:
       webhook_url: "REPLACE_WITH_WEBHOOK_URL"

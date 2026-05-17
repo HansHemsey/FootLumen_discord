@@ -43,6 +43,10 @@ from football_predictor.prediction.service import (
     PredictionOutput,
     PredictionService,
 )
+from football_predictor.prediction.staff_publication import (
+    STAFF_PREDICTION_SKIPPED_MESSAGE_TYPE,
+    send_skipped_prediction_to_staff,
+)
 from football_predictor.reference.lookups import ApiFootballReference, PlayersReference
 from football_predictor.utils.exceptions import PredictionError
 from football_predictor.utils.time import ensure_aware_utc, utc_now
@@ -384,9 +388,49 @@ def run_daily_predictions(
                 "prediction_time": prediction_time.isoformat(),
                 "run_key": run_key,
                 "refresh_warnings": refresh_warnings,
+                "model_family": "v2",
             }
             _annotate_model_prediction(session, output.model_prediction_id, metadata)
             if send_discord:
+                if (
+                    not dry_run
+                    and not print_only
+                    and not is_publishable_confidence(output.confidence_label)
+                ):
+                    logger.info(
+                        "V2 Discord publication skipped: fixture_id=%s confidence_label=%s "
+                        "confidence_score=%s expected=%s window=%s",
+                        fixture.fixture_id,
+                        normalize_confidence_label(output.confidence_label),
+                        output.confidence_score,
+                        "High|Very High",
+                        resolved_window.value,
+                    )
+                    send_skipped_prediction_to_staff(
+                        discord_delivery,
+                        format_prediction_markdown(output),
+                        fixture=fixture,
+                        model_family="v2",
+                        confidence_label=normalize_confidence_label(output.confidence_label),
+                        confidence_score=output.confidence_score,
+                        reason=CONFIDENCE_SKIP_REASON,
+                        prediction_time=prediction_time,
+                        automation_window=resolved_window.value,
+                        message_type=STAFF_PREDICTION_SKIPPED_MESSAGE_TYPE,
+                        model_prediction_id=output.model_prediction_id,
+                        payload_metadata=metadata,
+                        force=force,
+                    )
+                    results.append(
+                        _result(
+                            fixture,
+                            "confidence_skipped",
+                            prediction_time,
+                            model_prediction_id=output.model_prediction_id,
+                            reason=CONFIDENCE_SKIP_REASON,
+                        )
+                    )
+                    continue
                 send_result = _send_prediction(
                     discord_delivery,
                     output,
@@ -599,6 +643,25 @@ def run_daily_predictions_v3(
                             v3_feature_snapshot_id=output.v3_feature_snapshot_id,
                             reason=CONFIDENCE_SKIP_REASON,
                         )
+                    )
+                    send_skipped_prediction_to_staff(
+                        discord_delivery,
+                        format_prediction_v3_markdown(output, timezone_name=timezone_name),
+                        fixture=fixture,
+                        model_family="v3",
+                        confidence_label=normalize_confidence_label(output.confidence_label),
+                        confidence_score=output.confidence_score,
+                        reason=CONFIDENCE_SKIP_REASON,
+                        prediction_time=prediction_time,
+                        automation_window=resolved_window.value,
+                        message_type=STAFF_PREDICTION_SKIPPED_MESSAGE_TYPE,
+                        model_prediction_id=None,
+                        payload_metadata={
+                            **metadata,
+                            "v3_model_prediction_id": output.v3_model_prediction_id,
+                            "v3_feature_snapshot_id": output.v3_feature_snapshot_id,
+                        },
+                        force=force,
                     )
                     continue
                 send_result = _send_prediction_v3(

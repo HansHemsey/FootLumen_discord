@@ -10,6 +10,7 @@ from sqlalchemy import select
 from football_predictor.db import models
 from football_predictor.db.init_db import create_db_and_tables
 from football_predictor.db.session import create_session_factory, session_scope
+from football_predictor.discord.config import DiscordWebhookRouteConfig, DiscordWebhooksConfig
 from football_predictor.discord.service import DiscordDeliveryService
 from football_predictor.ou_model.prediction.ou_run_daily import run_daily_ou_predictions
 from football_predictor.ou_model.prediction.ou_service import OUPredictionOutput
@@ -143,12 +144,11 @@ def test_daily_ou_late_window_sends_high_confidence_prediction(tmp_path: Path) -
     assert message.payload_json["daily_window"] == "late"
 
 
-def test_daily_ou_medium_confidence_is_not_published(tmp_path: Path) -> None:
-    calls = 0
+def test_daily_ou_medium_confidence_goes_to_staff_not_public(tmp_path: Path) -> None:
+    calls: list[str] = []
 
-    def handler(_request: httpx.Request) -> httpx.Response:
-        nonlocal calls
-        calls += 1
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
         return httpx.Response(204)
 
     engine = create_db_and_tables(f"sqlite:///{tmp_path / 'ou_daily_medium.db'}")
@@ -166,6 +166,7 @@ def test_daily_ou_medium_confidence_is_not_published(tmp_path: Path) -> None:
             discord_delivery=DiscordDeliveryService(
                 session,
                 legacy_webhook_url="https://example.invalid/ou",
+                webhooks_config=_staff_webhooks_config(),
                 http_client=http_client,
             ),
             send_discord=True,
@@ -180,9 +181,26 @@ def test_daily_ou_medium_confidence_is_not_published(tmp_path: Path) -> None:
     assert summary.sent == 0
     assert summary.results[0].status == "confidence_skipped"
     assert summary.results[0].reason == "confidence_below_publish_threshold"
-    assert calls == 0
-    assert messages == []
+    assert calls == ["https://example.invalid/staff"]
+    assert len(messages) == 1
+    assert messages[0].message_type == "ou_prediction_skipped"
+    assert messages[0].channel_key == "predictions_staff"
+    assert messages[0].status == "sent"
+    assert messages[0].payload_json["model_family"] == "ou25"
+    assert messages[0].payload_json["skip_reason"] == "confidence_below_publish_threshold"
     assert len(predictions) == 1
+
+
+def _staff_webhooks_config() -> DiscordWebhooksConfig:
+    return DiscordWebhooksConfig(
+        routes=[
+            DiscordWebhookRouteConfig(
+                competition_key="global",
+                channel_key="predictions_staff",
+                webhook_url="https://example.invalid/staff",
+            )
+        ]
+    )
 
 
 def _seed_ou_fixtures(session: Any) -> None:

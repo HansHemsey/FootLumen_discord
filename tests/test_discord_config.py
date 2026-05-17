@@ -5,10 +5,13 @@ from pathlib import Path
 import pytest
 
 from football_predictor.discord.config import (
+    DiscordWebhookRouteConfig,
+    DiscordWebhooksConfig,
     load_discord_channels_config,
     load_discord_webhooks_config,
 )
 from football_predictor.discord.exceptions import DiscordRoutingError
+from football_predictor.discord.router import resolve_discord_route
 from football_predictor.reference.loaders import load_api_football_reference
 from football_predictor.utils.exceptions import ReferenceLookupError
 
@@ -31,6 +34,7 @@ def test_discord_example_configs_validate_against_reference(reference_path: Path
     assert channels.find_competition(league_id=39, season=2025).competition_key == (
         "premier_league"
     )
+    assert channels.find_global_channel("predictions_staff") is not None
     assert all(route.webhook_url is None for route in webhooks.routes)
 
 
@@ -98,6 +102,68 @@ webhooks:
     assert route.league_id is None
     assert route.season is None
     assert route.webhook_url == "https://example.invalid/weekly-score"
+
+
+def test_global_predictions_staff_webhook_route_is_not_treated_as_competition(
+    tmp_path: Path,
+    reference_path: Path,
+) -> None:
+    reference = load_api_football_reference(reference_path)
+    config = tmp_path / "discord_webhooks.yaml"
+    config.write_text(
+        """
+webhooks:
+  global:
+    predictions_staff:
+      webhook_url_env: DISCORD_WEBHOOK_PREDICTIONS_STAFF
+      enabled: true
+""",
+        encoding="utf-8",
+    )
+
+    webhooks = load_discord_webhooks_config(
+        config,
+        reference,
+        env={"DISCORD_WEBHOOK_PREDICTIONS_STAFF": "https://example.invalid/staff"},
+    )
+    route = webhooks.find_route(
+        competition_key=None,
+        league_id=None,
+        season=None,
+        channel_key="predictions_staff",
+    )
+
+    assert route is not None
+    assert route.competition_key == "global"
+    assert route.league_id is None
+    assert route.season is None
+    assert route.webhook_url == "https://example.invalid/staff"
+
+
+def test_skipped_prediction_message_types_route_to_global_staff_channel() -> None:
+    webhooks = DiscordWebhooksConfig(
+        routes=[
+            DiscordWebhookRouteConfig(
+                competition_key="global",
+                channel_key="predictions_staff",
+                webhook_url="https://example.invalid/staff",
+            )
+        ]
+    )
+
+    prediction_route = resolve_discord_route(
+        channels_config=None,
+        webhooks_config=webhooks,
+        message_type="prediction_skipped",
+    )
+    ou_route = resolve_discord_route(
+        channels_config=None,
+        webhooks_config=webhooks,
+        message_type="ou_prediction_skipped",
+    )
+
+    assert prediction_route.channel_key == "predictions_staff"
+    assert ou_route.channel_key == "predictions_staff"
 
 
 def test_discord_config_rejects_unknown_league_id(
@@ -194,6 +260,7 @@ def test_example_webhooks_config_contains_no_real_discord_url() -> None:
 
     assert "https://discord.com/api/webhooks" not in text
     assert "REPLACE_WITH_WEBHOOK_URL" in text
+    assert "DISCORD_WEBHOOK_PREDICTIONS_STAFF" in text
 
 
 def test_discord_local_configs_are_gitignored() -> None:

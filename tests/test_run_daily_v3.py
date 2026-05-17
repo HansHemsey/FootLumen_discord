@@ -15,6 +15,7 @@ from football_predictor.config.settings import get_settings
 from football_predictor.db import models
 from football_predictor.db.init_db import create_db_and_tables
 from football_predictor.db.session import create_session_factory, session_scope
+from football_predictor.discord.config import DiscordWebhookRouteConfig, DiscordWebhooksConfig
 from football_predictor.discord.service import DiscordDeliveryService
 from football_predictor.features.data_quality import DataQuality
 from football_predictor.modeling.probabilities import ProbabilityTriple
@@ -271,14 +272,13 @@ def test_run_daily_v3_production_sends_real_discord_and_v3_metadata(
     assert all(row.payload_json["shadow_mode"] is False for row in v3_predictions)
 
 
-def test_run_daily_v3_low_confidence_stays_internal_without_discord(
+def test_run_daily_v3_low_confidence_goes_to_staff_not_public(
     tmp_path: Path,
 ) -> None:
-    calls = 0
+    calls: list[str] = []
 
-    def handler(_request: httpx.Request) -> httpx.Response:
-        nonlocal calls
-        calls += 1
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
         return httpx.Response(204)
 
     engine = create_db_and_tables(f"sqlite:///{tmp_path / 'daily_v3_low_confidence.db'}")
@@ -308,6 +308,7 @@ def test_run_daily_v3_low_confidence_stays_internal_without_discord(
             discord_delivery=DiscordDeliveryService(
                 session,
                 legacy_webhook_url="https://example.invalid/v3-daily",
+                webhooks_config=_staff_webhooks_config(),
                 http_client=http_client,
             ),
             prediction_service_factory=lambda _session: fake_service,
@@ -319,8 +320,16 @@ def test_run_daily_v3_low_confidence_stays_internal_without_discord(
     assert summary.total == 2
     assert summary.confidence_skipped == 2
     assert summary.sent == 0
-    assert calls == 0
-    assert messages == []
+    assert calls == ["https://example.invalid/staff", "https://example.invalid/staff"]
+    assert len(messages) == 2
+    assert {message.message_type for message in messages} == {"prediction_skipped"}
+    assert {message.channel_key for message in messages} == {"predictions_staff"}
+    assert all(message.status == "sent" for message in messages)
+    assert all(message.payload_json["model_family"] == "v3" for message in messages)
+    assert all(
+        message.payload_json["skip_reason"] == "confidence_below_publish_threshold"
+        for message in messages
+    )
     assert len(v3_predictions) == 2
     assert {result.status for result in summary.results} == {"confidence_skipped"}
     assert {
@@ -513,6 +522,18 @@ def _seed_fixtures(session, *, league_id: int, season: int) -> None:
         league_id,
         season,
         status="FT",
+    )
+
+
+def _staff_webhooks_config() -> DiscordWebhooksConfig:
+    return DiscordWebhooksConfig(
+        routes=[
+            DiscordWebhookRouteConfig(
+                competition_key="global",
+                channel_key="predictions_staff",
+                webhook_url="https://example.invalid/staff",
+            )
+        ]
     )
 
 

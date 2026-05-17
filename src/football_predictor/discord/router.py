@@ -17,6 +17,8 @@ MESSAGE_TYPE_CHANNELS = {
     "today_matches": "matchs_du_jour",
     "analysis": "analyses",
     "prediction": "predictions",
+    "prediction_skipped": "predictions_staff",
+    "ou_prediction_skipped": "predictions_staff",
     "result": "resultats",
     "results": "resultats",
     "weekly_prediction_score": "score_pronos_semaine",

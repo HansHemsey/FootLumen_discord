@@ -259,6 +259,59 @@ Métriques obligatoires :
 
 Le backtest V1 évalue les sources suivantes sur le split test :
 
+## Modèle 1X2 Spécial Coupe Du Monde
+
+La Coupe du Monde 2026 utilise un modèle séparé des championnats afin d'éviter de mélanger
+des dynamiques de clubs et de sélections nationales. Les artefacts sont écrits par défaut
+dans `data/models/worldcup-1x2` et ne remplacent pas les modèles V2, V3 ou O/U.
+
+Les sources locales dédiées sont :
+
+- `data/reference/historical_worldcup_result.csv` : résultats internationaux depuis 2016 ;
+- `data/reference/classement_fifa_officiel.csv` : ranking FIFA courant, utilisé uniquement
+  comme prior de prédiction 2026 ;
+- `data/reference/elo_wc_teams_data.tsv` et `elo_wc_teams_shortname.tsv` : ranking Elo
+  courant et aliases.
+
+Le dataset historique est construit chronologiquement. Pour une ligne datée `D`, les
+features n'utilisent que les matchs internationaux dont `date < D`. Les rankings FIFA/Elo
+courants ne sont jamais injectés dans les backtests historiques, car ils représenteraient
+une information future. Ils sont autorisés seulement pour les fixtures CDM 2026 à venir.
+
+Les features principales couvrent forme 5/10/20 matchs, forme pondérée par récence,
+buts marqués/encaissés, clean sheets, BTTS, over/under historique, force attaque/défense,
+performance contre adversaires forts/faibles, terrain neutre, compétitions officielles,
+Coupe du Monde, qualifications et compétitions continentales. Le modèle ajoute aussi un
+Elo international chronologique interne et un power rating simple attaque/défense.
+
+Les probabilités finales combinent :
+
+- `p_wc_rating_home/draw/away` depuis le différentiel de rating ;
+- `p_wc_poisson_home/draw/away` depuis les buts attendus ;
+- `p_wc_market_home/draw/away` si des odds 1X2 pré-match sont snapshotées avant
+  `prediction_time` ;
+- `p_wc_api_home/draw/away` si une prediction API-Football est snapshotée avant
+  `prediction_time` ;
+- `p_wc_rating_dynamic_*` et `p_wc_poisson_dynamic_*`, qui appliquent un ajustement borné
+  à partir des absences, lineups officielles, surprises de XI et changements de formation ;
+- le modèle tabulaire `WorldCup1X2Model` quand l'artefact existe.
+
+Le poids de ces sources est piloté par `blend_config.json` dans le dossier modèle. En
+absence de configuration, le fallback reste conservateur : rating et Poisson dominent, le
+tabulaire ne pèse que faiblement, et les sources live market/API sont intégrées seulement
+si elles existent. La commande `worldcup-optimize-blend` teste les blends candidats sur
+validation chronologique, évalue ensuite le test et peut écrire le meilleur
+`blend_config.json`.
+
+La commande `worldcup-audit-reference` doit valider que les 48 équipes CDM 2026 sont
+résolues avant entraînement ou publication.
+
+En live, `predict-worldcup --refresh-data` et `worldcup-run-daily --refresh-data` récupèrent
+fixture, odds, injuries, API prediction et lineups avant de construire la prédiction. Chaque
+source reste strictement filtrée par `fetched_at <= prediction_time`. En backtest, aucune
+donnée récupérée après coup n'est utilisée pour simuler M-30 : les rapports indiquent la
+couverture dynamique disponible et évaluent seulement les snapshots réellement point-in-time.
+
 - modèle final chargé depuis `model.joblib` si `--model-dir` est fourni ;
 - `stacking_final` quand le modèle sportif et au moins une source marché/API existent ;
 - `odds_only` ;

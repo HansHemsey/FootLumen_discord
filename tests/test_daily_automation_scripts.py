@@ -233,6 +233,35 @@ def test_daily_late_echo_uses_v2_rollback_command(repo_root: Path) -> None:
     assert "--dry-run" in output
 
 
+def test_daily_late_echo_passes_refresh_to_worldcup(repo_root: Path) -> None:
+    result = subprocess.run(
+        ["scripts/daily_late.sh"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        env={
+            "FOOTBALL_PREDICTOR_BIN": "echo",
+            "PYTHON_BIN": sys.executable,
+            "DATE": "2026-06-11",
+            "WINDOW": "late",
+            "REFRESH_DATA": "true",
+            "SAVE_RAW": "true",
+            "DRY_RUN": "true",
+            "WORLD_CUP_1X2_ENABLED": "true",
+            "PATH": "/usr/bin:/bin",
+        },
+        text=True,
+    )
+
+    output = result.stdout
+    assert "worldcup-run-daily --date 2026-06-11 --window late" in output
+    assert "--model-dir data/models/worldcup-1x2" in output
+    assert "--json-output reports/daily/2026-06-11_worldcup_late_summary.json" in output
+    assert "--refresh-data" in output
+    assert "--save-raw" in output
+    assert "--dry-run" in output
+
+
 def test_refresh_and_training_scripts_use_competitions_config(repo_root: Path) -> None:
     refresh = (repo_root / "scripts/refresh_all_leagues.sh").read_text(encoding="utf-8")
     training = (repo_root / "scripts/train_backtest_all.sh").read_text(encoding="utf-8")

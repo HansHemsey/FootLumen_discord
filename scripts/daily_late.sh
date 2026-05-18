@@ -39,6 +39,8 @@ PUBLISH_ANALYSES="${PUBLISH_ANALYSES:-false}"
 PUBLISH_RESULTS="${PUBLISH_RESULTS:-false}"
 ANALYSIS_GRACE_MINUTES="${ANALYSIS_GRACE_MINUTES:-15}"
 REPORT_DIR="${REPORT_DIR:-reports/daily}"
+WORLD_CUP_1X2_ENABLED="${WORLD_CUP_1X2_ENABLED:-false}"
+WORLD_CUP_1X2_MODEL_DIR="${WORLD_CUP_1X2_MODEL_DIR:-data/models/worldcup-1x2}"
 SUMMARY_SUFFIX="$RUN_WINDOW"
 if [ "$PREDICTION_ENGINE" = "v3" ]; then
   SUMMARY_SUFFIX="${RUN_WINDOW}_v3"
@@ -115,6 +117,49 @@ if bool_flag "$PUBLISH_ANALYSES"; then
 fi
 
 "$CLI_BIN" "$@"
+
+if bool_flag "$WORLD_CUP_1X2_ENABLED"; then
+  WORLD_CUP_SUMMARY_PATH="${WORLD_CUP_JSON_OUTPUT:-$REPORT_DIR/${RUN_DATE}_worldcup_${RUN_WINDOW}_summary.json}"
+  set -- worldcup-run-daily \
+    --date "$RUN_DATE" \
+    --window "$RUN_WINDOW" \
+    --model-dir "$WORLD_CUP_1X2_MODEL_DIR" \
+    --json-output "$WORLD_CUP_SUMMARY_PATH"
+
+  if bool_flag "$REFRESH_DATA"; then
+    set -- "$@" --refresh-data
+  else
+    set -- "$@" --no-refresh-data
+  fi
+
+  if bool_flag "$SAVE_RAW"; then
+    set -- "$@" --save-raw
+  fi
+
+  if bool_flag "$SEND_DISCORD"; then
+    set -- "$@" --send-discord
+  fi
+
+  if bool_flag "$DRY_RUN"; then
+    set -- "$@" --dry-run
+  else
+    set -- "$@" --no-dry-run
+  fi
+
+  if bool_flag "$PRINT_ONLY"; then
+    set -- "$@" --print-only
+  fi
+
+  if bool_flag "$FORCE"; then
+    set -- "$@" --force
+  fi
+
+  if [ -n "${LIMIT:-}" ]; then
+    set -- "$@" --limit "$LIMIT"
+  fi
+
+  "$CLI_BIN" "$@"
+fi
 
 if bool_flag "$PUBLISH_RESULTS"; then
   DATE="$RUN_DATE" \

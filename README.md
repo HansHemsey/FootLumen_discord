@@ -1053,3 +1053,35 @@ Sprint 2 ajoute :
 - pagination API-Football agrégée ;
 - snapshots bruts JSON optionnels sans secret ;
 - tests unitaires avec `httpx.MockTransport`.
+
+## Modèle Coupe Du Monde 2026
+
+La CDM 2026 dispose d'un modèle 1X2 séparé des championnats. Il consomme uniquement des
+fichiers locaux sous `data/reference/` et les fixtures CDM déjà présentes en base.
+
+Commandes principales :
+
+```bash
+football-predictor worldcup-audit-reference
+football-predictor worldcup-build-dataset --output data/processed/worldcup_1x2_training.parquet
+football-predictor worldcup-train-1x2 --dataset data/processed/worldcup_1x2_training.parquet
+football-predictor worldcup-optimize-blend --dataset data/processed/worldcup_1x2_training.parquet --model-dir data/models/worldcup-1x2 --write-best-config
+football-predictor worldcup-backtest-1x2 --dataset data/processed/worldcup_1x2_training.parquet
+football-predictor predict-worldcup --fixture <fixture_id_verifie> --refresh-data --dry-run
+football-predictor worldcup-run-daily --date 2026-06-11 --window late --refresh-data --dry-run
+```
+
+Production :
+
+- activer avec `WORLD_CUP_1X2_ENABLED=true` si la routine CDM doit être lancée après
+  `scripts/daily_late.sh` ;
+- les prédictions High / Very High vont dans le channel CDM public `predictions` ;
+- les prédictions Low / Medium / Uncertain vont dans le channel global staff
+  `predictions_staff` quand l'envoi Discord live est activé ;
+- `--refresh-data` enrichit le live M-30 avec odds 1X2, prédiction API-Football,
+  lineups officielles et injuries si ces endpoints sont disponibles avant `prediction_time` ;
+- aucun appel API n'est nécessaire pour entraîner ou backtester ce modèle ;
+- le backtest strict ne simule pas des snapshots M-30 absents : il reporte leur couverture
+  dynamique et les ignore si `fetched_at > prediction_time`.
+- `worldcup-optimize-blend` choisit les poids rating / Poisson / tabulaire sur validation
+  chronologique, puis écrit `blend_config.json` seulement si `--write-best-config` est utilisé.

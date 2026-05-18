@@ -113,6 +113,30 @@ class Settings(BaseSettings):
         default=Path("data/models/ou-v1"),
         validation_alias="OU_MODEL_DIR",
     )
+    world_cup_1x2_enabled: bool = Field(
+        default=False,
+        validation_alias="WORLD_CUP_1X2_ENABLED",
+    )
+    world_cup_1x2_model_dir: Path = Field(
+        default=Path("data/models/worldcup-1x2"),
+        validation_alias="WORLD_CUP_1X2_MODEL_DIR",
+    )
+    world_cup_fifa_ranking_path: Path = Field(
+        default=Path("data/reference/classement_fifa_officiel.csv"),
+        validation_alias="WORLD_CUP_FIFA_RANKING_PATH",
+    )
+    world_cup_elo_data_path: Path = Field(
+        default=Path("data/reference/elo_wc_teams_data.tsv"),
+        validation_alias="WORLD_CUP_ELO_DATA_PATH",
+    )
+    world_cup_elo_shortname_path: Path = Field(
+        default=Path("data/reference/elo_wc_teams_shortname.tsv"),
+        validation_alias="WORLD_CUP_ELO_SHORTNAME_PATH",
+    )
+    world_cup_historical_results_path: Path = Field(
+        default=Path("data/reference/historical_worldcup_result.csv"),
+        validation_alias="WORLD_CUP_HISTORICAL_RESULTS_PATH",
+    )
 
     @field_validator("market_1x2_bet_id", mode="before")
     @classmethod

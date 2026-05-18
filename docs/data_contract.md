@@ -234,6 +234,48 @@ Champs minimaux :
 
 Toutes les valeurs doivent être sérialisables en JSON.
 
+### Features Coupe Du Monde `worldcup-1x2-v1`
+
+Le modèle Coupe du Monde écrit des snapshots `FeatureSnapshot` avec
+`feature_version="worldcup-1x2-v1"`. Ces snapshots sont séparés des features championnats.
+
+Champs principaux :
+
+- `wc_home_*` et `wc_away_*` : agrégats par sélection ;
+- `wc_diff_*` : différence home moins away pour les features numériques comparables ;
+- `wc_*_last5`, `wc_*_last10`, `wc_*_last20` : formes rolling avant `prediction_time` ;
+- `wc_*_recent2021` et `wc_*_recent2024` : formes filtrées sur les matchs précédents
+  depuis 2021 ou 2024 ;
+- `wc_internal_elo_diff`, `wc_power_rating_diff`, `wc_expected_margin` ;
+- `wc_expected_home_goals`, `wc_expected_away_goals`, `wc_total_expected_goals` ;
+- `p_wc_rating_home`, `p_wc_rating_draw`, `p_wc_rating_away` ;
+- `p_wc_poisson_home`, `p_wc_poisson_draw`, `p_wc_poisson_away` ;
+- `wc_market_*` et `p_wc_market_*` : consensus odds 1X2 pré-match, uniquement si
+  `OddsSnapshot.fetched_at <= prediction_time` ;
+- `wc_api_pred_*` et `p_wc_api_*` : dernière prédiction API-Football disponible avant
+  `prediction_time` ;
+- `wc_official_lineup_*`, `wc_home_lineup_surprise_score`,
+  `wc_away_lineup_surprise_score` : disponibilité et impact lineups M-30 ;
+- `wc_home_absence_*`, `wc_away_absence_*`, `wc_*_availability_score` : absences et
+  disponibilité des joueurs issues des injuries point-in-time ;
+- `wc_dynamic_*` : flags de couverture dynamique et pénalités bornées appliquées au rating
+  et au Poisson ;
+- `p_wc_rating_dynamic_home/draw/away` et `p_wc_poisson_dynamic_home/draw/away` :
+  probabilités après ajustement injuries/lineups ;
+- `wc_fifa_*` et `wc_current_elo_*` seulement pour les prédictions CDM 2026 futures.
+
+Règles :
+
+- les matchs historiques utilisés doivent avoir `date < prediction_time` ;
+- le résultat du match cible (`home_goals`, `away_goals`, `target`) est interdit dans
+  `features_json` ;
+- les rankings FIFA/Elo actuels sont interdits dans les lignes historiques de backtest ;
+- les odds, predictions API, lineups et injuries doivent respecter
+  `fetched_at <= prediction_time` ;
+- le backtest CDM strict n'invente pas de source dynamique manquante et expose sa couverture ;
+- les aliases doivent résoudre les 48 équipes CDM 2026 avant production ;
+- les features CDM ne doivent pas être utilisées par les pipelines championnats.
+
 ### `discord_message`
 
 Champs minimaux :

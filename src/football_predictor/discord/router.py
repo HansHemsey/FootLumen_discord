@@ -25,6 +25,8 @@ MESSAGE_TYPE_CHANNELS = {
     "discussion": "discussions",
 }
 
+GLOBAL_CHANNEL_KEYS = {"predictions_staff", "score_pronos_semaine"}
+
 
 @dataclass(frozen=True)
 class DiscordRoute:
@@ -94,19 +96,19 @@ class DiscordChannelRouter:
         webhook_name = None
         competition = None
         if self.channels_config is not None:
-            competition = self.channels_config.find_competition(
-                competition_key=competition_key,
-                league_id=league_id,
-                season=season,
-            )
-            if competition is None:
-                channel = self.channels_config.find_global_channel(resolved_channel)
-                if channel is None:
-                    raise DiscordRoutingError("Unknown Discord competition route")
+            channel = self.channels_config.find_global_channel(resolved_channel)
+            if channel is not None or resolved_channel in GLOBAL_CHANNEL_KEYS:
                 competition_key = None
                 league_id = None
                 season = None
             else:
+                competition = self.channels_config.find_competition(
+                    competition_key=competition_key,
+                    league_id=league_id,
+                    season=season,
+                )
+                if competition is None:
+                    raise DiscordRoutingError("Unknown Discord competition route")
                 if not competition.enabled and not force:
                     raise DiscordRoutingError(
                         f"Discord competition={competition.competition_key} is disabled"
@@ -120,11 +122,12 @@ class DiscordChannelRouter:
                 competition_key = competition.competition_key
                 league_id = competition.league_id
                 season = competition.season
-            if not channel.enabled and not force:
+            if channel is not None and not channel.enabled and not force:
                 raise DiscordRoutingError(f"Discord channel={resolved_channel!r} is disabled")
-            channel_id = channel.channel_id
-            channel_name = channel.channel_name
-            webhook_name = channel.webhook_name
+            if channel is not None:
+                channel_id = channel.channel_id
+                channel_name = channel.channel_name
+                webhook_name = channel.webhook_name
 
         route_config = None
         if self.webhooks_config is not None:

@@ -1717,7 +1717,11 @@ def publish_match_results_cli(
 
 @app.command("discord-test-route")
 def discord_test_route(
-    competition_key: str = typer.Option(..., "--competition-key", help="Competition key."),
+    competition_key: str | None = typer.Option(
+        None,
+        "--competition-key",
+        help="Competition key. Omit it for global channels like predictions_staff.",
+    ),
     channel: str = typer.Option("predictions", "--channel", help="Discord channel key."),
     message_type: str = typer.Option("prediction", "--message-type", help="Message type."),
     send: bool = typer.Option(False, "--send", help="Actually send the test message."),
@@ -1725,8 +1729,12 @@ def discord_test_route(
     """Resolve and optionally send a synthetic Discord routing test."""
     settings = get_settings()
     _, channels_config, webhooks_config = _load_discord_routing(settings)
-    competition = channels_config.find_competition(competition_key=competition_key)
-    if competition is None:
+    competition = (
+        channels_config.find_competition(competition_key=competition_key)
+        if competition_key
+        else None
+    )
+    if competition_key and competition is None:
         raise typer.BadParameter("Unknown Discord competition route")
     markdown = "```md\nTest routage Discord Football Predictor\n```"
     engine, session_factory = _engine_and_session(settings)
@@ -1741,15 +1749,16 @@ def discord_test_route(
         ).send_markdown(
             markdown,
             competition_key=competition_key,
-            league_id=competition.league_id,
-            season=competition.season,
+            league_id=competition.league_id if competition else None,
+            season=competition.season if competition else None,
             channel_key=channel,
             message_type=message_type,
             dry_run=not send,
             force=True,
         )
     console.print(
-        f"Discord test status={result.status} route={competition_key}/{channel} "
+        f"Discord test status={result.status} "
+        f"route={result.route.competition_key or 'global'}/{result.route.channel_key} "
         f"webhook_hash={result.webhook_hash or 'none'}"
     )
 

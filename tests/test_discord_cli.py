@@ -29,12 +29,43 @@ def test_discord_test_route_cli_dry_run(tmp_path: Path) -> None:
     result = runner.invoke(
         app,
         ["discord-test-route", "--competition-key", "ligue1"],
-        env={"DATABASE_URL": f"sqlite:///{tmp_path / 'discord_cli.db'}"},
+        env={
+            "DATABASE_URL": f"sqlite:///{tmp_path / 'discord_cli.db'}",
+            "DISCORD_CHANNELS_CONFIG_PATH": "config/discord_channels.example.yaml",
+            "DISCORD_WEBHOOKS_CONFIG_PATH": "config/discord_webhooks.example.yaml",
+        },
     )
     get_settings.cache_clear()
 
     assert result.exit_code == 0
     assert "status=dry_run" in result.stdout
+    assert "https://" not in result.stdout
+
+
+def test_discord_test_route_cli_global_staff_dry_run(tmp_path: Path) -> None:
+    get_settings.cache_clear()
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "discord-test-route",
+            "--channel",
+            "predictions_staff",
+            "--message-type",
+            "prediction_skipped",
+        ],
+        env={
+            "DATABASE_URL": f"sqlite:///{tmp_path / 'discord_staff_cli.db'}",
+            "DISCORD_CHANNELS_CONFIG_PATH": "config/discord_channels.example.yaml",
+            "DISCORD_WEBHOOKS_CONFIG_PATH": "config/discord_webhooks.example.yaml",
+        },
+    )
+    get_settings.cache_clear()
+
+    assert result.exit_code == 0
+    assert "status=dry_run" in result.stdout
+    assert "route=global/predictions_staff" in result.stdout
     assert "https://" not in result.stdout
 
 

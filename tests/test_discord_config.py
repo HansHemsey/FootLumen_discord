@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from football_predictor.discord.config import (
+    DiscordChannelsConfig,
     DiscordWebhookRouteConfig,
     DiscordWebhooksConfig,
     load_discord_channels_config,
@@ -164,6 +165,56 @@ def test_skipped_prediction_message_types_route_to_global_staff_channel() -> Non
 
     assert prediction_route.channel_key == "predictions_staff"
     assert ou_route.channel_key == "predictions_staff"
+
+
+def test_global_staff_route_wins_even_when_competition_is_provided(reference_path: Path) -> None:
+    reference = load_api_football_reference(reference_path)
+    channels = load_discord_channels_config("config/discord_channels.example.yaml", reference)
+    webhooks = DiscordWebhooksConfig(
+        routes=[
+            DiscordWebhookRouteConfig(
+                competition_key="global",
+                channel_key="predictions_staff",
+                webhook_url="https://example.invalid/staff",
+            )
+        ]
+    )
+
+    route = resolve_discord_route(
+        channels_config=channels,
+        webhooks_config=webhooks,
+        competition_key="ligue1",
+        channel_key="predictions_staff",
+        message_type="prediction_skipped",
+    )
+
+    assert route.competition_key == "global"
+    assert route.league_id is None
+    assert route.season is None
+    assert route.channel_key == "predictions_staff"
+
+
+def test_global_staff_route_can_resolve_without_channel_metadata() -> None:
+    webhooks = DiscordWebhooksConfig(
+        routes=[
+            DiscordWebhookRouteConfig(
+                competition_key="global",
+                channel_key="predictions_staff",
+                webhook_url="https://example.invalid/staff",
+            )
+        ]
+    )
+
+    route = resolve_discord_route(
+        channels_config=DiscordChannelsConfig(competitions={}),
+        webhooks_config=webhooks,
+        channel_key="predictions_staff",
+        message_type="prediction_skipped",
+    )
+
+    assert route.competition_key == "global"
+    assert route.channel_key == "predictions_staff"
+    assert route.webhook_url == "https://example.invalid/staff"
 
 
 def test_discord_config_rejects_unknown_league_id(

@@ -100,11 +100,18 @@ def test_worldcup_references_cover_48_fixture_teams(repo_root: Path) -> None:
     assert audit["ok"] is True
     assert audit["matched_count"] == 48
     assert audit["blocking_missing_teams"] == []
+    assert audit["elo_missing_teams"] == []
     rows = {row["team"]: row for row in audit["teams"]}
     assert rows["USA"]["canonical_team"] == "USA"
     assert rows["Türkiye"]["historical_available"] is True
+    assert rows["Türkiye"]["elo_available"] is True
     assert rows["Congo DR"]["fifa_available"] is True
+    assert rows["Congo DR"]["elo_available"] is True
     assert rows["Cape Verde Islands"]["historical_available"] is True
+    assert rows["Cape Verde Islands"]["elo_available"] is True
+    assert rows["Czech Republic"]["elo_available"] is True
+    assert rows["Argentina"]["elo_available"] is True
+    assert rows["Spain"]["elo_available"] is True
 
 
 def test_worldcup_features_are_chronological_and_exclude_target() -> None:

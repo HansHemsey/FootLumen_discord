@@ -73,8 +73,23 @@ class WorldCupReferenceBundle:
         return self.fifa_rankings.get(normalize_team_name(value))
 
     def elo_for_team(self, value: str) -> EloReference | None:
-        code = self.elo_alias_to_code.get(normalize_team_name(value))
+        code = self.elo_code_for_team(value)
         return self.elo_by_code.get(code or "")
+
+    def elo_code_for_team(self, value: str) -> str | None:
+        normalized = normalize_team_name(value)
+        direct_code = self.elo_alias_to_code.get(normalized)
+        if direct_code in self.elo_by_code:
+            return direct_code
+        canonical = self.canonical_aliases.get(normalized, value.strip())
+        canonical_norm = normalize_team_name(canonical)
+        for alias, code in self.elo_alias_to_code.items():
+            if code not in self.elo_by_code:
+                continue
+            alias_canonical = self.canonical_aliases.get(alias, alias)
+            if normalize_team_name(alias_canonical) == canonical_norm:
+                return code
+        return direct_code
 
 
 MANUAL_CANONICAL_ALIASES: dict[str, str] = {

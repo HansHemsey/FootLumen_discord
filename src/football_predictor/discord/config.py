@@ -164,8 +164,11 @@ def load_discord_channels_config(
         reference_key = str(raw_row.get("reference_key") or _reference_key(str(competition_key)))
         reference_league = reference.find_league_by_key(reference_key)
         league_id = _optional_int(raw_row.get("league_id")) or reference_league.league_id
-        season = _optional_int(raw_row.get("season")) or reference_league.season
-        if league_id != reference_league.league_id or season != reference_league.season:
+        season = _optional_config_season(raw_row, reference_league.season)
+        if (
+            league_id != reference_league.league_id
+            or (season is not None and season != reference_league.season)
+        ):
             reference.find_league_by_id(league_id, season)
         channels_payload = raw_row.get("channels")
         if not isinstance(channels_payload, Mapping):
@@ -244,6 +247,12 @@ def _parse_channel_config(key: str, payload: Any) -> DiscordChannelConfig:
         webhook_name=str(payload.get("webhook_name") or "") or None,
         enabled=bool(payload.get("enabled", True)),
     )
+
+
+def _optional_config_season(row: Mapping[str, Any], default_season: int) -> int | None:
+    if "season" in row and row.get("season") is None:
+        return None
+    return _optional_int(row.get("season")) or default_season
 
 
 def _parse_global_channels(payload: Any) -> dict[str, DiscordChannelConfig]:

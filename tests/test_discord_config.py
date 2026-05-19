@@ -141,6 +141,46 @@ webhooks:
     assert route.webhook_url == "https://example.invalid/staff"
 
 
+def test_discord_channel_config_season_null_matches_future_seasons(
+    tmp_path: Path,
+    reference_path: Path,
+) -> None:
+    reference = load_api_football_reference(reference_path)
+    config = tmp_path / "discord_channels.yaml"
+    config.write_text(
+        """
+competitions:
+  ligue1:
+    reference_key: ligue_1
+    league_id: 61
+    season: null
+    display_name: "Ligue 1"
+    enabled: true
+    channels:
+      classement:
+        channel_id: "synthetic-channel"
+        webhook_name: "synthetic-webhook"
+        enabled: true
+""",
+        encoding="utf-8",
+    )
+
+    channels = load_discord_channels_config(config, reference)
+    route = resolve_discord_route(
+        channels_config=channels,
+        webhooks_config=DiscordWebhooksConfig(routes=[]),
+        league_id=61,
+        season=2026,
+        channel_key="classement",
+        message_type="standings",
+        allow_missing_webhook=True,
+    )
+
+    assert channels.find_competition(league_id=61, season=2026).competition_key == "ligue1"
+    assert route.competition_key == "ligue1"
+    assert route.season is None
+
+
 def test_skipped_prediction_message_types_route_to_global_staff_channel() -> None:
     webhooks = DiscordWebhooksConfig(
         routes=[

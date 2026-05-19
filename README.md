@@ -1085,3 +1085,14 @@ Production :
   dynamique et les ignore si `fetched_at > prediction_time`.
 - `worldcup-optimize-blend` choisit les poids rating / Poisson / tabulaire sur validation
   chronologique, puis écrit `blend_config.json` seulement si `--write-best-config` est utilisé.
+
+Mode VPS CDM only :
+
+- `config/competitions_worldcup.yaml` limite les ingestions à la Coupe du Monde 2026 ;
+- `config/prod_worldcup.crontab` est le profil temporaire recommandé pendant la trêve des
+  championnats ;
+- ce profil désactive les routines championnats V3/O-U/analyses H-6 domestic et lance directement
+  `football-predictor worldcup-run-daily --window late --refresh-data` ;
+- `config/competitions_2026.example.yaml` sert de base de reprise pour les championnats en août
+  2026 ;
+- la procedure VPS complete est documentee dans `docs/worldcup_only_vps_mode.md`.

@@ -22,6 +22,20 @@ def test_competitions_yaml_resolves_against_reference(repo_root, reference_path)
     assert all(competition.season >= 2025 for competition in competitions)
 
 
+def test_competitions_worldcup_yaml_is_worldcup_only(repo_root, reference_path) -> None:
+    reference = load_api_football_reference(reference_path)
+    config_path = repo_root / "config/competitions_worldcup.yaml"
+
+    competitions = load_competition_config(config_path, reference)
+
+    assert len(competitions) == 1
+    competition = competitions[0]
+    assert competition.key == "fifa_world_cup_2026"
+    assert competition.league_id == 1
+    assert competition.season == 2026
+    assert competition.enabled is True
+
+
 def test_competitions_history_yaml_allows_historical_seasons(repo_root, reference_path) -> None:
     reference = load_api_football_reference(reference_path)
     config_path = repo_root / "config/competitions_history.yaml"

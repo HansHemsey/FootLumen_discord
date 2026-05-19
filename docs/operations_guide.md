@@ -394,6 +394,54 @@ Résumé des routines prod autonomes installées :
 Garde `DRY_RUN=true` seulement pour les tests manuels. La crontab prod est volontairement
 configurée pour publier.
 
+### Mode temporaire Coupe du Monde only
+
+Pendant la treve des championnats, utilise `config/prod_worldcup.crontab` sur le VPS pour
+concentrer les appels API et les publications sur `fifa_world_cup_2026` uniquement.
+La procedure detaillee est disponible dans `docs/worldcup_only_vps_mode.md`.
+
+Installation :
+
+```bash
+cd /opt/football-predictor/app
+crontab config/prod_worldcup.crontab
+crontab -l
+```
+
+Ce profil utilise `config/competitions_worldcup.yaml` et des verrous `flock`. Il desactive les
+routines championnats V3, O/U et analyses H-6 domestic. Les routines actives sont :
+
+```cron
+15 5 * * 1       scripts/weekly_ingestion.sh avec CONFIG=config/competitions_worldcup.yaml
+50 5 * * *       scripts/refresh_all_leagues.sh fixtures + standings CDM
+30 6 * * *       scripts/daily_morning.sh avec CONFIG=config/competitions_worldcup.yaml
+40 4 * * 1,4     football-predictor ingest-player-squads --config config/competitions_worldcup.yaml
+45 3 * * *       scripts/refresh_all_leagues.sh details CDM J-3 termines
+*/10 7-23 * * *  football-predictor worldcup-run-daily --window late --refresh-data
+20,50 12-23 * * * scripts/publish_match_results.sh avec CONFIG=config/competitions_worldcup.yaml
+10 8,12,18 * * * scripts/publish_weekly_score.sh
+55 23 * * *      scripts/publish_weekly_score.sh
+```
+
+Validation avant activation :
+
+```bash
+football-predictor doctor --strict
+football-predictor worldcup-audit-reference
+football-predictor worldcup-build-dataset --output data/processed/worldcup_1x2_training.parquet
+football-predictor worldcup-train-1x2 --dataset data/processed/worldcup_1x2_training.parquet --output-dir data/models/worldcup-1x2
+football-predictor worldcup-optimize-blend --dataset data/processed/worldcup_1x2_training.parquet --model-dir data/models/worldcup-1x2 --output-dir reports/worldcup_blend --write-best-config
+football-predictor worldcup-run-daily --window late --refresh-data --save-raw --dry-run
+```
+
+Retour championnats en aout 2026 :
+
+1. creer une vraie config locale depuis `config/competitions_2026.example.yaml` ;
+2. relancer l'ingestion teams, fixtures, standings, squads, odds et details recents ;
+3. reinstalller le crontab championnats avec `crontab config/prod.crontab` ou une version VPS
+   equivalente ;
+4. laisser `WORLD_CUP_1X2_ENABLED=false` sauf si la routine CDM doit rester active.
+
 ## Surveillance Logs
 
 Surveille surtout :

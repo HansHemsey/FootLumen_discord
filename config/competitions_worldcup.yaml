@@ -1,0 +1,8 @@
+competitions:
+  - key: fifa_world_cup_2026
+    league_id: 1
+    season: 2026
+    name: FIFA World Cup
+    country: World
+    enabled: true
+    source: docs/api_football_reference.json

@@ -101,6 +101,24 @@ def test_prod_crontab_runs_publication_scripts_with_prod_flags(repo_root: Path) 
     assert "config/discord_webhooks.local.yaml" not in text
 
 
+def test_worldcup_prod_crontab_is_cdm_only(repo_root: Path) -> None:
+    text = (repo_root / "config/prod_worldcup.crontab").read_text(encoding="utf-8")
+
+    assert "CONFIG_WC=config/competitions_worldcup.yaml" in text
+    assert "football-predictor worldcup-run-daily" in text
+    assert "--window late" in text
+    assert "--refresh-data" in text
+    assert "--send-discord" in text
+    assert "--no-dry-run" in text
+    assert "REFRESH_FIXTURES=true REFRESH_STANDINGS=true REFRESH_ODDS=false" in text
+    assert "ingest-player-squads --config \"$CONFIG_WC\" --refresh-api" in text
+    assert "DETAILS_ONLY=\"statistics events lineups players injuries predictions\"" in text
+    assert "scripts/daily_late.sh" not in text
+    assert "scripts/daily_ou.sh" not in text
+    assert "scripts/publish_match_analyses.sh" not in text
+    assert "PREDICTION_ENGINE=v3" not in text
+
+
 def test_prod_cron_installer_uses_versioned_crontab(repo_root: Path) -> None:
     text = (repo_root / "scripts/install_prod_cron.sh").read_text(encoding="utf-8")
 

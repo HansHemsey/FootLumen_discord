@@ -1,0 +1,36 @@
+competitions:
+  - key: ligue_1
+    league_id: 61
+    season: 2026
+    name: Ligue 1
+    country: France
+    enabled: true
+    source: docs/api_football_reference.json
+  - key: premier_league
+    league_id: 39
+    season: 2026
+    name: Premier League
+    country: England
+    enabled: true
+    source: docs/api_football_reference.json
+  - key: la_liga
+    league_id: 140
+    season: 2026
+    name: La Liga
+    country: Spain
+    enabled: true
+    source: docs/api_football_reference.json
+  - key: bundesliga
+    league_id: 78
+    season: 2026
+    name: Bundesliga
+    country: Germany
+    enabled: true
+    source: docs/api_football_reference.json
+  - key: serie_a
+    league_id: 135
+    season: 2026
+    name: Serie A
+    country: Italy
+    enabled: true
+    source: docs/api_football_reference.json

@@ -1579,7 +1579,7 @@ def publish_match_analyses_cli(
     force: bool = typer.Option(False, "--force", help="Bypass analysis dedupe."),
     limit: int | None = typer.Option(None, "--limit", help="Maximum due analyses."),
     analysis_grace_minutes: int = typer.Option(
-        15,
+        45,
         "--analysis-grace-minutes",
         help="Minutes after H-6 during which an analysis may still be sent.",
     ),

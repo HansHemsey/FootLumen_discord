@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 from typer.testing import CliRunner
 
@@ -93,6 +94,7 @@ def test_publish_match_analyses_due_and_dedupe(tmp_path: Path, reference_path: P
             dry_run=True,
         )
         sent = session.query(models.DiscordMessage).one()
+        payload = sent.payload_json if isinstance(sent.payload_json, dict) else {}
         sent.status = "sent"
         sent.dry_run = False
         sent.payload_json = {
@@ -116,6 +118,12 @@ def test_publish_match_analyses_due_and_dedupe(tmp_path: Path, reference_path: P
 
     assert summary.dry_run == 1
     assert sent.channel_key == "analyses"
+    assert payload["analysis_window"] == "T-6"
+    assert payload["analysis_prediction_time"] == "2026-05-03T12:00:00+00:00"
+    assert payload["analysis_current_time"] == "2026-05-03T12:10:00+00:00"
+    assert payload["analysis_deadline"] == "2026-05-03T12:45:00+00:00"
+    assert payload["analysis_grace_minutes"] == 45
+    assert payload["source"] == "publish_match_analyses"
     assert second.duplicate_skipped == 1
 
 
@@ -149,7 +157,7 @@ def test_publish_match_analyses_respects_h6_grace_window(
             now=datetime(2026, 5, 3, 11, 59, tzinfo=UTC),
             dry_run=True,
         )
-        after = publish_match_analyses(
+        within_extended_window = publish_match_analyses(
             session=session,
             competitions=[competition],
             delivery=DiscordDeliveryService(
@@ -162,11 +170,205 @@ def test_publish_match_analyses_respects_h6_grace_window(
             now=datetime(2026, 5, 3, 12, 16, tzinfo=UTC),
             dry_run=True,
         )
+        after = publish_match_analyses(
+            session=session,
+            competitions=[competition],
+            delivery=DiscordDeliveryService(
+                session,
+                channels_config=channels,
+                webhooks_config=webhooks,
+            ),
+            reference=reference,
+            target_date=date(2026, 5, 3),
+            now=datetime(2026, 5, 3, 12, 46, tzinfo=UTC),
+            dry_run=True,
+        )
 
     assert before.skipped == 1
     assert before.results[0].reason == "not_in_h6_grace_window"
+    assert before.results[0].analysis_deadline == "2026-05-03T12:45:00+00:00"
+    assert within_extended_window.dry_run == 1
     assert after.skipped == 1
     assert after.results[0].reason == "not_in_h6_grace_window"
+    assert after.results[0].analysis_deadline == "2026-05-03T12:45:00+00:00"
+
+
+def test_publish_match_analyses_rebuilds_stale_snapshot_when_h6_odds_exist(
+    tmp_path: Path,
+    reference_path: Path,
+    monkeypatch,
+) -> None:
+    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'analyses_rebuild.db'}")
+    session_factory = create_session_factory(engine)
+    reference = load_api_football_reference(reference_path)
+    channels = load_discord_channels_config(_channels_config(tmp_path), reference)
+    webhooks = load_discord_webhooks_config(_webhooks_config(tmp_path), reference)
+    competition = _competition()
+
+    with session_scope(session_factory) as session:
+        fixture, prediction, snapshot = _fixture_prediction_snapshot(
+            fixture_date=datetime(2026, 5, 3, 18, tzinfo=UTC),
+            prediction_time=datetime(2026, 5, 3, 12, tzinfo=UTC),
+        )
+        snapshot.features_json = {
+            **snapshot.features_json,
+            "market_home": None,
+            "market_draw": None,
+            "market_away": None,
+            "market_bookmaker_count": 0,
+        }
+        snapshot.data_quality_json = {
+            **snapshot.data_quality_json,
+            "odds_available_flag": False,
+        }
+        _persist_fixture_prediction(session, fixture, prediction, snapshot)
+        session.add(
+            models.OddsSnapshot(
+                fixture_id=fixture.fixture_id,
+                league_id=fixture.league_id,
+                season=fixture.season,
+                bookmaker_id=8,
+                bookmaker_name="Synthetic",
+                bet_id=1,
+                bet_name="Match Winner",
+                fetched_at=datetime(2026, 5, 3, 11, 30, tzinfo=UTC),
+                is_live=False,
+                odd_home=2.0,
+                odd_draw=3.4,
+                odd_away=4.1,
+                values_json=[],
+                odds_json={},
+                payload_json={},
+            )
+        )
+        session.flush()
+
+        def fake_predict_fixture(self, fixture_id, prediction_time, **kwargs):
+            rebuilt_snapshot = models.FeatureSnapshot(
+                fixture_id=fixture_id,
+                prediction_time=prediction_time,
+                feature_version="v1-rebuilt",
+                features_json={
+                    **_fixture_prediction_snapshot(
+                        fixture_date=datetime(2026, 5, 3, 18, tzinfo=UTC),
+                        prediction_time=datetime(2026, 5, 3, 12, tzinfo=UTC),
+                    )[2].features_json,
+                    "market_home": 0.50,
+                    "market_draw": 0.29,
+                    "market_away": 0.21,
+                    "market_bookmaker_count": 1,
+                },
+                data_quality_json={
+                    "overall_data_quality_score": 72,
+                    "odds_available_flag": True,
+                },
+            )
+            session.add(rebuilt_snapshot)
+            session.flush()
+            rebuilt_prediction = models.ModelPrediction(
+                fixture_id=fixture_id,
+                feature_snapshot_id=rebuilt_snapshot.id,
+                prediction_time=prediction_time,
+                model_version="rebuilt-v1",
+                p_home=0.50,
+                p_draw=0.29,
+                p_away=0.21,
+                predicted_outcome="HOME",
+                predicted_result="HOME",
+                confidence=55.0,
+                confidence_label="Medium",
+                confidence_score=55.0,
+                explanation_json=["Rebuilt"],
+                explanations_json=["Rebuilt"],
+                data_quality_json=rebuilt_snapshot.data_quality_json,
+                payload_json={"competition": "Ligue 1"},
+            )
+            session.add(rebuilt_prediction)
+            session.flush()
+            return SimpleNamespace(model_prediction_id=rebuilt_prediction.id)
+
+        monkeypatch.setattr(
+            "football_predictor.discord.match_publication.PredictionService.predict_fixture",
+            fake_predict_fixture,
+        )
+
+        summary = publish_match_analyses(
+            session=session,
+            competitions=[competition],
+            delivery=DiscordDeliveryService(
+                session,
+                channels_config=channels,
+                webhooks_config=webhooks,
+            ),
+            reference=reference,
+            target_date=date(2026, 5, 3),
+            now=datetime(2026, 5, 3, 12, 5, tzinfo=UTC),
+            dry_run=True,
+        )
+        message = session.query(models.DiscordMessage).one()
+
+    assert summary.dry_run == 1
+    assert summary.results[0].model_prediction_id != prediction.id
+    assert message.model_prediction_id == summary.results[0].model_prediction_id
+    assert "Domicile 50.0%" in message.message_markdown
+
+
+def test_publish_match_analyses_keeps_stale_snapshot_without_point_in_time_odds(
+    tmp_path: Path,
+    reference_path: Path,
+    monkeypatch,
+) -> None:
+    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'analyses_no_rebuild.db'}")
+    session_factory = create_session_factory(engine)
+    reference = load_api_football_reference(reference_path)
+    channels = load_discord_channels_config(_channels_config(tmp_path), reference)
+    webhooks = load_discord_webhooks_config(_webhooks_config(tmp_path), reference)
+    competition = _competition()
+
+    def unexpected_predict_fixture(self, fixture_id, prediction_time, **kwargs):
+        raise AssertionError("prediction should not be rebuilt without point-in-time odds")
+
+    monkeypatch.setattr(
+        "football_predictor.discord.match_publication.PredictionService.predict_fixture",
+        unexpected_predict_fixture,
+    )
+
+    with session_scope(session_factory) as session:
+        fixture, prediction, snapshot = _fixture_prediction_snapshot(
+            fixture_date=datetime(2026, 5, 3, 18, tzinfo=UTC),
+            prediction_time=datetime(2026, 5, 3, 12, tzinfo=UTC),
+        )
+        snapshot.features_json = {
+            **snapshot.features_json,
+            "market_home": None,
+            "market_draw": None,
+            "market_away": None,
+            "market_bookmaker_count": 0,
+        }
+        snapshot.data_quality_json = {
+            **snapshot.data_quality_json,
+            "odds_available_flag": False,
+        }
+        _persist_fixture_prediction(session, fixture, prediction, snapshot)
+        summary = publish_match_analyses(
+            session=session,
+            competitions=[competition],
+            delivery=DiscordDeliveryService(
+                session,
+                channels_config=channels,
+                webhooks_config=webhooks,
+            ),
+            reference=reference,
+            target_date=date(2026, 5, 3),
+            now=datetime(2026, 5, 3, 12, 5, tzinfo=UTC),
+            dry_run=True,
+        )
+        message = session.query(models.DiscordMessage).one()
+
+    assert summary.dry_run == 1
+    assert summary.results[0].model_prediction_id == prediction.id
+    assert message.model_prediction_id == prediction.id
+    assert "probabilités marché non disponibles" in message.message_markdown
 
 
 def test_publish_match_analyses_skips_insufficient_data(
@@ -432,10 +634,13 @@ def test_publish_match_cli_and_scripts(repo_root: Path) -> None:
     )
     daily_late = (repo_root / "scripts" / "daily_late.sh").read_text(encoding="utf-8")
     assert "publish-match-analyses" in analyses_script
-    assert 'ANALYSIS_GRACE_MINUTES="${ANALYSIS_GRACE_MINUTES:-15}"' in analyses_script
+    assert 'ANALYSIS_GRACE_MINUTES="${ANALYSIS_GRACE_MINUTES:-45}"' in analyses_script
+    assert 'RUN_ID="${RUN_ID:-$(date -u +%H%M%S)}"' in analyses_script
+    assert "${RUN_DATE}_analyses_${RUN_ID}_summary.json" in analyses_script
     assert "publish-match-results" in results_script
     assert 'DRY_RUN="${DRY_RUN:-true}"' in analyses_script
     assert 'DRY_RUN="${DRY_RUN:-true}"' in results_script
+    assert 'ANALYSIS_GRACE_MINUTES="${ANALYSIS_GRACE_MINUTES:-45}"' in daily_late
     assert 'PUBLISH_ANALYSES="${PUBLISH_ANALYSES:-false}"' in daily_late
     assert 'PUBLISH_RESULTS="${PUBLISH_RESULTS:-false}"' in daily_late
 

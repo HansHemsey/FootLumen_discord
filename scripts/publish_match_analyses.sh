@@ -17,9 +17,10 @@ DRY_RUN="${DRY_RUN:-true}"
 PRINT_ONLY="${PRINT_ONLY:-false}"
 FORCE="${FORCE:-false}"
 SAVE_RAW="${SAVE_RAW:-true}"
-ANALYSIS_GRACE_MINUTES="${ANALYSIS_GRACE_MINUTES:-15}"
+ANALYSIS_GRACE_MINUTES="${ANALYSIS_GRACE_MINUTES:-45}"
 REPORT_DIR="${REPORT_DIR:-reports/daily}"
-SUMMARY_PATH="${JSON_OUTPUT:-$REPORT_DIR/${RUN_DATE}_analyses_summary.json}"
+RUN_ID="${RUN_ID:-$(date -u +%H%M%S)}"
+SUMMARY_PATH="${JSON_OUTPUT:-$REPORT_DIR/${RUN_DATE}_analyses_${RUN_ID}_summary.json}"
 
 mkdir -p "$REPORT_DIR" data/raw data/processed data/models
 

@@ -198,7 +198,7 @@ publie aussi une finalisation de la semaine précédente pour inclure les matchs
 dont les scores ont ete rafraîchis pendant la nuit.
 
 ```bash
-# A lancer toutes les 15 minutes si tu veux capter la fenetre H-6 -> H-5h45.
+# A lancer toutes les 15 minutes si tu veux capter la fenetre H-6 -> H-5h15.
 SEND_DISCORD=true DRY_RUN=false scripts/publish_match_analyses.sh
 
 # A lancer toutes les 30-60 minutes apres les matchs.
@@ -207,11 +207,45 @@ REFRESH_DATA=true SEND_DISCORD=true DRY_RUN=false scripts/publish_match_results.
 ```
 
 `publish_match_analyses.sh` appelle `publish-match-analyses` et utilise strictement
-`prediction_time = fixture.date - 6h`. La marge d'envoi est `ANALYSIS_GRACE_MINUTES=15`
-par defaut. Le message contient le contexte, la forme recente, le classement, les odds, les
-absences/XI si disponibles, les points forts/faibles et une conclusion prudente.
+`prediction_time = fixture.date - 6h`. La marge d'envoi est `ANALYSIS_GRACE_MINUTES=45`
+par defaut pour absorber les retards cron/flock. Le message contient le contexte, la forme
+recente, le classement, les odds, les absences/XI si disponibles, les points forts/faibles
+et une conclusion prudente. Les summaries H-6 sont horodates et les messages persistés
+incluent `analysis_prediction_time`, `analysis_current_time`, `analysis_deadline`,
+`analysis_grace_minutes` et `source=publish_match_analyses` pour l'audit.
 Une analyse trop pauvre est ignorée avec `reason=insufficient_analysis_data` afin d'éviter
 les messages génériques remplis de champs non disponibles.
+Diagnostic rapide VPS si une analyse manque :
+
+```bash
+sqlite3 -header -column data/football_predictor.db "
+with now_utc(value) as (select datetime('now'))
+select f.fixture_id, f.home_team || ' vs ' || f.away_team as match,
+       f.date as kickoff_utc, datetime(f.date, '-6 hours') as analysis_time,
+       datetime(f.date, '-315 minutes') as deadline,
+       now_utc.value as current_time,
+       count(o.id) as odds_before_h6
+from fixtures f, now_utc
+left join odds_snapshots o
+  on o.fixture_id = f.fixture_id
+ and o.bet_id = 1
+ and o.is_live = 0
+ and o.fetched_at <= datetime(f.date, '-6 hours')
+where f.status_short in ('NS', 'TBD', '')
+  and date(f.date) = date('now')
+group by f.fixture_id
+order by f.date;"
+
+sqlite3 -header -column data/football_predictor.db "
+select dm.id, dm.fixture_id, dm.status, dm.created_at,
+       json_extract(dm.payload_json, '$.analysis_prediction_time') as prediction_time,
+       json_extract(dm.payload_json, '$.analysis_deadline') as deadline,
+       json_extract(dm.payload_json, '$.analysis_grace_minutes') as grace
+from discord_messages dm
+where dm.message_type = 'analysis'
+order by dm.created_at desc
+limit 20;"
+```
 `publish_match_results.sh` appelle `publish-match-results` uniquement pour les fixtures
 `FT/AET/PEN` avec score final, puis compare le resultat a la prediction pre-match publiee
 si elle existe. Avec `REFRESH_DATA=true`, il rafraichit les fixtures du jour pour capter

@@ -276,8 +276,8 @@ CONFIG_CHAMP=config/competitions_2026.yaml
 # Routine matin : init, refs, standings, odds du jour, classements, calendriers, matchs du jour, score hebdo.
 30 6 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_daily_morning.lock env CONFIG="$CONFIG_CHAMP" REFRESH_DATA=true SEND_DISCORD=true DRY_RUN=false PUBLISH_DISCORD=true SAVE_RAW=true scripts/daily_morning.sh >> "$LOGDIR/daily_morning.log" 2>&1
 
-# Analyses H-6 championnats : publication reelle.
-*/15 6-23 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_match_analyses.lock env CONFIG="$CONFIG_CHAMP" MODEL_DIR=data/models/v2-late REFRESH_DATA=false SEND_DISCORD=true DRY_RUN=false scripts/publish_match_analyses.sh >> "$LOGDIR/match_analyses.log" 2>&1
+# Analyses H-6 championnats : publication reelle, marge H-6 -> H-5:15.
+*/15 6-23 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_match_analyses.lock env CONFIG="$CONFIG_CHAMP" MODEL_DIR=data/models/v2-late REFRESH_DATA=false SEND_DISCORD=true DRY_RUN=false ANALYSIS_GRACE_MINUTES=45 scripts/publish_match_analyses.sh >> "$LOGDIR/match_analyses.log" 2>&1
 
 # V3 1X2 championnats M-30 : publication reelle.
 # High/Very High public, Low/Medium/Uncertain vers le channel staff.

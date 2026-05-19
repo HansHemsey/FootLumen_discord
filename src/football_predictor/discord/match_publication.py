@@ -19,6 +19,7 @@ from football_predictor.discord.match_formatters import (
     format_match_result_message,
 )
 from football_predictor.discord.service import DiscordDeliveryService
+from football_predictor.features.odds_features import compute_market_consensus
 from football_predictor.ingestion.fixtures import FixtureIngestionService
 from football_predictor.prediction.service import PredictionService
 from football_predictor.reference.lookups import ApiFootballReference, PlayersReference
@@ -53,9 +54,15 @@ class MatchDiscordPublishResult:
     discord_message_id: int | None = None
     reason: str | None = None
     error: str | None = None
+    analysis_window: str | None = None
+    analysis_prediction_time: str | None = None
+    analysis_current_time: str | None = None
+    analysis_deadline: str | None = None
+    analysis_grace_minutes: int | None = None
+    source: str | None = None
 
     def as_dict(self) -> JsonDict:
-        return {
+        payload: JsonDict = {
             "fixture_id": self.fixture_id,
             "channel_key": self.channel_key,
             "message_type": self.message_type,
@@ -65,6 +72,18 @@ class MatchDiscordPublishResult:
             "reason": self.reason,
             "error": self.error,
         }
+        for key in (
+            "analysis_window",
+            "analysis_prediction_time",
+            "analysis_current_time",
+            "analysis_deadline",
+            "analysis_grace_minutes",
+            "source",
+        ):
+            value = getattr(self, key)
+            if value is not None:
+                payload[key] = value
+        return payload
 
 
 @dataclass(frozen=True)
@@ -134,7 +153,7 @@ def publish_match_analyses(
     force: bool = False,
     limit: int | None = None,
     now: datetime | None = None,
-    analysis_grace_minutes: int = 15,
+    analysis_grace_minutes: int = 45,
     echo: Callable[[str], None] | None = None,
 ) -> MatchDiscordPublishSummary:
     """Publish one due H-6 analysis per upcoming followed fixture."""
@@ -170,6 +189,12 @@ def publish_match_analyses(
         kickoff = ensure_aware_utc(fixture.date)
         analysis_time = kickoff - ANALYSIS_OFFSET
         analysis_deadline = analysis_time + timedelta(minutes=max(0, analysis_grace_minutes))
+        audit_metadata = _analysis_audit_metadata(
+            analysis_time=analysis_time,
+            current_time=current_time,
+            analysis_deadline=analysis_deadline,
+            analysis_grace_minutes=analysis_grace_minutes,
+        )
         if not (analysis_time <= current_time <= analysis_deadline):
             results.append(
                 MatchDiscordPublishResult(
@@ -178,6 +203,7 @@ def publish_match_analyses(
                     message_type="analysis",
                     status="skipped",
                     reason="not_in_h6_grace_window",
+                    **audit_metadata,
                 )
             )
             continue
@@ -198,12 +224,18 @@ def publish_match_analyses(
                     message_type="analysis",
                     status="duplicate_skipped",
                     reason="analysis_already_sent",
+                    **audit_metadata,
                 )
             )
             continue
         try:
             prediction = _prediction_at_time(session, fixture.fixture_id, analysis_time)
-            if prediction is None:
+            if prediction is None or _should_rebuild_prediction_for_h6_odds(
+                session,
+                prediction,
+                fixture_id=fixture.fixture_id,
+                analysis_time=analysis_time,
+            ):
                 output = service.predict_fixture(
                     fixture.fixture_id,
                     analysis_time,
@@ -230,6 +262,7 @@ def publish_match_analyses(
                         status="skipped",
                         model_prediction_id=prediction.id,
                         reason="insufficient_analysis_data",
+                        **audit_metadata,
                     )
                 )
                 continue
@@ -254,14 +287,7 @@ def publish_match_analyses(
                 print_only=print_only,
                 force=force,
                 wait=True,
-            )
-            _tag_discord_row(
-                session,
-                send_result.discord_message_id,
-                {
-                    "analysis_window": ANALYSIS_WINDOW,
-                    "analysis_prediction_time": analysis_time.isoformat(),
-                },
+                payload_metadata=audit_metadata,
             )
             results.append(
                 MatchDiscordPublishResult(
@@ -271,6 +297,7 @@ def publish_match_analyses(
                     status=send_result.status,
                     model_prediction_id=prediction.id,
                     discord_message_id=send_result.discord_message_id,
+                    **audit_metadata,
                 )
             )
         except Exception as exc:
@@ -281,6 +308,7 @@ def publish_match_analyses(
                     message_type="analysis",
                     status="failed",
                     error=str(exc),
+                    **audit_metadata,
                 )
             )
     return MatchDiscordPublishSummary(
@@ -486,6 +514,59 @@ def _prediction_at_time(
         .order_by(models.ModelPrediction.created_at.desc())
         .limit(1)
     ).scalar_one_or_none()
+
+
+def _analysis_audit_metadata(
+    *,
+    analysis_time: datetime,
+    current_time: datetime,
+    analysis_deadline: datetime,
+    analysis_grace_minutes: int,
+) -> JsonDict:
+    return {
+        "analysis_window": ANALYSIS_WINDOW,
+        "analysis_prediction_time": ensure_aware_utc(analysis_time).isoformat(),
+        "analysis_current_time": ensure_aware_utc(current_time).isoformat(),
+        "analysis_deadline": ensure_aware_utc(analysis_deadline).isoformat(),
+        "analysis_grace_minutes": max(0, int(analysis_grace_minutes)),
+        "source": "publish_match_analyses",
+    }
+
+
+def _should_rebuild_prediction_for_h6_odds(
+    session: Session,
+    prediction: models.ModelPrediction | None,
+    *,
+    fixture_id: int,
+    analysis_time: datetime,
+) -> bool:
+    if prediction is None:
+        return False
+    snapshot = session.get(models.FeatureSnapshot, prediction.feature_snapshot_id)
+    data_quality = snapshot.data_quality_json if snapshot is not None else {}
+    if _truthy_payload_flag(data_quality, "odds_available_flag"):
+        return False
+    features = snapshot.features_json if snapshot is not None else {}
+    if _truthy_payload_flag(features, "odds_available") or _truthy_payload_flag(
+        features, "market_available"
+    ):
+        return False
+    if isinstance(features, dict):
+        market_probability_keys = ("market_home", "market_draw", "market_away")
+        if any(features.get(key) is not None for key in market_probability_keys):
+            return False
+        if _float_value(features.get("market_bookmaker_count")):
+            return False
+    return compute_market_consensus(session, fixture_id, analysis_time) is not None
+
+
+def _truthy_payload_flag(payload: Any, key: str) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    value = payload.get(key)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "oui"}
+    return bool(value)
 
 
 def _published_prediction_before_match(

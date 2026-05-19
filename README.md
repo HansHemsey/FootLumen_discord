@@ -822,7 +822,7 @@ en variable d'environnement, jamais dans le repo.
 Deux publications par match gardent volontairement l'historique :
 
 ```bash
-# Analyse unique H-6, envoyee dans la fenetre H-6 -> H-5h45.
+# Analyse unique H-6, envoyee dans la fenetre H-6 -> H-5h15.
 football-predictor publish-match-analyses --date YYYY-MM-DD --dry-run
 SEND_DISCORD=true DRY_RUN=false scripts/publish_match_analyses.sh
 
@@ -836,8 +836,10 @@ REFRESH_DATA=true SEND_DISCORD=true DRY_RUN=false scripts/publish_match_results.
 forme recente, classement, odds/mouvement, absences ou XI si disponibles, points
 forts/faibles, fiabilite des donnees et conclusion prudente. La prediction est construite
 avec `prediction_time = fixture.date - 6h` pour rester point-in-time. La marge d'envoi est
-configurable avec `ANALYSIS_GRACE_MINUTES`, 15 minutes par defaut. Une analyse sans
-signaux suffisants est ignorée avec `insufficient_analysis_data`.
+configurable avec `ANALYSIS_GRACE_MINUTES`, 45 minutes par defaut. Les messages et
+summaries embarquent `analysis_prediction_time`, `analysis_current_time`, `analysis_deadline`
+et `analysis_grace_minutes` pour tracer les skips et les envois. Une analyse sans signaux
+suffisants est ignorée avec `insufficient_analysis_data`.
 
 `publish-match-results` publie dans `resultats` uniquement quand la DB contient un statut
 termine et un score final. Le message compare le score et le resultat 1X2 avec la derniere

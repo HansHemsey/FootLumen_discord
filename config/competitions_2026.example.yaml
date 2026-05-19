@@ -1,5 +1,6 @@
 competitions:
   - key: ligue_1
+    reference_key: ligue_1
     league_id: 61
     season: 2026
     name: Ligue 1
@@ -7,6 +8,7 @@ competitions:
     enabled: true
     source: docs/api_football_reference.json
   - key: premier_league
+    reference_key: premier_league
     league_id: 39
     season: 2026
     name: Premier League
@@ -14,6 +16,7 @@ competitions:
     enabled: true
     source: docs/api_football_reference.json
   - key: la_liga
+    reference_key: la_liga
     league_id: 140
     season: 2026
     name: La Liga
@@ -21,6 +24,7 @@ competitions:
     enabled: true
     source: docs/api_football_reference.json
   - key: bundesliga
+    reference_key: bundesliga
     league_id: 78
     season: 2026
     name: Bundesliga
@@ -28,6 +32,7 @@ competitions:
     enabled: true
     source: docs/api_football_reference.json
   - key: serie_a
+    reference_key: serie_a
     league_id: 135
     season: 2026
     name: Serie A

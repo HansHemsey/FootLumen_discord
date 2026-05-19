@@ -3703,6 +3703,38 @@ def ou_backtest(
         console.print(f"[green]Backtest results saved to {output_dir}[/green]")
 
 
+@ou_app.command("backtest-publication-v2")
+def ou_backtest_publication_v2(
+    dataset: Path = typer.Option(
+        Path("data/processed/training_ou_v1.parquet"), "--dataset"
+    ),
+    output_dir: Path = typer.Option(Path("reports/ou_v2"), "--output-dir"),
+    n_splits: int = typer.Option(5, "--n-splits"),
+    min_train_rows: int = typer.Option(300, "--min-train-rows"),
+    min_recommended_bets: int = typer.Option(20, "--min-recommended-bets"),
+) -> None:
+    """Backtest O/U V2 publication policy and write calibration/ROI reports."""
+    from football_predictor.ou_model.backtesting.ou_evaluator import OUBacktestConfig
+    from football_predictor.ou_model.backtesting.ou_publication_backtest import (
+        OUPublicationBacktestConfig,
+        run_ou_publication_backtest,
+    )
+
+    result = run_ou_publication_backtest(
+        dataset,
+        output_dir=output_dir,
+        config=OUPublicationBacktestConfig(
+            ou_backtest_config=OUBacktestConfig(
+                n_splits=n_splits,
+                min_train_rows=min_train_rows,
+            ),
+            min_recommended_bets=min_recommended_bets,
+        ),
+    )
+    console.print(json.dumps(result.summary["recommendation"], indent=2, default=str))
+    console.print(f"[green]O/U V2 publication reports saved to {output_dir}[/green]")
+
+
 @ou_app.command("predict")
 def ou_predict(
     fixture_id: int = typer.Option(..., "--fixture-id"),
@@ -3748,6 +3780,7 @@ def ou_run_daily(
 
     settings = get_settings()
     engine, session_factory = _engine_and_session(settings)
+    init_db(engine)
     target_date = date_type.fromisoformat(date_str) if date_str else None
 
     discord_delivery = None

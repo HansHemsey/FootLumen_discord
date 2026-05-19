@@ -22,6 +22,10 @@ from football_predictor.ou_model.features.ou_feature_builder import (
     build_ou_feature_snapshot,
 )
 from football_predictor.ou_model.modeling.ou_model import OUCompositeModel
+from football_predictor.ou_model.prediction.ou_decision import (
+    OUDecision,
+    decide_ou_prediction,
+)
 from football_predictor.reference.lookups import ApiFootballReference, PlayersReference
 from football_predictor.utils.time import ensure_aware_utc, utc_now
 
@@ -55,6 +59,29 @@ class OUPredictionOutput:
     # Confidence
     confidence_score: float
     confidence_label: str
+    # O/U decision v2
+    forecast_side: str | None = None
+    forecast_probability: float | None = None
+    value_side: str | None = None
+    value_probability: float | None = None
+    value_market_probability: float | None = None
+    value_market_odd: float | None = None
+    value_edge: float | None = None
+    value_ev: float | None = None
+    p_pick: float | None = None
+    market_p_pick: float | None = None
+    odd_pick: float | None = None
+    edge_pick: float | None = None
+    ev_pick: float | None = None
+    is_value_pick: bool = False
+    no_bet_reason: str | None = None
+    non_publication_reason: str | None = None
+    confidence_score_v2: float | None = None
+    confidence_label_v2: str | None = None
+    publication_decision: str | None = None
+    decision_version: str | None = None
+    data_quality_score: float | None = None
+    bookmaker_count: float | None = None
     # Match context (resolved at prediction time)
     kickoff_time: datetime | None = None
     match_label: str | None = None
@@ -63,26 +90,6 @@ class OUPredictionOutput:
     expert_probabilities: dict[str, float] = field(default_factory=dict)
     data_quality_json: JsonDict = field(default_factory=dict)
     ou_model_prediction_id: int | None = None
-
-
-def _ou_confidence_score(p_over: float, edge: float | None) -> float:
-    """Rough confidence score in [0, 100] for O/U predictions."""
-    separation = abs(p_over - 0.5) * 2  # 0 = no edge vs coin flip, 1 = certainty
-    edge_factor = abs(edge) if edge is not None else 0.0
-    raw = (separation * 60.0) + (edge_factor * 200.0)
-    return round(max(0.0, min(100.0, raw)), 1)
-
-
-def _ou_confidence_label(score: float) -> str:
-    if score >= 85:
-        return "Very High"
-    if score >= 70:
-        return "High"
-    if score >= 45:
-        return "Medium"
-    if score >= 20:
-        return "Low"
-    return "Uncertain"
 
 
 def _compute_market_p_over(odd_over: float, odd_under: float) -> float:
@@ -176,10 +183,10 @@ class OUPredictionService:
 
         market_p_over: float | None = None
         market_p_under: float | None = None
-        edge_over: float | None = None
-        edge_under: float | None = None
-        ev_over: float | None = None
-        ev_under: float | None = None
+        decision_data_quality = {
+            **builder_result.data_quality_json,
+            "ou_data_quality_score": features.get("ou_data_quality_score"),
+        }
 
         if (
             odd_over_f is not None
@@ -189,13 +196,16 @@ class OUPredictionService:
         ):
             market_p_over = _compute_market_p_over(odd_over_f, odd_under_f)
             market_p_under = 1.0 - market_p_over
-            edge_over = p_over - market_p_over
-            edge_under = p_under - market_p_under
-            ev_over = p_over * odd_over_f - 1
-            ev_under = p_under * odd_under_f - 1
 
-        conf_score = _ou_confidence_score(p_over, edge_over)
-        conf_label = _ou_confidence_label(conf_score)
+        decision: OUDecision = decide_ou_prediction(
+            p_over=p_over,
+            p_under=p_under,
+            market_p_over=market_p_over,
+            market_p_under=market_p_under,
+            odd_over=odd_over_f,
+            odd_under=odd_under_f,
+            data_quality_json=decision_data_quality,
+        )
 
         kickoff_time, match_label, competition = self._resolve_match_context(fixture_id)
 
@@ -213,17 +223,39 @@ class OUPredictionService:
             market_p_under=market_p_under,
             market_odd_over=odd_over_f,
             market_odd_under=odd_under_f,
-            edge_over=edge_over,
-            edge_under=edge_under,
-            ev_over=ev_over,
-            ev_under=ev_under,
-            confidence_score=conf_score,
-            confidence_label=conf_label,
+            edge_over=decision.edge_over,
+            edge_under=decision.edge_under,
+            ev_over=decision.ev_over,
+            ev_under=decision.ev_under,
+            confidence_score=decision.confidence_score_v2,
+            confidence_label=decision.confidence_label_v2,
+            forecast_side=decision.forecast_side,
+            forecast_probability=decision.forecast_probability,
+            value_side=decision.value_side,
+            value_probability=decision.value_probability,
+            value_market_probability=decision.value_market_probability,
+            value_market_odd=decision.value_market_odd,
+            value_edge=decision.value_edge,
+            value_ev=decision.value_ev,
+            p_pick=decision.p_pick,
+            market_p_pick=decision.market_p_pick,
+            odd_pick=decision.odd_pick,
+            edge_pick=decision.edge_pick,
+            ev_pick=decision.ev_pick,
+            is_value_pick=decision.is_value_pick,
+            no_bet_reason=decision.no_bet_reason,
+            non_publication_reason=decision.non_publication_reason,
+            confidence_score_v2=decision.confidence_score_v2,
+            confidence_label_v2=decision.confidence_label_v2,
+            publication_decision=decision.publication_decision,
+            decision_version=decision.decision_version,
+            data_quality_score=decision.data_quality_score,
+            bookmaker_count=decision.bookmaker_count,
             kickoff_time=kickoff_time,
             match_label=match_label,
             competition=competition,
             expert_probabilities=expert_probs,
-            data_quality_json=builder_result.data_quality_json,
+            data_quality_json=decision_data_quality,
         )
 
         if save_to_db:
@@ -303,9 +335,47 @@ class OUPredictionService:
                     "market_odd_under": output.market_odd_under,
                     "confidence_score": output.confidence_score,
                     "confidence_label": output.confidence_label,
+                    "forecast_side": output.forecast_side,
+                    "forecast_probability": output.forecast_probability,
+                    "value_side": output.value_side,
+                    "p_pick": output.p_pick,
+                    "market_p_pick": output.market_p_pick,
+                    "odd_pick": output.odd_pick,
+                    "edge_pick": output.edge_pick,
+                    "ev_pick": output.ev_pick,
+                    "is_value_pick": output.is_value_pick,
+                    "no_bet_reason": output.no_bet_reason,
+                    "confidence_score_v2": output.confidence_score_v2,
+                    "confidence_label_v2": output.confidence_label_v2,
+                    "publication_decision": output.publication_decision,
                     "expert_probabilities_json": output.expert_probabilities,
                     "data_quality_json": output.data_quality_json,
-                    "payload_json": {},
+                    "payload_json": {
+                        "ou_decision": {
+                            "decision_version": output.decision_version,
+                            "forecast_side": output.forecast_side,
+                            "forecast_probability": output.forecast_probability,
+                            "value_side": output.value_side,
+                            "value_probability": output.value_probability,
+                            "value_market_probability": output.value_market_probability,
+                            "value_market_odd": output.value_market_odd,
+                            "value_edge": output.value_edge,
+                            "value_ev": output.value_ev,
+                            "p_pick": output.p_pick,
+                            "market_p_pick": output.market_p_pick,
+                            "odd_pick": output.odd_pick,
+                            "edge_pick": output.edge_pick,
+                            "ev_pick": output.ev_pick,
+                            "is_value_pick": output.is_value_pick,
+                            "no_bet_reason": output.no_bet_reason,
+                            "non_publication_reason": output.non_publication_reason,
+                            "confidence_score_v2": output.confidence_score_v2,
+                            "confidence_label_v2": output.confidence_label_v2,
+                            "publication_decision": output.publication_decision,
+                            "data_quality_score": output.data_quality_score,
+                            "bookmaker_count": output.bookmaker_count,
+                        },
+                    },
                 },
             )
             self.session.flush()

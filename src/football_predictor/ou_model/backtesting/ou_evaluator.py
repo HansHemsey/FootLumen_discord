@@ -15,7 +15,6 @@ from football_predictor.ou_model.backtesting.ou_metrics import (
     binary_brier_score,
     binary_log_loss,
     calibration_bins_binary,
-    closing_line_value,
     roi_simulation,
 )
 from football_predictor.ou_model.modeling.ou_train import (
@@ -61,6 +60,7 @@ class OUFoldResult:
     metrics_per_model: dict[str, JsonDict]
     roi_per_model: dict[str, dict[str, JsonDict]]  # model -> edge_threshold -> roi_dict
     calibration_bins: list[JsonDict]
+    prediction_rows: list[JsonDict] = field(default_factory=list)
 
 
 @dataclass
@@ -194,6 +194,7 @@ def _run_single_fold(
             metrics_per_model={},
             roi_per_model={},
             calibration_bins=[],
+            prediction_rows=[],
         )
 
     y_test = test_df[TARGET_COL].values.astype(int)
@@ -222,7 +223,6 @@ def _run_single_fold(
     roi_per_model["ensemble"] = r
 
     # Expert breakdowns
-    from football_predictor.ou_model.modeling.ou_poisson import poisson_ou_predict
     expert_preds: dict[str, list[float]] = {
         "poisson": [], "logistic": [], "lgbm": [], "xgb": [], "catboost": [],
     }
@@ -243,7 +243,7 @@ def _run_single_fold(
 
     # Market-only baseline
     market_p_list: list[float] = []
-    for oo, ou in zip(odd_over_list, odd_under_list):
+    for oo, ou in zip(odd_over_list, odd_under_list, strict=True):
         if oo is not None and ou is not None and oo > 1 and ou > 1:
             market_p_list.append(_market_p_over(oo, ou))
         else:
@@ -258,6 +258,15 @@ def _run_single_fold(
     roi_per_model["market"] = r
 
     cal_bins = calibration_bins_binary(list(y_test), list(p_ensemble), n_bins=10)
+    prediction_rows = _prediction_rows_for_fold(
+        fold_idx,
+        test_df,
+        y_test,
+        p_ensemble,
+        p_market,
+        odd_over_list,
+        odd_under_list,
+    )
 
     return OUFoldResult(
         fold=fold_idx,
@@ -268,7 +277,108 @@ def _run_single_fold(
         metrics_per_model=metrics_per_model,
         roi_per_model=roi_per_model,
         calibration_bins=cal_bins,
+        prediction_rows=prediction_rows,
     )
+
+
+def _prediction_rows_for_fold(
+    fold_idx: int,
+    test_df: pd.DataFrame,
+    y_true: np.ndarray,
+    p_ensemble: np.ndarray,
+    p_market: np.ndarray,
+    odd_over_list: list[float | None],
+    odd_under_list: list[float | None],
+) -> list[JsonDict]:
+    rows: list[JsonDict] = []
+    for row_idx, (_, row) in enumerate(test_df.iterrows()):
+        closing_odd_over = _first_numeric(
+            row,
+            (
+                "closing_ou_market_odd_over",
+                "ou_closing_odd_over",
+                "closing_market_odd_over25",
+                "market_closing_odd_over25",
+            ),
+        )
+        closing_odd_under = _first_numeric(
+            row,
+            (
+                "closing_ou_market_odd_under",
+                "ou_closing_odd_under",
+                "closing_market_odd_under25",
+                "market_closing_odd_under25",
+            ),
+        )
+        rows.append({
+            "fold": fold_idx,
+            "row_index": row_idx,
+            "fixture_id": _json_scalar(row.get("fixture_id")),
+            "fixture_date": _json_scalar(row.get(DATE_COL)),
+            "league_id": _json_scalar(row.get("league_id")),
+            "season": _json_scalar(row.get("season")),
+            "target_ou25": int(y_true[row_idx]),
+            "p_over": float(p_ensemble[row_idx]),
+            "p_under": float(1.0 - p_ensemble[row_idx]),
+            "market_p_over": (
+                float(p_market[row_idx])
+                if odd_over_list[row_idx] is not None and odd_under_list[row_idx] is not None
+                else None
+            ),
+            "market_p_under": (
+                float(1.0 - p_market[row_idx])
+                if odd_over_list[row_idx] is not None and odd_under_list[row_idx] is not None
+                else None
+            ),
+            "odd_over": odd_over_list[row_idx],
+            "odd_under": odd_under_list[row_idx],
+            "closing_odd_over": closing_odd_over,
+            "closing_odd_under": closing_odd_under,
+            "data_quality_score": _first_numeric(
+                row,
+                (
+                    "ou_data_quality_score",
+                    "overall_data_quality_score",
+                    "publication_data_quality_score",
+                    "data_quality_score",
+                ),
+            ),
+            "bookmaker_count": _first_numeric(
+                row,
+                (
+                    "market_ou_bookmaker_count",
+                    "ou_market_bookmaker_count",
+                    "market_bookmaker_count",
+                    "bookmaker_count",
+                ),
+            ),
+        })
+    return rows
+
+
+def _first_numeric(row: pd.Series, keys: tuple[str, ...]) -> float | None:
+    for key in keys:
+        if key not in row:
+            continue
+        value = row.get(key)
+        if pd.isna(value):
+            continue
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _json_scalar(value: Any) -> Any:
+    if pd.isna(value):
+        return None
+    if hasattr(value, "item"):
+        try:
+            return value.item()
+        except Exception:
+            return value
+    return value
 
 
 def _aggregate_fold_results(folds: list[OUFoldResult]) -> JsonDict:
@@ -323,7 +433,11 @@ def run_ou_backtest(
         raise ValueError(f"Dataset missing date column '{DATE_COL}'")
 
     frame = frame.sort_values(DATE_COL).reset_index(drop=True)
-    logger.info("Running O/U backtest: %d total rows, %d splits", len(frame), resolved_config.n_splits)
+    logger.info(
+        "Running O/U backtest: %d total rows, %d splits",
+        len(frame),
+        resolved_config.n_splits,
+    )
 
     fold_splits = _fold_splits(frame, resolved_config.n_splits, resolved_config.min_train_rows)
     if not fold_splits:
@@ -367,6 +481,7 @@ def _save_backtest_results(result: OUBacktestResult, output_dir: Path) -> None:
                 "test_date_end": f.test_date_end,
                 "metrics": f.metrics_per_model,
                 "roi": f.roi_per_model,
+                "prediction_rows": f.prediction_rows,
             }
             for f in result.folds
         ],

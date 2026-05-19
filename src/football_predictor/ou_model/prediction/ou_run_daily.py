@@ -24,11 +24,7 @@ from football_predictor.ou_model.prediction.ou_service import (
     OUPredictionOutput,
     OUPredictionService,
 )
-from football_predictor.prediction.publication_policy import (
-    CONFIDENCE_SKIP_REASON,
-    is_publishable_confidence,
-    normalize_confidence_label,
-)
+from football_predictor.prediction.publication_policy import normalize_confidence_label
 from football_predictor.prediction.scheduler import (
     DailyPredictionWindow,
     fixture_matches_window,
@@ -57,6 +53,12 @@ class OUDailyFixtureResult:
     p_over: float | None = None
     p_under: float | None = None
     edge_over: float | None = None
+    value_side: str | None = None
+    value_edge: float | None = None
+    value_ev: float | None = None
+    no_bet_reason: str | None = None
+    non_publication_reason: str | None = None
+    publication_decision: str | None = None
     confidence_label: str | None = None
     confidence_score: float | None = None
     ou_model_prediction_id: int | None = None
@@ -75,6 +77,12 @@ class OUDailyFixtureResult:
             "p_over": self.p_over,
             "p_under": self.p_under,
             "edge_over": self.edge_over,
+            "value_side": self.value_side,
+            "value_edge": self.value_edge,
+            "value_ev": self.value_ev,
+            "no_bet_reason": self.no_bet_reason,
+            "non_publication_reason": self.non_publication_reason,
+            "publication_decision": self.publication_decision,
             "confidence_label": self.confidence_label,
             "confidence_score": self.confidence_score,
             "ou_model_prediction_id": self.ou_model_prediction_id,
@@ -100,7 +108,14 @@ class OUDailyPredictionSummary:
         return sum(
             1
             for r in self.results
-            if r.status in {"predicted", "sent", "dry_run", "print_only", "confidence_skipped"}
+            if r.status in {
+                "predicted",
+                "sent",
+                "dry_run",
+                "print_only",
+                "confidence_skipped",
+                "no_bet",
+            }
         )
 
     @property
@@ -236,23 +251,23 @@ def run_daily_ou_predictions(
 
             status = "predicted"
             if send_discord and discord_delivery is not None:
-                if (
-                    not dry_run
-                    and not print_only
-                    and not is_publishable_confidence(prediction.confidence_label)
-                ):
+                publication_decision = getattr(prediction, "publication_decision", None)
+                if not dry_run and not print_only and publication_decision == "no_bet":
+                    status = "no_bet"
+                    reason = (
+                        getattr(prediction, "no_bet_reason", None)
+                        or getattr(prediction, "non_publication_reason", None)
+                        or "no_value_pick"
+                    )
                     logger.info(
-                        "O/U Discord publication skipped: fixture_id=%s "
-                        "confidence_label=%s confidence_score=%s expected=%s "
-                        "window=%s",
+                        "O/U no-bet: fixture_id=%s reason=%s forecast_side=%s "
+                        "confidence_score=%s window=%s",
                         fixture.fixture_id,
-                        normalize_confidence_label(prediction.confidence_label),
+                        reason,
+                        getattr(prediction, "forecast_side", None),
                         prediction.confidence_score,
-                        "High|Very High",
                         resolved_window.value,
                     )
-                    status = "confidence_skipped"
-                    reason = CONFIDENCE_SKIP_REASON
                     md = format_ou_prediction_markdown(
                         prediction,
                         fixture,
@@ -266,7 +281,7 @@ def run_daily_ou_predictions(
                         model_family="ou25",
                         confidence_label=normalize_confidence_label(prediction.confidence_label),
                         confidence_score=prediction.confidence_score,
-                        reason=CONFIDENCE_SKIP_REASON,
+                        reason=reason,
                         prediction_time=prediction_time,
                         automation_window=resolved_window.value,
                         message_type=STAFF_OU_PREDICTION_SKIPPED_MESSAGE_TYPE,
@@ -275,9 +290,20 @@ def run_daily_ou_predictions(
                             "ou_model_prediction_id": prediction.ou_model_prediction_id,
                             "daily_window": resolved_window.value,
                             "automation_date": target_date.isoformat(),
+                            "forecast_side": getattr(prediction, "forecast_side", None),
+                            "value_side": getattr(prediction, "value_side", None),
+                            "publication_decision": publication_decision,
+                            "no_bet_reason": getattr(prediction, "no_bet_reason", None),
+                            "non_publication_reason": getattr(
+                                prediction, "non_publication_reason", None
+                            ),
                         },
                     )
-                else:
+                elif (
+                    dry_run
+                    or print_only
+                    or publication_decision == "public"
+                ):
                     try:
                         md = format_ou_prediction_markdown(
                             prediction,
@@ -304,6 +330,13 @@ def run_daily_ou_predictions(
                                 "automation_window": resolved_window.value,
                                 "automation_date": target_date.isoformat(),
                                 "prediction_time": prediction_time.isoformat(),
+                                "forecast_side": getattr(prediction, "forecast_side", None),
+                                "value_side": getattr(prediction, "value_side", None),
+                                "publication_decision": publication_decision,
+                                "no_bet_reason": getattr(prediction, "no_bet_reason", None),
+                                "non_publication_reason": getattr(
+                                    prediction, "non_publication_reason", None
+                                ),
                             },
                         )
                         discord_sent = send_result.status == "sent"
@@ -314,6 +347,54 @@ def run_daily_ou_predictions(
                             "Discord send failed for fixture %d: %s",
                             fixture.fixture_id, exc,
                         )
+                else:
+                    logger.info(
+                        "O/U Discord publication skipped: fixture_id=%s "
+                        "confidence_label=%s confidence_score=%s expected=%s "
+                        "window=%s",
+                        fixture.fixture_id,
+                        normalize_confidence_label(prediction.confidence_label),
+                        prediction.confidence_score,
+                        "public value decision",
+                        resolved_window.value,
+                    )
+                    status = "confidence_skipped"
+                    reason = (
+                        getattr(prediction, "non_publication_reason", None)
+                        or getattr(prediction, "no_bet_reason", None)
+                        or "publication_decision_missing"
+                    )
+                    md = format_ou_prediction_markdown(
+                        prediction,
+                        fixture,
+                        timezone_name=timezone_name,
+                        edge_display_threshold=edge_threshold,
+                    )
+                    send_skipped_prediction_to_staff(
+                        discord_delivery,
+                        md,
+                        fixture=fixture,
+                        model_family="ou25",
+                        confidence_label=normalize_confidence_label(prediction.confidence_label),
+                        confidence_score=prediction.confidence_score,
+                        reason=reason,
+                        prediction_time=prediction_time,
+                        automation_window=resolved_window.value,
+                        message_type=STAFF_OU_PREDICTION_SKIPPED_MESSAGE_TYPE,
+                        model_prediction_id=None,
+                        payload_metadata={
+                            "ou_model_prediction_id": prediction.ou_model_prediction_id,
+                            "daily_window": resolved_window.value,
+                            "automation_date": target_date.isoformat(),
+                            "forecast_side": getattr(prediction, "forecast_side", None),
+                            "value_side": getattr(prediction, "value_side", None),
+                            "publication_decision": publication_decision,
+                            "no_bet_reason": getattr(prediction, "no_bet_reason", None),
+                            "non_publication_reason": getattr(
+                                prediction, "non_publication_reason", None
+                            ),
+                        },
+                    )
             elif print_only:
                 md = format_ou_prediction_markdown(
                     prediction,
@@ -335,6 +416,12 @@ def run_daily_ou_predictions(
                 p_over=prediction.p_over,
                 p_under=prediction.p_under,
                 edge_over=prediction.edge_over,
+                value_side=getattr(prediction, "value_side", None),
+                value_edge=getattr(prediction, "value_edge", None),
+                value_ev=getattr(prediction, "value_ev", None),
+                no_bet_reason=getattr(prediction, "no_bet_reason", None),
+                non_publication_reason=getattr(prediction, "non_publication_reason", None),
+                publication_decision=getattr(prediction, "publication_decision", None),
                 confidence_label=prediction.confidence_label,
                 confidence_score=prediction.confidence_score,
                 ou_model_prediction_id=prediction.ou_model_prediction_id,

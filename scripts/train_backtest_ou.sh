@@ -19,6 +19,8 @@ fi
 DATASET="${DATASET:-data/processed/training_ou_v1.parquet}"
 MODEL_DIR="${MODEL_DIR:-data/models/ou-v1}"
 BACKTEST_DIR="${BACKTEST_DIR:-reports/backtest_ou_v1}"
+PUBLICATION_BACKTEST_DIR="${PUBLICATION_BACKTEST_DIR:-reports/ou_v2}"
+RUN_PUBLICATION_BACKTEST="${RUN_PUBLICATION_BACKTEST:-false}"
 MODEL_VERSION="${MODEL_VERSION:-ou-v1}"
 N_SPLITS="${N_SPLITS:-5}"
 
@@ -50,3 +52,10 @@ fi
   --dataset "$DATASET" \
   --output-dir "$BACKTEST_DIR" \
   --n-splits "$N_SPLITS"
+
+if [ "$RUN_PUBLICATION_BACKTEST" = "true" ]; then
+  "$CLI_BIN" ou backtest-publication-v2 \
+    --dataset "$DATASET" \
+    --output-dir "$PUBLICATION_BACKTEST_DIR" \
+    --n-splits "$N_SPLITS"
+fi

@@ -77,12 +77,10 @@ def roi_simulation(
 
         if edge_over >= edge_threshold:
             bet_side = "over"
-            edge = edge_over
             odd = odd_over_f
             p_model = float(p)
         else:
             bet_side = "under"
-            edge = edge_under
             odd = odd_under_f
             p_model = 1 - float(p)
 
@@ -134,6 +132,78 @@ def roi_simulation(
         "net_profit": current_bankroll - bankroll,
         "max_drawdown": max_drawdown,
         "sharpe_ratio": sharpe,
+    }
+
+
+def expected_calibration_error(calibration_bins: Sequence[JsonDict]) -> float:
+    """Weighted mean absolute calibration gap from calibration bin payloads."""
+    total = 0
+    weighted_gap = 0.0
+    for item in calibration_bins:
+        count = int(item.get("count") or 0)
+        mean_predicted = item.get("mean_predicted")
+        actual_fraction = item.get("actual_fraction")
+        if count <= 0 or mean_predicted is None or actual_fraction is None:
+            continue
+        total += count
+        weighted_gap += count * abs(float(mean_predicted) - float(actual_fraction))
+    if total == 0:
+        return float("nan")
+    return weighted_gap / total
+
+
+def flat_stake_betting_metrics(
+    y_true: Sequence[int],
+    bet_sides: Sequence[str | None],
+    bet_odds: Sequence[float | None],
+    *,
+    stake: float = 1.0,
+) -> JsonDict:
+    """Return simple flat-stake betting metrics in units."""
+    total_bets = wins = 0
+    total_staked = 0.0
+    profit_units = 0.0
+    bankroll = 0.0
+    peak = 0.0
+    max_drawdown_units = 0.0
+    over_bets = under_bets = 0
+
+    for y, side, odd in zip(y_true, bet_sides, bet_odds, strict=True):
+        normalized = str(side or "").upper()
+        if normalized not in {"OVER", "UNDER"} or odd is None:
+            continue
+        odd_f = float(odd)
+        if odd_f <= 1:
+            continue
+        total_bets += 1
+        total_staked += stake
+        if normalized == "OVER":
+            over_bets += 1
+            won = int(y) == 1
+        else:
+            under_bets += 1
+            won = int(y) == 0
+        if won:
+            wins += 1
+            profit = stake * (odd_f - 1.0)
+        else:
+            profit = -stake
+        profit_units += profit
+        bankroll += profit
+        peak = max(peak, bankroll)
+        max_drawdown_units = max(max_drawdown_units, peak - bankroll)
+
+    roi = profit_units / total_staked if total_staked > 0 else 0.0
+    return {
+        "roi": roi,
+        "profit_units": profit_units,
+        "total_bets": total_bets,
+        "wins": wins,
+        "hit_rate": wins / total_bets if total_bets else 0.0,
+        "total_staked": total_staked,
+        "max_drawdown_units": max_drawdown_units,
+        "bets_over": over_bets,
+        "bets_under": under_bets,
     }
 
 

@@ -83,11 +83,15 @@ def test_daily_scripts_default_to_safe_discord_behavior(repo_root: Path) -> None
 def test_prod_crontab_runs_publication_scripts_with_prod_flags(repo_root: Path) -> None:
     text = (repo_root / "config/prod.crontab").read_text(encoding="utf-8")
 
-    assert "PROJECT=/Users/yanisruel/Documents/ProBet_discord" in text
-    assert "/usr/bin/lockf -t 0" in text
+    assert "PROJECT=/opt/football-predictor/app" in text
+    assert "CONFIG_CHAMP=config/competitions_2026.yaml" in text
+    assert "flock -n" in text
+    assert "/usr/bin/lockf -t 0" not in text
     assert 'cd "$PROJECT"' in text
     assert "scripts/weekly_ingestion.sh" in text
-    assert "SAVE_RAW=true DRY_RUN=false scripts/weekly_ingestion.sh" in text
+    assert 'CONFIG="$CONFIG_CHAMP" SAVE_RAW=true DRY_RUN=false scripts/weekly_ingestion.sh' in text
+    assert 'ingest-player-squads --config "$CONFIG_CHAMP" --refresh-api' in text
+    assert 'DETAILS_ONLY="statistics events lineups players injuries predictions"' in text
     assert "SEND_DISCORD=true DRY_RUN=false PUBLISH_DISCORD=true" in text
     assert "scripts/daily_morning.sh" in text
     assert "scripts/publish_match_analyses.sh" in text
@@ -96,6 +100,7 @@ def test_prod_crontab_runs_publication_scripts_with_prod_flags(repo_root: Path) 
     assert "scripts/daily_ou.sh" in text
     assert "scripts/publish_match_results.sh" in text
     assert "scripts/publish_weekly_score.sh" in text
+    assert "WORLD_CUP_1X2_ENABLED=false" in text
     assert "DRY_RUN=true" not in text
     assert "PRINT_ONLY=true" not in text
     assert "config/discord_webhooks.local.yaml" not in text

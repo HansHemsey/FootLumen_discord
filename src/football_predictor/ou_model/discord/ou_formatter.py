@@ -36,8 +36,15 @@ def format_ou_prediction_markdown(
     """Format an OUPredictionOutput as a Discord-safe markdown code block."""
     p_over = _number(getattr(prediction, "p_over", None), default=0.5)
     p_under = _number(getattr(prediction, "p_under", None), default=1.0 - p_over)
-    predicted_over = p_over >= p_under
-    pick = "Plus de 2.5 buts" if predicted_over else "Moins de 2.5 buts"
+    forecast_side = _side(
+        getattr(prediction, "forecast_side", None),
+        fallback="OVER" if p_over >= p_under else "UNDER",
+    )
+    value_side = _side(getattr(prediction, "value_side", None), fallback=None)
+    legacy_pick = value_side is None and getattr(prediction, "no_bet_reason", None) is None
+    pick_side = value_side or (forecast_side if legacy_pick else None)
+    forecast = _side_label(forecast_side)
+    pick = _side_label(pick_side) if pick_side is not None else "No bet"
 
     market_p_over = _number(getattr(prediction, "market_p_over", None))
     market_p_under = _number(getattr(prediction, "market_p_under", None))
@@ -45,8 +52,28 @@ def format_ou_prediction_markdown(
     edge_under = _number(getattr(prediction, "edge_under", None))
     ev_over = _number(getattr(prediction, "ev_over", None))
     ev_under = _number(getattr(prediction, "ev_under", None))
-    pick_edge = edge_over if predicted_over else edge_under
-    pick_ev = ev_over if predicted_over else ev_under
+    pick_edge = _number(getattr(prediction, "value_edge", None))
+    if pick_edge is None and pick_side is not None:
+        pick_edge = edge_over if pick_side == "OVER" else edge_under
+    pick_ev = _number(getattr(prediction, "value_ev", None))
+    if pick_ev is None and pick_side is not None:
+        pick_ev = ev_over if pick_side == "OVER" else ev_under
+    no_bet_reason = getattr(prediction, "no_bet_reason", None)
+    non_publication_reason = getattr(prediction, "non_publication_reason", None)
+    pick_probability = _number(getattr(prediction, "p_pick", None))
+    if pick_probability is None and pick_side is not None:
+        pick_probability = p_over if pick_side == "OVER" else p_under
+    pick_market_probability = _number(getattr(prediction, "market_p_pick", None))
+    if pick_market_probability is None and pick_side is not None:
+        pick_market_probability = market_p_over if pick_side == "OVER" else market_p_under
+    pick_odd = _number(getattr(prediction, "odd_pick", None))
+    if pick_odd is None and pick_side is not None:
+        pick_odd = (
+            _number(getattr(prediction, "market_odd_over", None))
+            if pick_side == "OVER"
+            else _number(getattr(prediction, "market_odd_under", None))
+        )
+    data_quality_score = _data_quality_score(getattr(prediction, "data_quality_json", None))
 
     lines = [
         CODE_OPEN,
@@ -54,9 +81,33 @@ def format_ou_prediction_markdown(
         f"{_match_label(prediction, fixture)} · {_competition_label(prediction, fixture)}",
         _date_str(_kickoff_time(prediction, fixture), timezone_name),
         "",
-        "🎯 PICK PRINCIPAL",
-        f"▶ {pick}",
-        f"Confiance : {_confidence_label(prediction)} · Score : {_score_label(prediction)}",
+        "🎯 SCÉNARIO MODÈLE",
+        f"Scénario le plus probable : {forecast} — "
+        f"{_pct(p_over if forecast_side == 'OVER' else p_under)}",
+        "",
+        "💰 PICK VALUE",
+    ]
+    if pick_side is None:
+        lines += [
+            "Aucun pick public",
+            f"Raison : {_reason_label(no_bet_reason or non_publication_reason)}",
+        ]
+    else:
+        lines += [
+            f"Côté : {pick}",
+            f"Probabilité modèle : {_pct(pick_probability)}",
+            f"Probabilité marché : {_pct(pick_market_probability)}",
+            f"Cote utilisée : {_odd_str(pick_odd)}",
+            f"Edge : {_delta_str(pick_edge)}",
+            f"EV : {_ev_str(pick_ev)}",
+            f"Confiance V2 : {_score_label(prediction)} · {_confidence_label(prediction)}",
+            f"Data quality : {_quality_score_str(data_quality_score)}",
+        ]
+        if non_publication_reason:
+            lines.append(f"Publication : staff · {_reason_label(non_publication_reason)}")
+        else:
+            lines.append("Publication : public")
+    lines += [
         "",
         "📊 PROBABILITÉS",
         "              Modèle   Marché   Écart",
@@ -64,14 +115,16 @@ def format_ou_prediction_markdown(
         _ou_probability_row("Moins 2.5", p_under, market_p_under),
         "",
         "💡 LECTURE PARIEUR",
-        _value_sentence(pick, pick_edge),
+        _value_sentence(pick, pick_edge, no_bet_reason=no_bet_reason),
         _market_sentence(market_p_over, market_p_under),
         f"• xG attendu : {_xg_str(prediction)}.",
     ]
 
-    if pick_edge is not None and abs(pick_edge) >= edge_display_threshold:
+    if no_bet_reason:
+        lines.append(f"• Raison no bet : {_reason_label(no_bet_reason)}.")
+    if pick_side is not None and pick_edge is not None and abs(pick_edge) >= edge_display_threshold:
         lines.append(f"• Edge du pick : {_delta_str(pick_edge)}.")
-    if pick_ev is not None:
+    if pick_side is not None and pick_ev is not None:
         lines.append(f"• EV estimée : {_ev_str(pick_ev)} / unité.")
 
     quality_lines = _data_quality_lines(getattr(prediction, "data_quality_json", None))
@@ -92,8 +145,10 @@ def _ou_probability_row(label: str, model_value: float | None, market_value: flo
     )
 
 
-def _value_sentence(pick: str, edge: float | None) -> str:
+def _value_sentence(pick: str, edge: float | None, *, no_bet_reason: Any = None) -> str:
     target = pick.lower()
+    if no_bet_reason:
+        return "• Aucun pick value publiable n'est identifié sur cette ligne."
     if edge is None:
         return f"• Le modèle identifie {target} comme scénario principal."
     if edge >= 0.10:
@@ -117,9 +172,7 @@ def _market_sentence(market_p_over: float | None, market_p_under: float | None) 
 def _data_quality_lines(payload: Any) -> list[str]:
     if not isinstance(payload, Mapping) or not payload:
         return []
-    score = _number(
-        payload.get("overall_data_quality_score", payload.get("ou_data_quality_score"))
-    )
+    score = _data_quality_score(payload)
     lines = [f"Score : {score:.0f}/100" if score is not None else "Score : N/A"]
     odds_available = payload.get("ou_odds_available")
     if odds_available is None:
@@ -181,12 +234,17 @@ def _kickoff_time(prediction: Any, fixture: Any | None) -> datetime | None:
 
 
 def _confidence_label(prediction: Any) -> str:
-    value = getattr(prediction, "confidence_label", _NA)
+    value = getattr(prediction, "confidence_label_v2", None) or getattr(
+        prediction, "confidence_label", _NA
+    )
     return _clean(value).upper().replace("_", " ")
 
 
 def _score_label(prediction: Any) -> str:
-    value = _number(getattr(prediction, "confidence_score", None))
+    value = _number(
+        getattr(prediction, "confidence_score_v2", None),
+        default=_number(getattr(prediction, "confidence_score", None)),
+    )
     return f"{value:.0f}/100" if value is not None else _NA
 
 
@@ -210,10 +268,71 @@ def _ev_str(value: float | None) -> str:
     return f"{sign}{value * 100:.1f}%"
 
 
+def _odd_str(value: float | None) -> str:
+    if value is None:
+        return _NA
+    return f"{value:.2f}"
+
+
+def _quality_score_str(value: float | None) -> str:
+    if value is None:
+        return _NA
+    return f"{value:.0f}/100"
+
+
+def _data_quality_score(payload: Any) -> float | None:
+    if not isinstance(payload, Mapping):
+        return None
+    for key in (
+        "ou_data_quality_score",
+        "overall_data_quality_score",
+        "publication_data_quality_score",
+        "data_quality_score",
+    ):
+        value = _number(payload.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def _reason_label(reason: Any) -> str:
+    labels = {
+        "market_unavailable": "marché indisponible",
+        "edge_below_threshold": "edge insuffisant",
+        "edge_insufficient": "edge insuffisant",
+        "ev_below_threshold": "EV insuffisante",
+        "ev_insufficient": "EV insuffisante",
+        "invalid_odds": "cotes invalides",
+        "confidence_insufficient": "confiance insuffisante",
+        "data_quality_insufficient": "data quality insuffisante",
+        "bookmaker_count_insufficient": "nombre de bookmakers insuffisant",
+        "no_value_side": "aucun côté value",
+    }
+    key = str(reason or "").strip()
+    return labels.get(key, _clean(key) if key else _NA)
+
+
 def _yes_no(value: Any) -> str:
     if value is None:
         return _NA
     return "oui" if bool(value) else "non"
+
+
+def _side(value: Any, *, fallback: str | None) -> str | None:
+    normalized = str(value or "").strip().upper()
+    if normalized in {"OVER", "PLUS", "PLUS 2.5", "OVER 2.5"}:
+        return "OVER"
+    if normalized in {"UNDER", "MOINS", "MOINS 2.5", "UNDER 2.5"}:
+        return "UNDER"
+    return fallback
+
+
+def _side_label(side: str | None) -> str:
+    if side == "OVER":
+        return "Plus de 2.5 buts"
+    if side == "UNDER":
+        return "Moins de 2.5 buts"
+    return "No bet"
 
 
 def _number(value: Any, *, default: float | None = None) -> float | None:

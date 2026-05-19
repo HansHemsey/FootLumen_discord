@@ -270,6 +270,22 @@ def test_alembic_upgrade_head_creates_v3_tables(tmp_path: Path, repo_root: Path)
     tables = set(inspector.get_table_names())
 
     assert {"v3_feature_snapshots", "v3_model_predictions"}.issubset(tables)
+    ou_columns = {column["name"] for column in inspector.get_columns("ou_model_predictions")}
+    assert {
+        "forecast_side",
+        "forecast_probability",
+        "value_side",
+        "p_pick",
+        "market_p_pick",
+        "odd_pick",
+        "edge_pick",
+        "ev_pick",
+        "is_value_pick",
+        "no_bet_reason",
+        "confidence_score_v2",
+        "confidence_label_v2",
+        "publication_decision",
+    }.issubset(ou_columns)
     indexes_pred = {idx["name"] for idx in inspector.get_indexes("v3_model_predictions")}
     indexes_feat = {idx["name"] for idx in inspector.get_indexes("v3_feature_snapshots")}
     assert "ix_v3_prediction_fixture_time" in indexes_pred

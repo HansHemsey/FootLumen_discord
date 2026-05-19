@@ -626,11 +626,41 @@ La promotion V3 est volontaire malgré un backtest non validé. Les probabilité
 de réussite doivent donc être surveillés après activation, avec une attention particulière
 aux sources live M-30 : odds, prédictions API, lineups et blessures.
 
-La publication Discord n'est pas automatique pour toutes les prédictions calculées. La
-règle métier commune V3 1X2 et O/U 2.5 est : publier uniquement les confiances `High` et
-`Very High`. Les prédictions `Medium`, `Low`, `Uncertain` ou non normalisables restent
-stockées en base avec `confidence_skipped` et ne sont pas prises en compte dans le score
-public hebdomadaire.
+La publication Discord n'est pas automatique pour toutes les prédictions calculées. Pour
+V3 1X2, la règle reste : publier uniquement les confiances `High` et `Very High`. Pour
+O/U 2.5 V2, la règle est séparée : la publication publique dépend d'un vrai pick value
+avec edge positif, EV positive, confiance O/U V2 suffisante, data quality suffisante et
+couverture bookmaker minimale. Les prédictions non publiques restent routées staff ou
+marquées `no_bet`, et ne sont pas prises en compte dans le score public hebdomadaire.
+
+### Backtest Publication O/U V2
+
+Le backtest publication O/U V2 ne retune pas le modèle. Il réutilise le dataset
+point-in-time O/U, entraîne les folds walk-forward existants, puis applique la couche de
+décision O/U V2 sur les prédictions out-of-fold.
+
+Commande recommandée :
+
+```bash
+football-predictor ou backtest-publication-v2 \
+  --dataset data/processed/training_ou_v1.parquet \
+  --output-dir reports/ou_v2
+```
+
+Sorties :
+
+- `backtest_summary.json` : synthèse modèle vs marché, ROI, CLV si disponible,
+  recommandation de policy ;
+- `roi_by_edge_bucket.csv` : ROI par bucket d'edge ;
+- `roi_by_ev_bucket.csv` : ROI par bucket d'EV ;
+- `calibration_bins.csv` : calibration modèle et marché ;
+- `publication_policy_grid.csv` : grille `min_edge`, `min_ev`, `min_confidence`,
+  `min_data_quality` ;
+- `backtest_report.md` : rapport lisible avec recommandation.
+
+La recommandation de policy privilégie ROI positif, volume suffisant, drawdown acceptable
+et cohérence avec les métriques probabilistes. Si aucune policy n'est robuste, le rapport
+recommande de garder O/U en staff-only.
 
 Pour valider le rendu Discord V3 sans envoi réel :
 

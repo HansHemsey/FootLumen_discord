@@ -245,9 +245,9 @@ crontab config/prod.crontab
 crontab -l
 ```
 
-Sur le VPS Ubuntu, utilise plutot le crontab championnat propre ci-dessous. Il remet les routines
-domestiques et ajoute l'entretien regulier qui manquait avant la CDM : squads/effectifs et details
-historiques recents.
+`config/prod.crontab` est le profil Ubuntu championnats 2026. Il remet les routines
+domestiques et ajoute l'entretien regulier qui manquait avant la CDM : squads/effectifs et
+details historiques recents.
 
 Crontab championnat 2026 recommande :
 
@@ -284,7 +284,7 @@ CONFIG_CHAMP=config/competitions_2026.yaml
 1,11,21,31,41,51 7-23 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_daily_late.lock env CONFIG="$CONFIG_CHAMP" PREDICTION_ENGINE=v3 WINDOW=late REFRESH_DATA=true SEND_DISCORD=true DRY_RUN=false SAVE_RAW=true WORLD_CUP_1X2_ENABLED=false scripts/daily_late.sh >> "$LOGDIR/daily_late_v3.log" 2>&1
 
 # O/U 2.5 championnats M-30 : publication reelle.
-# High/Very High public, Low/Medium/Uncertain vers le channel staff.
+# Value pick public si policy O/U V2 OK, sinon staff/no-bet selon decision O/U V2.
 3,13,23,33,43,53 7-23 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_daily_ou.lock env CONFIG="$CONFIG_CHAMP" WINDOW=late REFRESH_DATA=true SEND_DISCORD=true DRY_RUN=false SAVE_RAW=true scripts/daily_ou.sh >> "$LOGDIR/daily_ou.log" 2>&1
 
 # Resultats post-match : refresh scores + publication.
@@ -293,35 +293,6 @@ CONFIG_CHAMP=config/competitions_2026.yaml
 # Score public hebdo : mises a jour apres les resultats.
 10 8,12,18 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_weekly_score.lock env DRY_RUN=false scripts/publish_weekly_score.sh >> "$LOGDIR/weekly_score.log" 2>&1
 55 23 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_weekly_score.lock env DRY_RUN=false scripts/publish_weekly_score.sh >> "$LOGDIR/weekly_score.log" 2>&1
-```
-
-Pour l'installer proprement :
-
-```bash
-cat > /tmp/prod_championship_2026.crontab <<'CRON'
-SHELL=/bin/bash
-PATH=/opt/football-predictor/app/.venv/bin:/usr/local/bin:/usr/bin:/bin
-APP_TIMEZONE=Europe/Paris
-PROJECT=/opt/football-predictor/app
-LOGDIR=/opt/football-predictor/app/logs/cron
-MPLCONFIGDIR=/opt/football-predictor/app/.cache/matplotlib
-LOKY_MAX_CPU_COUNT=2
-CONFIG_CHAMP=config/competitions_2026.yaml
-
-15 5 * * 1 cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_weekly_ingestion.lock env CONFIG="$CONFIG_CHAMP" SAVE_RAW=true DRY_RUN=false scripts/weekly_ingestion.sh >> "$LOGDIR/weekly_ingestion.log" 2>&1
-35 4 * * 1 cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_player_squads.lock football-predictor ingest-player-squads --config "$CONFIG_CHAMP" --refresh-api >> "$LOGDIR/player_squads.log" 2>&1
-45 4 * * 2 cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_weekly_details.lock env CONFIG="$CONFIG_CHAMP" REFRESH_FIXTURES=false REFRESH_STANDINGS=false REFRESH_ODDS=false REFRESH_DETAILS=true DETAILS_ONLY="statistics events lineups players injuries predictions" DETAILS_DAYS_BACK=10 DETAILS_STATUSES="FT AET PEN" DETAILS_LIMIT=120 DETAILS_DELAY_SECONDS=2 DETAILS_SKIP_IF_COMPLETE=true SAVE_RAW=true scripts/refresh_all_leagues.sh >> "$LOGDIR/weekly_details.log" 2>&1
-30 6 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_daily_morning.lock env CONFIG="$CONFIG_CHAMP" REFRESH_DATA=true SEND_DISCORD=true DRY_RUN=false PUBLISH_DISCORD=true SAVE_RAW=true scripts/daily_morning.sh >> "$LOGDIR/daily_morning.log" 2>&1
-*/15 6-23 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_match_analyses.lock env CONFIG="$CONFIG_CHAMP" MODEL_DIR=data/models/v2-late REFRESH_DATA=false SEND_DISCORD=true DRY_RUN=false scripts/publish_match_analyses.sh >> "$LOGDIR/match_analyses.log" 2>&1
-1,11,21,31,41,51 7-23 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_daily_late.lock env CONFIG="$CONFIG_CHAMP" PREDICTION_ENGINE=v3 WINDOW=late REFRESH_DATA=true SEND_DISCORD=true DRY_RUN=false SAVE_RAW=true WORLD_CUP_1X2_ENABLED=false scripts/daily_late.sh >> "$LOGDIR/daily_late_v3.log" 2>&1
-3,13,23,33,43,53 7-23 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_daily_ou.lock env CONFIG="$CONFIG_CHAMP" WINDOW=late REFRESH_DATA=true SEND_DISCORD=true DRY_RUN=false SAVE_RAW=true scripts/daily_ou.sh >> "$LOGDIR/daily_ou.log" 2>&1
-20,50 12-23 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_match_results.lock env CONFIG="$CONFIG_CHAMP" REFRESH_DATA=true SEND_DISCORD=true DRY_RUN=false SAVE_RAW=true scripts/publish_match_results.sh >> "$LOGDIR/match_results.log" 2>&1
-10 8,12,18 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_weekly_score.lock env DRY_RUN=false scripts/publish_weekly_score.sh >> "$LOGDIR/weekly_score.log" 2>&1
-55 23 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_weekly_score.lock env DRY_RUN=false scripts/publish_weekly_score.sh >> "$LOGDIR/weekly_score.log" 2>&1
-CRON
-
-crontab /tmp/prod_championship_2026.crontab
-crontab -l
 ```
 
 Le point important est de remettre :

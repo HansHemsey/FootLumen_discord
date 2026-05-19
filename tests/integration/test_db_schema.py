@@ -51,6 +51,25 @@ def test_init_db_creates_sprint_3_tables_and_columns(tmp_path: Path) -> None:
     assert _has_columns(inspector, "fixture_player_stats", {"stats_json", "payload_json"})
     assert _has_columns(inspector, "api_prediction_snapshots", {"source", "fetched_at"})
     assert _has_columns(inspector, "model_predictions", {"feature_snapshot_id"})
+    assert _has_columns(
+        inspector,
+        "ou_model_predictions",
+        {
+            "forecast_side",
+            "forecast_probability",
+            "value_side",
+            "p_pick",
+            "market_p_pick",
+            "odd_pick",
+            "edge_pick",
+            "ev_pick",
+            "is_value_pick",
+            "no_bet_reason",
+            "confidence_score_v2",
+            "confidence_label_v2",
+            "publication_decision",
+        },
+    )
     assert _is_not_nullable(inspector, "fixture_statistics", "fetched_at")
     assert _is_not_nullable(inspector, "injuries", "fetched_at")
     assert _is_not_nullable(inspector, "odds_snapshots", "fetched_at")

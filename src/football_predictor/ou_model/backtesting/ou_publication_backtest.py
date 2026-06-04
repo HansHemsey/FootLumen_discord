@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any
 
 import numpy as np
@@ -39,6 +41,12 @@ EV_BUCKETS = (
     (0.04, 0.08, "4-8 %"),
     (0.08, float("inf"), "8+ %"),
 )
+CONFIDENCE_BUCKETS = (
+    (0.00, 55.0, "<55"),
+    (55.0, 65.0, "55-65"),
+    (65.0, 80.0, "65-80"),
+    (80.0, float("inf"), "80+"),
+)
 
 
 @dataclass(frozen=True)
@@ -48,7 +56,7 @@ class OUPublicationBacktestConfig:
     policy_min_evs: tuple[float, ...] = (0.02, 0.03, 0.05)
     policy_min_confidences: tuple[float, ...] = (55.0, 60.0, 65.0, 70.0)
     policy_min_data_qualities: tuple[float, ...] = (60.0, 70.0, 80.0)
-    min_bookmaker_count: int = 2
+    policy_min_bookmaker_counts: tuple[int, ...] = (1, 2, 3)
     min_recommended_bets: int = 20
 
 
@@ -58,6 +66,7 @@ class OUPublicationBacktestResult:
     evaluated_predictions: pd.DataFrame
     roi_by_edge_bucket: pd.DataFrame
     roi_by_ev_bucket: pd.DataFrame
+    roi_by_confidence_bucket: pd.DataFrame
     calibration_bins: pd.DataFrame
     publication_policy_grid: pd.DataFrame
     output_paths: dict[str, Path]
@@ -68,11 +77,20 @@ def run_ou_publication_backtest(
     *,
     output_dir: Path = Path("reports/ou_v2"),
     config: OUPublicationBacktestConfig | None = None,
+    start_date: date | str | None = None,
+    end_date: date | str | None = None,
+    competition: str | int | None = None,
 ) -> OUPublicationBacktestResult:
     """Run a walk-forward O/U backtest focused on publishable value decisions."""
     resolved_config = config or OUPublicationBacktestConfig()
-    backtest = run_ou_backtest(
+    filtered_dataset_path = _filtered_dataset_path(
         dataset_path,
+        start_date=start_date,
+        end_date=end_date,
+        competition=competition,
+    )
+    backtest = run_ou_backtest(
+        filtered_dataset_path,
         output_dir=None,
         config=resolved_config.ou_backtest_config,
     )
@@ -85,12 +103,23 @@ def run_ou_publication_backtest(
     calibration = calibration_report_frame(evaluated)
     edge_bucket = roi_by_bucket_frame(evaluated, "edge_bucket", EDGE_BUCKETS)
     ev_bucket = roi_by_bucket_frame(evaluated, "ev_bucket", EV_BUCKETS)
+    confidence_bucket = roi_by_bucket_frame(
+        evaluated,
+        "confidence_bucket",
+        CONFIDENCE_BUCKETS,
+    )
     policy_grid = publication_policy_grid_frame(evaluated, resolved_config)
     summary = build_publication_summary(
         evaluated,
         calibration,
         policy_grid,
         dataset_path=dataset_path,
+        filtered_dataset_path=filtered_dataset_path,
+        filters={
+            "start_date": _date_filter_label(start_date),
+            "end_date": _date_filter_label(end_date),
+            "competition": str(competition) if competition is not None else None,
+        },
         n_folds=len(backtest.folds),
         aggregate_backtest=backtest.aggregate,
         config=resolved_config,
@@ -100,6 +129,7 @@ def run_ou_publication_backtest(
         summary=summary,
         roi_by_edge_bucket=edge_bucket,
         roi_by_ev_bucket=ev_bucket,
+        roi_by_confidence_bucket=confidence_bucket,
         calibration_bins=calibration,
         publication_policy_grid=policy_grid,
     )
@@ -108,33 +138,152 @@ def run_ou_publication_backtest(
         evaluated_predictions=evaluated,
         roi_by_edge_bucket=edge_bucket,
         roi_by_ev_bucket=ev_bucket,
+        roi_by_confidence_bucket=confidence_bucket,
         calibration_bins=calibration,
         publication_policy_grid=policy_grid,
         output_paths=output_paths,
     )
 
 
+def filter_ou_publication_dataset(
+    frame: pd.DataFrame,
+    *,
+    start_date: date | str | None = None,
+    end_date: date | str | None = None,
+    competition: str | int | None = None,
+) -> pd.DataFrame:
+    """Return a filtered copy of an O/U dataset before walk-forward splitting."""
+    filtered = frame.copy()
+    if start_date is not None or end_date is not None:
+        if "fixture_date" not in filtered.columns:
+            raise ValueError("Date filters require a fixture_date column")
+        fixture_dates = pd.to_datetime(filtered["fixture_date"], utc=True, errors="coerce")
+        if start_date is not None:
+            filtered = filtered[fixture_dates >= _timestamp_utc(start_date)]
+            fixture_dates = fixture_dates.loc[filtered.index]
+        if end_date is not None:
+            end_ts = _timestamp_utc(end_date)
+            if _is_date_only(end_date):
+                end_ts = end_ts + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
+            filtered = filtered[fixture_dates <= end_ts]
+
+    if competition is not None:
+        filtered = _filter_competition(filtered, competition)
+
+    if "target_ou25" in filtered.columns:
+        filtered = filtered[filtered["target_ou25"].notna()]
+
+    return filtered.reset_index(drop=True)
+
+
+def load_filtered_ou_publication_dataset(
+    dataset_path: Path,
+    *,
+    start_date: date | str | None = None,
+    end_date: date | str | None = None,
+    competition: str | int | None = None,
+) -> pd.DataFrame:
+    """Load and filter an O/U publication backtest dataset."""
+    if dataset_path.suffix in (".parquet", ".pq"):
+        frame = pd.read_parquet(dataset_path)
+    else:
+        frame = pd.read_csv(dataset_path)
+    return filter_ou_publication_dataset(
+        frame,
+        start_date=start_date,
+        end_date=end_date,
+        competition=competition,
+    )
+
+
+def _filtered_dataset_path(
+    dataset_path: Path,
+    *,
+    start_date: date | str | None,
+    end_date: date | str | None,
+    competition: str | int | None,
+) -> Path:
+    if start_date is None and end_date is None and competition is None:
+        return dataset_path
+    filtered = load_filtered_ou_publication_dataset(
+        dataset_path,
+        start_date=start_date,
+        end_date=end_date,
+        competition=competition,
+    )
+    if filtered.empty:
+        raise ValueError("Filtered O/U publication dataset is empty")
+    suffix = dataset_path.suffix if dataset_path.suffix else ".csv"
+    with NamedTemporaryFile(
+        prefix="ou_publication_backtest_",
+        suffix=suffix,
+        delete=False,
+    ) as temp:
+        temp_path = Path(temp.name)
+    if suffix in (".parquet", ".pq"):
+        filtered.to_parquet(temp_path, index=False)
+    else:
+        filtered.to_csv(temp_path, index=False)
+    return temp_path
+
+
+def _filter_competition(frame: pd.DataFrame, competition: str | int) -> pd.DataFrame:
+    competition_text = str(competition).strip()
+    if competition_text.isdigit() and "league_id" in frame.columns:
+        league_ids = pd.to_numeric(frame["league_id"], errors="coerce")
+        return frame[league_ids == int(competition_text)]
+
+    text_columns = ("competition", "competition_key", "league_name")
+    available = [column for column in text_columns if column in frame.columns]
+    if not available:
+        raise ValueError(
+            "Competition filter requires league_id or one of: "
+            "competition, competition_key, league_name"
+        )
+    normalized = competition_text.casefold()
+    mask = pd.Series(False, index=frame.index)
+    for column in available:
+        mask |= frame[column].astype(str).str.casefold().eq(normalized)
+    return frame[mask]
+
+
 def evaluate_ou_publication_rows(rows: list[JsonDict]) -> pd.DataFrame:
     """Apply O/U V2 decisions to out-of-fold prediction rows."""
     evaluated: list[JsonDict] = []
     for row in rows:
+        target = _optional_int(row.get("target_ou25"))
+        if target is None:
+            continue
         data_quality_score = _optional_float(row.get("data_quality_score"))
         bookmaker_count = _optional_float(row.get("bookmaker_count"))
+        odds_payload = _point_in_time_odds_payload(row)
         decision = decide_ou_prediction(
             p_over=float(row["p_over"]),
             p_under=float(row["p_under"]),
-            market_p_over=_optional_float(row.get("market_p_over")),
-            market_p_under=_optional_float(row.get("market_p_under")),
-            odd_over=_optional_float(row.get("odd_over")),
-            odd_under=_optional_float(row.get("odd_under")),
+            market_p_over=odds_payload["market_p_over"],
+            market_p_under=odds_payload["market_p_under"],
+            odd_over=odds_payload["odd_over"],
+            odd_under=odds_payload["odd_under"],
             data_quality_json={
                 "ou_data_quality_score": data_quality_score,
                 "ou_market_bookmaker_count": bookmaker_count,
             },
         )
-        payload = {**row, **decision.as_payload()}
+        payload = {
+            **row,
+            "target_ou25": target,
+            "market_p_over": odds_payload["market_p_over"],
+            "market_p_under": odds_payload["market_p_under"],
+            "odd_over": odds_payload["odd_over"],
+            "odd_under": odds_payload["odd_under"],
+            **decision.as_payload(),
+        }
         payload["edge_bucket"] = _bucket_label(payload.get("edge_pick"), EDGE_BUCKETS)
         payload["ev_bucket"] = _bucket_label(payload.get("ev_pick"), EV_BUCKETS)
+        payload["confidence_bucket"] = _bucket_label(
+            payload.get("confidence_score_v2"),
+            CONFIDENCE_BUCKETS,
+        )
         payload["bet_won"] = _bet_won(payload)
         payload["bet_profit_units"] = _bet_profit_units(payload)
         evaluated.append(payload)
@@ -186,23 +335,24 @@ def publication_policy_grid_frame(
         for min_ev in config.policy_min_evs:
             for min_confidence in config.policy_min_confidences:
                 for min_data_quality in config.policy_min_data_qualities:
-                    selected = _select_policy_rows(
-                        frame,
-                        min_edge=min_edge,
-                        min_ev=min_ev,
-                        min_confidence=min_confidence,
-                        min_data_quality=min_data_quality,
-                        min_bookmaker_count=config.min_bookmaker_count,
-                    )
-                    metrics = _betting_metrics(selected)
-                    rows.append({
-                        "min_edge": min_edge,
-                        "min_ev": min_ev,
-                        "min_confidence": min_confidence,
-                        "min_data_quality": min_data_quality,
-                        "min_bookmaker_count": config.min_bookmaker_count,
-                        **metrics,
-                    })
+                    for min_bookmaker_count in config.policy_min_bookmaker_counts:
+                        selected = _select_policy_rows(
+                            frame,
+                            min_edge=min_edge,
+                            min_ev=min_ev,
+                            min_confidence=min_confidence,
+                            min_data_quality=min_data_quality,
+                            min_bookmaker_count=min_bookmaker_count,
+                        )
+                        metrics = _betting_metrics(selected)
+                        rows.append({
+                            "min_edge": min_edge,
+                            "min_ev": min_ev,
+                            "min_confidence": min_confidence,
+                            "min_data_quality": min_data_quality,
+                            "min_bookmaker_count": min_bookmaker_count,
+                            **metrics,
+                        })
     return pd.DataFrame(rows)
 
 
@@ -212,6 +362,8 @@ def build_publication_summary(
     policy_grid: pd.DataFrame,
     *,
     dataset_path: Path,
+    filtered_dataset_path: Path,
+    filters: JsonDict,
     n_folds: int,
     aggregate_backtest: JsonDict,
     config: OUPublicationBacktestConfig,
@@ -223,6 +375,8 @@ def build_publication_summary(
     value_frame = frame[frame["value_side"].notna()] if not frame.empty else frame
     return {
         "dataset_path": str(dataset_path),
+        "filtered_dataset_path": str(filtered_dataset_path),
+        "filters": filters,
         "row_count": int(len(frame)),
         "n_folds": n_folds,
         "aggregate_backtest": aggregate_backtest,
@@ -371,11 +525,83 @@ def _select_policy_rows(
         & (frame["data_quality_score"].fillna(-999.0) >= min_data_quality)
     )
     if "bookmaker_count" in frame.columns:
-        mask &= (
-            frame["bookmaker_count"].isna()
-            | (frame["bookmaker_count"].fillna(0) >= min_bookmaker_count)
-        )
+        mask &= frame["bookmaker_count"].fillna(0) >= min_bookmaker_count
+    elif min_bookmaker_count > 0:
+        mask &= False
     return frame[mask]
+
+
+def _point_in_time_odds_payload(row: JsonDict) -> JsonDict:
+    odd_over = _optional_float(row.get("odd_over"))
+    odd_under = _optional_float(row.get("odd_under"))
+    market_p_over = _optional_float(row.get("market_p_over"))
+    market_p_under = _optional_float(row.get("market_p_under"))
+    if _odds_after_cutoff(row):
+        odd_over = None
+        odd_under = None
+        market_p_over = None
+        market_p_under = None
+    return {
+        "odd_over": odd_over,
+        "odd_under": odd_under,
+        "market_p_over": market_p_over,
+        "market_p_under": market_p_under,
+    }
+
+
+def _odds_after_cutoff(row: JsonDict) -> bool:
+    odds_time = _first_datetime(
+        row,
+        (
+            "odds_fetched_at",
+            "ou_odds_fetched_at",
+            "market_ou_fetched_at",
+            "ou_market_fetched_at",
+            "odd_fetched_at",
+            "odds_last_update",
+        ),
+    )
+    cutoff_time = _first_datetime(
+        row,
+        (
+            "cutoff_time",
+            "data_cutoff_time",
+            "prediction_time",
+        ),
+    )
+    return odds_time is not None and cutoff_time is not None and odds_time > cutoff_time
+
+
+def _first_datetime(row: JsonDict, keys: tuple[str, ...]) -> pd.Timestamp | None:
+    for key in keys:
+        if key not in row:
+            continue
+        value = row.get(key)
+        if value is None:
+            continue
+        timestamp = pd.to_datetime(value, utc=True, errors="coerce")
+        if not pd.isna(timestamp):
+            return timestamp
+    return None
+
+
+def _timestamp_utc(value: date | str) -> pd.Timestamp:
+    timestamp = pd.to_datetime(value, utc=True, errors="coerce")
+    if pd.isna(timestamp):
+        raise ValueError(f"Invalid date filter value: {value!r}")
+    return timestamp
+
+
+def _is_date_only(value: date | str) -> bool:
+    if isinstance(value, date) and not isinstance(value, pd.Timestamp):
+        return True
+    return isinstance(value, str) and len(value.strip()) == 10
+
+
+def _date_filter_label(value: date | str | None) -> str | None:
+    if value is None:
+        return None
+    return str(value)
 
 
 def _betting_metrics(frame: pd.DataFrame) -> JsonDict:
@@ -445,3 +671,10 @@ def _optional_float(value: Any) -> float | None:
     if not np.isfinite(parsed):
         return None
     return parsed
+
+
+def _optional_int(value: Any) -> int | None:
+    numeric = _optional_float(value)
+    if numeric is None:
+        return None
+    return int(numeric)

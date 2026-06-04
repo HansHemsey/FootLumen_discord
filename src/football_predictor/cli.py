@@ -3852,6 +3852,9 @@ def ou_backtest_publication_v2(
         Path("data/processed/training_ou_v1.parquet"), "--dataset"
     ),
     output_dir: Path = typer.Option(Path("reports/ou_v2"), "--output-dir"),
+    start_date: str | None = typer.Option(None, "--start-date"),
+    end_date: str | None = typer.Option(None, "--end-date"),
+    competition: str | None = typer.Option(None, "--competition"),
     n_splits: int = typer.Option(5, "--n-splits"),
     min_train_rows: int = typer.Option(300, "--min-train-rows"),
     min_recommended_bets: int = typer.Option(20, "--min-recommended-bets"),
@@ -3866,6 +3869,9 @@ def ou_backtest_publication_v2(
     result = run_ou_publication_backtest(
         dataset,
         output_dir=output_dir,
+        start_date=start_date,
+        end_date=end_date,
+        competition=competition,
         config=OUPublicationBacktestConfig(
             ou_backtest_config=OUBacktestConfig(
                 n_splits=n_splits,

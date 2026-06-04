@@ -660,20 +660,35 @@ football-predictor ou backtest-publication-v2 \
   --output-dir reports/ou_v2
 ```
 
+Wrapper script reproductible :
+
+```bash
+python scripts/backtest_ou_v2_publication.py \
+  --dataset data/processed/training_ou_v1.parquet \
+  --output-dir reports/ou_v2 \
+  --start-date 2025-08-01 \
+  --end-date 2026-05-31
+```
+
 Sorties :
 
 - `backtest_summary.json` : synthèse modèle vs marché, ROI, CLV si disponible,
   recommandation de policy ;
 - `roi_by_edge_bucket.csv` : ROI par bucket d'edge ;
 - `roi_by_ev_bucket.csv` : ROI par bucket d'EV ;
+- `roi_by_confidence_bucket.csv` : ROI par bucket de confiance O/U V2 ;
 - `calibration_bins.csv` : calibration modèle et marché ;
 - `publication_policy_grid.csv` : grille `min_edge`, `min_ev`, `min_confidence`,
-  `min_data_quality` ;
+  `min_data_quality`, `min_bookmaker_count` ;
 - `backtest_report.md` : rapport lisible avec recommandation.
 
 La recommandation de policy privilégie ROI positif, volume suffisant, drawdown acceptable
 et cohérence avec les métriques probabilistes. Si aucune policy n'est robuste, le rapport
 recommande de garder O/U en staff-only.
+
+Les cotes closing, si présentes dans le dataset, sont utilisées uniquement pour calculer
+la CLV après sélection. Elles ne doivent jamais entrer dans le masque de sélection d'un
+pick value.
 
 Pour valider le rendu Discord V3 sans envoi réel :
 

@@ -1,5 +1,7 @@
 PYTHON ?= .venv/bin/python
 PIP ?= .venv/bin/pip
+RUFF ?= $(PYTHON) -m ruff
+MYPY ?= $(PYTHON) -m mypy
 CLI ?= scripts/football_predictor_cli.sh
 DOCKER ?= docker
 COMPOSE ?= docker compose
@@ -14,28 +16,34 @@ MODEL_VERSION ?= v2-late
 PREDICT_TODAY_ARGS ?= --date $(DATE) --window $(WINDOW) --no-refresh-data --dry-run
 SEASON ?=
 
-.PHONY: install test lint format typecheck check doctor init-db seed-reference data-quality smoke smoke-live
+.PHONY: install test lint format typecheck compile security check doctor init-db seed-reference data-quality smoke smoke-live
 .PHONY: predict-fixture predict-today publish-daily-discord daily-morning daily-late refresh-all-leagues backfill-season train train-backtest-all train-backtest-ou backtest
 .PHONY: docker-build docker-doctor docker-init-db docker-seed-reference docker-data-quality
 .PHONY: docker-predict-today-dry-run docker-shell compose-doctor compose-run compose-down
 
 install:
-	$(PYTHON) -m pip install -e ".[dev]"
+	$(PYTHON) -m pip install -r requirements-dev.txt
 	$(PYTHON) scripts/repair_editable_install.py
 
 test:
 	$(PYTHON) -m pytest
 
 lint:
-	ruff check .
+	$(RUFF) check .
 
 format:
-	ruff format .
+	$(RUFF) format .
 
 typecheck:
-	mypy src
+	$(MYPY) src
 
-check: lint typecheck test
+compile:
+	$(PYTHON) -m compileall -q src tests scripts alembic
+
+security:
+	$(PYTHON) scripts/security_scan.py
+
+check: compile lint typecheck security test
 
 doctor:
 	$(CLI) doctor --strict

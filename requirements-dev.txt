@@ -1,0 +1,23 @@
+# Direct development baseline for a clean clone.
+# Runtime dependency ranges are also declared in pyproject.toml.
+# Heavy optional ML packages remain under the `ml` extra and are not required by CI.
+-e .[dev]
+alembic==1.18.4
+httpx==0.28.1
+joblib==1.5.3
+numpy==2.4.4
+pandas==3.0.2
+pyarrow==24.0.0
+pydantic==2.13.3
+pydantic-settings==2.14.0
+PyYAML==6.0.3
+python-dotenv==1.2.2
+rich==15.0.0
+scikit-learn==1.8.0
+SQLAlchemy==2.0.49
+typer==0.25.1
+mypy==1.20.2
+pre-commit==4.6.0
+pytest==9.0.3
+pytest-cov==7.1.0
+ruff==0.15.12

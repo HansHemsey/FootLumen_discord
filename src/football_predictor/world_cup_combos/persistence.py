@@ -112,13 +112,43 @@ def persist_combo_ticket_snapshot(
     record = db_models.ComboTicketSnapshot(
         ticket_id=ticket_id,
         ticket_key=snapshot.ticket_key,
-        status=snapshot.status.value,
+        status=_snapshot_status_value(snapshot.status),
         captured_at=snapshot.captured_at,
         snapshot_json=snapshot.to_json_dict(),
         model_versions_json=snapshot.model_versions_json,
         warnings_json=snapshot.warnings_json,
     )
     session.add(record)
+    return record
+
+
+def persist_combo_ticket_with_snapshots(
+    session: Session,
+    ticket: ComboTicketCandidate,
+    *,
+    captured_at: datetime,
+    model_versions_json: dict | None = None,
+    snapshot_types: tuple[str, ...] = ("generated", "scored", "policy_decided"),
+) -> db_models.ComboTicket:
+    record = persist_combo_ticket_candidate(
+        session,
+        ticket,
+        model_versions_json=model_versions_json,
+    )
+    session.flush()
+    for snapshot_type in snapshot_types:
+        persist_combo_ticket_snapshot(
+            session,
+            ComboTicketSnapshot(
+                ticket_key=ticket.ticket_key,
+                status=snapshot_type,
+                candidate=ticket,
+                captured_at=captured_at,
+                model_versions_json=model_versions_json or {},
+                warnings_json=[*ticket.warnings, f"snapshot_type:{snapshot_type}"],
+            ),
+            ticket_id=record.id,
+        )
     return record
 
 
@@ -140,3 +170,8 @@ def persist_combo_leg_snapshot(
     )
     session.add(record)
     return record
+
+
+def _snapshot_status_value(status: object) -> str:
+    value = getattr(status, "value", status)
+    return str(value)

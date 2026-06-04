@@ -8,6 +8,8 @@ Cette feature prépare un socle indépendant pour de futurs tickets combinés Co
 Le sprint 1 ajoute la configuration, les objets métier et la persistance.
 Le sprint 2 ajoute la lecture des fixtures CDM 2026, la création de sessions horaires et
 la sélection de legs candidats à partir des prédictions déjà persistées.
+Le sprint 3 ajoute la construction de tickets candidats, le scoring combiné, les pénalités
+de risque et la décision `PUBLIC_PUBLISHED` / `STAFF_ONLY` / `NO_BET`.
 
 La feature ne modifie pas les prédictions 1X2, V3 ou O/U existantes.
 
@@ -56,14 +58,32 @@ Règles point-in-time :
 - odds avec `fetched_at <= lock_time` uniquement ;
 - lineups avec `fetched_at <= lock_time` uniquement.
 
-## Non Branché Dans Ce Sprint
+## Sprint 3
+
+Services ajoutés :
+
+- `worldcup_combo_builder.py` : construit au plus un ticket 2 legs safe et un ticket
+  3 legs staff-only par session.
+- `worldcup_combo_scoring.py` : calcule cotes combinées, probabilités, EV brute/ajustée,
+  risques, fraîcheur et confiance combinée.
+- `worldcup_combo_publication_policy.py` : applique la policy public/staff/no-bet sans
+  envoyer de message Discord.
+- `scripts/dry_run_worldcup_combo_builder.py` : affiche les meilleurs tickets par session
+  sans écrire en DB ni publier.
+
+Les snapshots de cycle supportés sont :
+
+- `generated`
+- `scored`
+- `policy_decided`
+
+## Non Branché À Ce Stade
 
 - pas de commande CLI ;
 - pas de cron ;
 - pas de publication Discord ;
 - pas de modification des channels Discord ;
-- pas de construction automatique de tickets ;
 - pas de settlement.
 
-Les prochains sprints pourront construire les tickets, appliquer la décision de publication
-puis brancher Discord, en gardant ce socle inactif par défaut.
+Les prochains sprints pourront brancher Discord et l'orchestration cron, en gardant ce
+socle inactif par défaut.

@@ -27,15 +27,23 @@ from football_predictor.world_cup_combos.models import (
     ComboLegSelectionResult,
     ComboTicketCandidate,
     ComboTicketSnapshot,
+    WorldCupComboFixtureRef,
+    WorldCupComboSession,
 )
 from football_predictor.world_cup_combos.persistence import (
     ensure_combo_tables,
     persist_combo_ticket_candidate,
     persist_combo_ticket_snapshot,
+    persist_combo_ticket_with_snapshots,
 )
+from football_predictor.world_cup_combos.worldcup_combo_builder import WorldCupComboBuilder
 from football_predictor.world_cup_combos.worldcup_combo_leg_selector import (
     WorldCupComboLegSelector,
 )
+from football_predictor.world_cup_combos.worldcup_combo_publication_policy import (
+    WorldCupComboPublicationPolicy,
+)
+from football_predictor.world_cup_combos.worldcup_combo_scoring import WorldCupComboScoring
 from football_predictor.world_cup_combos.worldcup_combo_sessions import (
     WorldCupComboSessionService,
 )
@@ -111,7 +119,7 @@ def test_worldcup_combo_ticket_candidate_serializes_nested_legs() -> None:
     assert payload["competition_key"] == "fifa_world_cup_2026"
     assert payload["publication_decision"] == "DRAFT"
     assert payload["legs"][0]["selection"] == "Synthetic Home"
-    assert payload["warnings"] == ["ticket-warning"]
+    assert "ticket-warning" in payload["warnings"]
 
 
 def test_worldcup_combo_tables_are_created_idempotently(tmp_path: Path) -> None:
@@ -365,34 +373,280 @@ def test_worldcup_combo_selector_excludes_knockout_unknown_scope(tmp_path: Path)
     assert _reason_counts(result)["ambiguous_market_scope"] == 1
 
 
-def _leg_candidate() -> ComboLegCandidate:
+def test_worldcup_combo_scoring_multiplies_odds_probability_and_raw_ev() -> None:
+    legs = (
+        _leg_candidate(fixture_id=-2001, decimal_odd=2.0, model_probability=0.60),
+        _leg_candidate(fixture_id=-2002, decimal_odd=2.0, model_probability=0.55),
+    )
+
+    scoring = WorldCupComboScoring().score(legs)
+
+    assert scoring.combined_decimal_odds == 4.0
+    assert scoring.combined_probability_raw == 0.33
+    assert scoring.combined_ev_raw == 0.32
+    assert scoring.combined_probability_adjusted == 0.33
+    assert scoring.combined_ev_adjusted == 0.32
+
+
+def test_worldcup_combo_scoring_adjusts_ev_with_penalties() -> None:
+    legs = (
+        _leg_candidate(
+            fixture_id=-2101,
+            freshness_score=45.0,
+            lineup_status="missing",
+            warnings=["lineup_missing_close_to_kickoff", "odds_stale"],
+        ),
+        _leg_candidate(
+            fixture_id=-2102,
+            freshness_score=55.0,
+            lineup_status="partial",
+            warnings=["prediction_stale"],
+        ),
+    )
+
+    scoring = WorldCupComboScoring().score(legs, is_matchday3=True)
+
+    assert scoring.combined_ev_adjusted < scoring.combined_ev_raw
+    assert scoring.post_lock_risk_score > 0
+    assert scoring.lineup_risk_score > 0
+    assert "matchday3_public_risk" in scoring.warnings
+
+
+def test_worldcup_combo_confidence_is_penalized_by_weakest_leg() -> None:
+    scoring = WorldCupComboScoring()
+    strong = scoring.score(
+        (
+            _leg_candidate(fixture_id=-2201, confidence_score=82.0),
+            _leg_candidate(fixture_id=-2202, confidence_score=80.0),
+        )
+    )
+    weak = scoring.score(
+        (
+            _leg_candidate(fixture_id=-2201, confidence_score=82.0),
+            _leg_candidate(fixture_id=-2202, confidence_score=35.0),
+        )
+    )
+
+    assert weak.combined_confidence_score < strong.combined_confidence_score
+
+
+def test_worldcup_combo_builder_returns_no_ticket_with_single_leg() -> None:
+    config = _enabled_config()
+    session = _combo_session((-2301, -2302))
+
+    tickets = WorldCupComboBuilder(config).build_for_session(
+        session,
+        [_leg_candidate(fixture_id=-2301)],
+    )
+
+    assert tickets == []
+
+
+def test_worldcup_combo_builder_builds_valid_two_leg_ticket() -> None:
+    config = _enabled_config(staff_only_shadow_mode=False)
+    session = _combo_session((-2401, -2402))
+
+    tickets = WorldCupComboBuilder(config).build_for_session(
+        session,
+        (
+            _leg_candidate(fixture_id=-2401, confidence_score=88.0, data_quality_score=90.0),
+            _leg_candidate(fixture_id=-2402, confidence_score=86.0, data_quality_score=90.0),
+        ),
+    )
+
+    assert len(tickets) == 1
+    assert tickets[0].legs_count == 2
+    assert tickets[0].publication_decision == ComboTicketStatus.PUBLIC_PUBLISHED
+
+
+def test_worldcup_combo_builder_builds_three_leg_staff_ticket() -> None:
+    config = _enabled_config(staff_only_shadow_mode=False)
+    session = _combo_session((-2501, -2502, -2503))
+
+    tickets = WorldCupComboBuilder(config).build_for_session(
+        session,
+        (
+            _leg_candidate(fixture_id=-2501, confidence_score=88.0, data_quality_score=90.0),
+            _leg_candidate(fixture_id=-2502, confidence_score=86.0, data_quality_score=90.0),
+            _leg_candidate(fixture_id=-2503, confidence_score=84.0, data_quality_score=90.0),
+        ),
+    )
+
+    assert {ticket.legs_count for ticket in tickets} == {2, 3}
+    staff_ticket = next(ticket for ticket in tickets if ticket.legs_count == 3)
+    assert staff_ticket.publication_decision == ComboTicketStatus.STAFF_ONLY
+    assert staff_ticket.no_publish_reason == "too_many_public_legs"
+
+
+def test_worldcup_combo_builder_excludes_same_fixture_combos() -> None:
+    config = _enabled_config(staff_only_shadow_mode=False)
+    session = _combo_session((-2601, -2602))
+
+    tickets = WorldCupComboBuilder(config).build_for_session(
+        session,
+        (
+            _leg_candidate(fixture_id=-2601, market_type=ComboMarketType.HOME),
+            _leg_candidate(fixture_id=-2601, market_type=ComboMarketType.OVER_25),
+            _leg_candidate(fixture_id=-2602, market_type=ComboMarketType.AWAY),
+        ),
+    )
+
+    assert tickets
+    assert all(
+        len({leg.fixture_id for leg in ticket.legs}) == ticket.legs_count
+        for ticket in tickets
+    )
+
+
+def test_worldcup_combo_policy_blocks_matchday3_public() -> None:
+    config = _enabled_config(staff_only_shadow_mode=False)
+    session = _combo_session((-2701, -2702), is_matchday3=True)
+
+    tickets = WorldCupComboBuilder(config).build_for_session(
+        session,
+        (
+            _leg_candidate(fixture_id=-2701, confidence_score=88.0, data_quality_score=90.0),
+            _leg_candidate(fixture_id=-2702, confidence_score=86.0, data_quality_score=90.0),
+        ),
+    )
+
+    assert tickets[0].publication_decision == ComboTicketStatus.STAFF_ONLY
+    assert tickets[0].no_publish_reason == "matchday3_public_forbidden"
+
+
+def test_worldcup_combo_policy_knockout_unknown_scope_is_no_bet() -> None:
+    config = _enabled_config(staff_only_shadow_mode=False, allow_public_knockout=True)
+    ticket = _ticket_candidate(
+        legs=(
+            _leg_candidate(fixture_id=-2801, market_scope=ComboMarketScope.UNKNOWN),
+            _leg_candidate(fixture_id=-2802),
+        )
+    )
+
+    decided = WorldCupComboPublicationPolicy(config).decide(ticket)
+
+    assert decided.publication_decision == ComboTicketStatus.NO_BET
+    assert decided.no_publish_reason == "market_scope_unknown"
+
+
+def test_worldcup_combo_policy_shadow_mode_prevents_public() -> None:
+    config = _enabled_config(staff_only_shadow_mode=True)
+    ticket = _ticket_candidate(
+        legs=(
+            _leg_candidate(fixture_id=-2901, confidence_score=88.0, data_quality_score=90.0),
+            _leg_candidate(fixture_id=-2902, confidence_score=86.0, data_quality_score=90.0),
+        )
+    )
+
+    decided = WorldCupComboPublicationPolicy(config).decide(ticket)
+
+    assert decided.publication_decision == ComboTicketStatus.STAFF_ONLY
+    assert decided.no_publish_reason == "staff_only_shadow_mode"
+
+
+def test_worldcup_combo_policy_no_bet_if_adjusted_ev_non_positive() -> None:
+    config = _enabled_config(staff_only_shadow_mode=False)
+    ticket = _ticket_candidate(
+        legs=(
+            _leg_candidate(
+                fixture_id=-3001,
+                decimal_odd=1.97,
+                model_probability=0.51,
+                edge=0.01,
+                ev=0.004,
+                freshness_score=30.0,
+                lineup_status="missing",
+                warnings=["lineup_missing_close_to_kickoff"],
+            ),
+            _leg_candidate(
+                fixture_id=-3002,
+                decimal_odd=1.97,
+                model_probability=0.51,
+                edge=0.01,
+                ev=0.004,
+                freshness_score=30.0,
+                lineup_status="missing",
+                warnings=["lineup_missing_close_to_kickoff"],
+            ),
+        )
+    )
+
+    decided = WorldCupComboPublicationPolicy(config).decide(ticket)
+
+    assert decided.combined_ev_adjusted <= 0
+    assert decided.publication_decision == ComboTicketStatus.NO_BET
+
+
+def test_worldcup_combo_persistence_stores_lifecycle_snapshots(tmp_path: Path) -> None:
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'combos.db'}")
+    ensure_combo_tables(engine)
+    session_factory = create_session_factory(engine)
+    ticket = _ticket_candidate(
+        legs=(
+            _leg_candidate(fixture_id=-3101),
+            _leg_candidate(fixture_id=-3102),
+        )
+    )
+
+    with session_scope(session_factory) as session:
+        persist_combo_ticket_with_snapshots(
+            session,
+            ticket,
+            captured_at=datetime(2026, 6, 11, 17, 40, tzinfo=UTC),
+        )
+
+    assert _count_rows(engine, "combo_tickets") == 1
+    assert _count_rows(engine, "combo_ticket_legs") == 2
+    assert _count_rows(engine, "combo_ticket_snapshots") == 3
+
+
+def _leg_candidate(
+    *,
+    fixture_id: int = -101,
+    market_type: ComboMarketType = ComboMarketType.HOME,
+    market_scope: ComboMarketScope = ComboMarketScope.NINETY_MIN,
+    selection: str = "Synthetic Home",
+    decimal_odd: float = 2.1,
+    model_probability: float = 0.52,
+    market_probability: float = 0.47,
+    edge: float = 0.05,
+    ev: float = 0.092,
+    confidence_score: float = 78.0,
+    confidence_label: str = "High",
+    data_quality_score: float = 84.0,
+    lineup_status: str = "available",
+    freshness_score: float | None = 100.0,
+    warnings: list[str] | None = None,
+) -> ComboLegCandidate:
     kickoff = datetime(2026, 6, 11, 18, tzinfo=UTC)
     return ComboLegCandidate(
-        fixture_id=-101,
+        fixture_id=fixture_id,
         kickoff_at_utc=kickoff,
         kickoff_at_paris=kickoff + timedelta(hours=2),
-        market_type=ComboMarketType.HOME,
-        market_scope=ComboMarketScope.NINETY_MIN,
-        selection="Synthetic Home",
-        decimal_odd=2.1,
-        model_probability=0.52,
-        market_probability=0.47,
-        edge=0.05,
-        ev=0.092,
-        confidence_score=62.0,
-        confidence_label="Medium",
-        data_quality_score=78.0,
+        market_type=market_type,
+        market_scope=market_scope,
+        selection=selection,
+        decimal_odd=decimal_odd,
+        model_probability=model_probability,
+        market_probability=market_probability,
+        edge=edge,
+        ev=ev,
+        confidence_score=confidence_score,
+        confidence_label=confidence_label,
+        data_quality_score=data_quality_score,
         odds_snapshot_id=-201,
         prediction_snapshot_id=-301,
-        lineup_status="unknown",
+        lineup_status=lineup_status,
         odds_last_update=kickoff - timedelta(minutes=45),
         prediction_generated_at=kickoff - timedelta(minutes=40),
-        warnings=["synthetic-warning"],
+        freshness_score=freshness_score,
+        warnings=warnings if warnings is not None else ["synthetic-warning"],
     )
 
 
 def _ticket_candidate(legs: tuple[ComboLegCandidate, ...]) -> ComboTicketCandidate:
     first_kickoff = datetime(2026, 6, 11, 18, tzinfo=UTC)
+    scoring = WorldCupComboScoring().score(legs)
     return ComboTicketCandidate(
         competition_key="fifa_world_cup_2026",
         league_id=1,
@@ -404,27 +658,70 @@ def _ticket_candidate(legs: tuple[ComboLegCandidate, ...]) -> ComboTicketCandida
         last_kickoff_at=first_kickoff + timedelta(hours=2),
         lock_time=first_kickoff - timedelta(minutes=20),
         legs_count=len(legs),
-        combined_decimal_odds=2.1,
-        combined_probability_raw=0.52,
-        combined_probability_adjusted=0.50,
-        combined_fair_odds=2.0,
-        combined_ev_raw=0.092,
-        combined_ev_adjusted=0.05,
-        combined_confidence_score=61.0,
-        combined_confidence_label="Medium",
-        post_lock_risk_score=20.0,
-        freshness_score=82.0,
-        lineup_risk_score=15.0,
+        combined_decimal_odds=scoring.combined_decimal_odds,
+        combined_probability_raw=scoring.combined_probability_raw,
+        combined_probability_adjusted=scoring.combined_probability_adjusted,
+        combined_fair_odds=scoring.combined_fair_odds,
+        combined_ev_raw=scoring.combined_ev_raw,
+        combined_ev_adjusted=scoring.combined_ev_adjusted,
+        combined_confidence_score=scoring.combined_confidence_score,
+        combined_confidence_label=scoring.combined_confidence_label,
+        post_lock_risk_score=scoring.post_lock_risk_score,
+        freshness_score=scoring.freshness_score,
+        lineup_risk_score=scoring.lineup_risk_score,
         publication_decision=ComboTicketStatus.DRAFT,
         no_publish_reason=None,
         legs=legs,
-        warnings=["ticket-warning"],
+        warnings=["ticket-warning", *scoring.warnings],
     )
 
 
 def _count_rows(engine, table_name: str) -> int:
     with engine.connect() as connection:
         return int(connection.exec_driver_sql(f"select count(*) from {table_name}").scalar_one())
+
+
+def _combo_session(
+    fixture_ids: tuple[int, ...],
+    *,
+    is_matchday3: bool = False,
+    is_knockout: bool = False,
+) -> WorldCupComboSession:
+    first_kickoff = datetime(2026, 6, 11, 18, tzinfo=UTC)
+    fixtures = tuple(
+        WorldCupComboFixtureRef(
+            fixture_id=fixture_id,
+            kickoff_at_utc=first_kickoff + timedelta(hours=index),
+            kickoff_at_paris=first_kickoff + timedelta(hours=index + 2),
+            home_team=f"Synthetic Home {index}",
+            away_team=f"Synthetic Away {index}",
+            status_short="NS",
+            round_name=_synthetic_round_name(index, is_matchday3, is_knockout),
+            league_id=1,
+            season=2026,
+            competition_key="fifa_world_cup_2026",
+        )
+        for index, fixture_id in enumerate(fixture_ids)
+    )
+    return WorldCupComboSession(
+        session_key="synthetic-session-builder",
+        combo_date_paris=date(2026, 6, 11),
+        first_kickoff_at=fixtures[0].kickoff_at_utc,
+        last_kickoff_at=fixtures[-1].kickoff_at_utc,
+        fixtures=fixtures,
+        stage="KNOCKOUT" if is_knockout else "GROUP",
+        group_matchday=3 if is_matchday3 else 1,
+        is_matchday3=is_matchday3,
+        is_knockout=is_knockout,
+        lock_time=first_kickoff - timedelta(minutes=20),
+    )
+
+
+def _synthetic_round_name(index: int, is_matchday3: bool, is_knockout: bool) -> str:
+    if is_knockout:
+        return "Quarter-finals"
+    group = chr(ord("A") + index)
+    return f"Group {group} - {3 if is_matchday3 else 1}"
 
 
 def _init_full_db(tmp_path: Path):

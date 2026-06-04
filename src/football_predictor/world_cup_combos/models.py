@@ -150,7 +150,7 @@ class ComboLegSnapshot:
 @dataclass(frozen=True)
 class ComboTicketSnapshot:
     ticket_key: str
-    status: ComboTicketStatus
+    status: ComboTicketStatus | str
     candidate: ComboTicketCandidate
     captured_at: datetime
     model_versions_json: JsonDict = field(default_factory=dict)

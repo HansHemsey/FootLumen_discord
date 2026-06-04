@@ -17,6 +17,14 @@ from football_predictor.world_cup_combos.models import (
     WorldCupComboFixtureRef,
     WorldCupComboSession,
 )
+from football_predictor.world_cup_combos.worldcup_combo_builder import WorldCupComboBuilder
+from football_predictor.world_cup_combos.worldcup_combo_publication_policy import (
+    WorldCupComboPublicationPolicy,
+)
+from football_predictor.world_cup_combos.worldcup_combo_scoring import (
+    ComboScoringResult,
+    WorldCupComboScoring,
+)
 
 __all__ = [
     "ComboFixtureNoCandidate",
@@ -29,7 +37,11 @@ __all__ = [
     "ComboTicketDecision",
     "ComboTicketSnapshot",
     "ComboTicketStatus",
+    "ComboScoringResult",
     "WorldCupComboConfig",
+    "WorldCupComboBuilder",
     "WorldCupComboFixtureRef",
+    "WorldCupComboPublicationPolicy",
+    "WorldCupComboScoring",
     "WorldCupComboSession",
 ]

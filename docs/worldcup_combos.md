@@ -12,6 +12,8 @@ Le sprint 3 ajoute la construction de tickets candidats, le scoring combiné, le
 de risque et la décision `PUBLIC_PUBLISHED` / `STAFF_ONLY` / `NO_BET`.
 Le sprint 4 ajoute refresh policy, revalidation pre-lock, lock final, formatage Discord,
 publication contrôlée et settlement.
+Le passage production ajoute une orchestration contrôlée `generate -> lock -> publish -> settle`
+sans activer de cron par défaut.
 
 La feature ne modifie pas les prédictions 1X2, V3 ou O/U existantes.
 
@@ -89,31 +91,34 @@ Services ajoutés :
   anciennes selon la proximité du kickoff.
 - `worldcup_combo_lock_service.py` : revalide un ticket avant lock, recalcule scoring/policy,
   crée le snapshot `pre_lock`, puis passe `LOCKED`, `STAFF_ONLY` ou `NO_BET`.
-- `worldcup_combo_formatter.py` : formate watchlist staff, ticket public verrouillé et no bet.
-- `worldcup_combo_publication_service.py` : publie en staff/public uniquement via service
-  contrôlé, avec idempotence par `ticket_key`.
+- `worldcup_combo_formatter.py` : formate watchlist staff, ticket verrouillé staff et no bet.
+- `worldcup_combo_publication_service.py` : publie uniquement dans le channel staff,
+  avec idempotence par `ticket_key`.
 - `worldcup_combo_settlement.py` : calcule `WON`, `LOST`, `VOID`, `PARTIAL_VOID` et
   `profit_unit` après résultats.
 
-Règles public/staff/no bet :
+Règles staff/no bet :
 
-- public seulement si le ticket est `LOCKED` et repasse la policy publique ;
-- staff si shadow mode, risque post-lock trop élevé, confiance insuffisante ou contexte
-  public interdit ;
+- toutes les publications Discord partent vers `predictions_staff` ;
+- un ticket théoriquement publiable reste staff-only pendant la CDM ;
 - no bet si EV ajustée non positive, market scope inconnu, data insuffisante ou warning
   critique ;
 - aucun message ne promet un gain ou une certitude.
 
 ## Commandes Contrôlées
 
-Toutes les commandes respectent `enabled: false` par défaut.
+Le fichier prod `config/worldcup_combos.yaml` est activé, mais staff-only.
 
 Dry-run :
 
 ```bash
+football-predictor worldcup-combos-run --dry-run
+football-predictor worldcup-combos-publish --dry-run
 PYTHONPATH=src .venv/bin/python scripts/dry_run_worldcup_combo_candidates.py --config config/worldcup_combos.yaml
 PYTHONPATH=src .venv/bin/python scripts/dry_run_worldcup_combo_builder.py --config config/worldcup_combos.yaml
 PYTHONPATH=src .venv/bin/python scripts/dry_run_worldcup_combo_publish.py --config config/worldcup_combos.yaml
+PYTHONPATH=src .venv/bin/python scripts/run_worldcup_combos.py --config config/worldcup_combos.yaml
+PYTHONPATH=src .venv/bin/python scripts/publish_worldcup_combos.py --config config/worldcup_combos.yaml
 PYTHONPATH=src .venv/bin/python scripts/lock_worldcup_combos.py --config config/worldcup_combos.yaml
 PYTHONPATH=src .venv/bin/python scripts/settle_worldcup_combos.py --config config/worldcup_combos.yaml
 ```
@@ -121,17 +126,39 @@ PYTHONPATH=src .venv/bin/python scripts/settle_worldcup_combos.py --config confi
 Execution explicite :
 
 ```bash
+football-predictor worldcup-combos-run --execute
+football-predictor worldcup-combos-publish --execute
+PYTHONPATH=src .venv/bin/python scripts/run_worldcup_combos.py --config config/worldcup_combos.yaml --execute
+PYTHONPATH=src .venv/bin/python scripts/publish_worldcup_combos.py --config config/worldcup_combos.yaml --execute
 PYTHONPATH=src .venv/bin/python scripts/lock_worldcup_combos.py --config config/worldcup_combos.yaml --execute
 PYTHONPATH=src .venv/bin/python scripts/settle_worldcup_combos.py --config config/worldcup_combos.yaml --execute
 ```
 
-## Non Branché À Ce Stade
+`worldcup-combos-run` génère et persiste les tickets, mais ne publie aucun message Discord.
+`worldcup-combos-publish` publie uniquement des tickets déjà persistés, avec dry-run par défaut.
 
-- pas de commande CLI ;
-- pas de cron ;
-- pas de cron production ;
-- pas de publication automatique ;
-- pas de modification des channels Discord existants.
+## Passage Production VPS
+
+Avant toute activation :
+
+```bash
+alembic upgrade head
+football-predictor worldcup-combos-run --dry-run
+football-predictor worldcup-combos-publish --dry-run
+```
+
+Configuration de production :
+
+```yaml
+enabled: true
+staff_only_shadow_mode: true
+allow_public_matchday3: false
+allow_public_knockout: false
+```
+
+Les cron combinés de `config/prod_worldcup.crontab` sont actifs. Ils génèrent, verrouillent,
+publient en staff et settlent les tickets. Aucun channel public n'est nécessaire : la route
+réelle à vérifier côté VPS est `predictions_staff`.
 
 La feature reste CDM 2026 uniquement : `competition_key=fifa_world_cup_2026`,
 `league_id=1`, `season=2026`.

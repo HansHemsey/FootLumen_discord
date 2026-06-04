@@ -66,6 +66,7 @@ Il garde uniquement :
 - squads/effectifs CDM deux fois par semaine ;
 - backfill post-match CDM ;
 - predictions CDM M-30 ;
+- combinés CDM actifs, publiés uniquement en staff ;
 - resultats CDM ;
 - score hebdo.
 
@@ -118,6 +119,7 @@ git pull --ff-only origin main
 
 football-predictor doctor --strict
 football-predictor worldcup-audit-reference
+alembic upgrade head
 ```
 
 Verifier ou generer le modele CDM :
@@ -140,6 +142,27 @@ football-predictor worldcup-run-daily \
   --dry-run
 ```
 
+Smoke test combinés CDM, sans publication Discord :
+
+```bash
+football-predictor worldcup-combos-run --dry-run
+football-predictor worldcup-combos-publish --dry-run
+PYTHONPATH=src .venv/bin/python scripts/lock_worldcup_combos.py --config config/worldcup_combos.yaml
+PYTHONPATH=src .venv/bin/python scripts/settle_worldcup_combos.py --config config/worldcup_combos.yaml
+```
+
+Configuration combinés CDM en production staff-only :
+
+```yaml
+enabled: true
+staff_only_shadow_mode: true
+allow_public_matchday3: false
+allow_public_knockout: false
+```
+
+Les combinés sont publiés uniquement dans `predictions_staff`. Aucun channel public dédié
+n'est requis pendant la Coupe du Monde.
+
 Installer le crontab CDM only :
 
 ```bash
@@ -152,6 +175,10 @@ Surveiller les premiers logs :
 ```bash
 tail -n 100 logs/cron/worldcup_daily_morning.log
 tail -n 100 logs/cron/worldcup_late.log
+tail -n 100 logs/cron/worldcup_combos_run.log
+tail -n 100 logs/cron/worldcup_combos_lock.log
+tail -n 100 logs/cron/worldcup_combos_publish.log
+tail -n 100 logs/cron/worldcup_combos_settle.log
 tail -n 100 logs/cron/worldcup_details.log
 tail -n 100 logs/cron/worldcup_weekly_score.log
 ```

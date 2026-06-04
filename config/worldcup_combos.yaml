@@ -1,6 +1,6 @@
 # World Cup 2026 combo tickets.
-# Sprint 1 only: technical base, disabled by default, no Discord/job wiring.
-enabled: false
+# Production mode: enabled, but every Discord publication is routed to staff only.
+enabled: true
 competition_key: fifa_world_cup_2026
 league_id: 1
 season: 2026

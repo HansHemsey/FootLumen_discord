@@ -55,6 +55,9 @@ from football_predictor.world_cup_combos.worldcup_combo_publication_service impo
 from football_predictor.world_cup_combos.worldcup_combo_refresh_policy import (
     WorldCupComboRefreshPolicy,
 )
+from football_predictor.world_cup_combos.worldcup_combo_run_service import (
+    WorldCupComboRunService,
+)
 from football_predictor.world_cup_combos.worldcup_combo_scoring import WorldCupComboScoring
 from football_predictor.world_cup_combos.worldcup_combo_sessions import (
     WorldCupComboSessionService,
@@ -730,7 +733,7 @@ def test_worldcup_combo_formatter_outputs_watchlist_public_and_no_bet() -> None:
 
     assert "COMBINÉ CDM — WATCHLIST STAFF" in watchlist
     assert "COMBINÉ CDM — VERROUILLÉ" in public
-    assert "Aucun combiné CDM public" in no_bet
+    assert "Aucun combiné CDM publiable" in no_bet
     assert "pas une certitude" in public
 
 
@@ -756,6 +759,115 @@ def test_worldcup_combo_publication_is_idempotent(tmp_path: Path) -> None:
 
     assert first.status == "dry_run"
     assert second.status == "duplicate_skipped"
+
+
+def test_worldcup_combo_publication_dry_run_does_not_block_execute(
+    tmp_path: Path,
+) -> None:
+    engine = _init_full_db(tmp_path)
+    config = _enabled_config()
+    ticket = _ticket_candidate(
+        legs=(
+            _leg_candidate(fixture_id=-3711),
+            _leg_candidate(fixture_id=-3712),
+        )
+    )
+
+    with session_scope(create_session_factory(engine)) as session:
+        dry_run_service = WorldCupComboPublicationService(
+            session,
+            config,
+            delivery_service=DiscordDeliveryService(session),
+        )
+        dry_run = dry_run_service.publish_watchlist_staff(
+            ticket,
+            dry_run=True,
+            execute=False,
+        )
+        execute_service = WorldCupComboPublicationService(session, config)
+        execute = execute_service.publish_watchlist_staff(
+            ticket,
+            dry_run=False,
+            execute=True,
+        )
+
+    assert dry_run.status == "dry_run"
+    assert execute.status == "skipped"
+    assert execute.reason == "no_delivery_service"
+
+
+def test_worldcup_combo_locked_public_capable_ticket_still_publishes_to_staff(
+    tmp_path: Path,
+) -> None:
+    engine = _init_full_db(tmp_path)
+    config = _enabled_config(staff_only_shadow_mode=False)
+    ticket = replace(
+        _ticket_candidate(
+            legs=(
+                _leg_candidate(fixture_id=-3721),
+                _leg_candidate(fixture_id=-3722),
+            )
+        ),
+        publication_decision=ComboTicketStatus.LOCKED,
+    )
+
+    with session_scope(create_session_factory(engine)) as session:
+        service = WorldCupComboPublicationService(
+            session,
+            config,
+            delivery_service=DiscordDeliveryService(session),
+        )
+        result = service.publish_locked(
+            ticket,
+            locked_at=datetime(2026, 6, 11, 17, 40, tzinfo=UTC),
+            dry_run=True,
+            execute=False,
+        )
+
+    assert result.status == "dry_run"
+    assert result.channel_key == "predictions_staff"
+    assert result.message_type == "worldcup_combo_staff"
+
+
+def test_worldcup_combo_run_service_dry_run_does_not_persist(tmp_path: Path) -> None:
+    engine = _init_full_db(tmp_path)
+    config = _enabled_config()
+    target_date = date(2026, 6, 11)
+    with session_scope(create_session_factory(engine)) as session:
+        _seed_combo_run_sources(session)
+        summary = WorldCupComboRunService(session, config).run(
+            target_date=target_date,
+            execute=False,
+            captured_at=datetime(2026, 6, 11, 12, tzinfo=UTC),
+        )
+
+    assert summary.enabled is True
+    assert summary.sessions == 1
+    assert summary.candidate_legs >= 2
+    assert summary.tickets >= 1
+    assert summary.persisted_tickets == 0
+    assert _count_rows(engine, "combo_tickets") == 0
+    assert _count_rows(engine, "combo_ticket_snapshots") == 0
+
+
+def test_worldcup_combo_run_service_execute_persists_tickets_and_snapshots(
+    tmp_path: Path,
+) -> None:
+    engine = _init_full_db(tmp_path)
+    config = _enabled_config()
+    target_date = date(2026, 6, 11)
+    with session_scope(create_session_factory(engine)) as session:
+        _seed_combo_run_sources(session)
+        summary = WorldCupComboRunService(session, config).run(
+            target_date=target_date,
+            execute=True,
+            captured_at=datetime(2026, 6, 11, 12, tzinfo=UTC),
+        )
+
+    assert summary.enabled is True
+    assert summary.persisted_tickets == summary.tickets
+    assert _count_rows(engine, "combo_tickets") == summary.tickets
+    assert _count_rows(engine, "combo_ticket_snapshots") == summary.tickets * 3
 
 
 def test_worldcup_combo_settlement_won_and_lost(tmp_path: Path) -> None:
@@ -1053,6 +1165,40 @@ def _seed_finished_fixture(
             payload_json={"synthetic": True},
         )
     )
+
+
+def _seed_combo_run_sources(session) -> None:
+    first_kickoff = datetime(2026, 6, 11, 18, tzinfo=UTC)
+    prediction_time = first_kickoff - timedelta(hours=3)
+    odds_time = first_kickoff - timedelta(hours=3, minutes=5)
+    for index, fixture_id in enumerate((-4101, -4102), start=1):
+        kickoff = first_kickoff + timedelta(hours=index - 1)
+        _seed_fixture(
+            session,
+            fixture_id=fixture_id,
+            kickoff=kickoff,
+            round_name=f"Group A - {index}",
+        )
+        _seed_1x2_prediction(
+            session,
+            fixture_id=fixture_id,
+            prediction_time=prediction_time,
+            p_home=0.62,
+            p_draw=0.2,
+            p_away=0.18,
+            predicted_result="HOME",
+            confidence_score=76.0,
+            data_quality_score=82.0,
+        )
+        _seed_1x2_odds(
+            session,
+            fixture_id=fixture_id,
+            fetched_at=odds_time,
+            odd_home=2.05,
+            odd_draw=3.5,
+            odd_away=4.0,
+        )
+        session.flush()
 
 
 def _ensure_synthetic_teams(session) -> None:

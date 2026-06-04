@@ -72,7 +72,7 @@ class WorldCupComboFormatter:
     ) -> str:
         lines = [
             "```md",
-            "🚫 Aucun combiné CDM public",
+            "🚫 Aucun combiné CDM publiable",
             "",
             f"Raison : {reason}",
         ]
@@ -91,7 +91,7 @@ class WorldCupComboFormatter:
         lines.extend(
             [
                 "",
-                "Aucune publication publique sans value suffisante et risque maîtrisé.",
+                "Aucune proposition sans value suffisante et risque maîtrisé.",
                 "```",
             ]
         )

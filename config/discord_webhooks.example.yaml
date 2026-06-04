@@ -25,3 +25,6 @@ webhooks:
     calendrier:
       webhook_url: "REPLACE_WITH_WEBHOOK_URL"
       enabled: true
+    predictions:
+      webhook_url: "REPLACE_WITH_WEBHOOK_URL"
+      enabled: true

@@ -38,17 +38,13 @@ class WorldCupComboPublicationService:
         *,
         delivery_service: DiscordDeliveryService | None = None,
         formatter: WorldCupComboFormatter | None = None,
-        public_channel_key: str = "combines",
         staff_channel_key: str = "predictions_staff",
-        no_bet_public: bool = False,
     ) -> None:
         self.session = session
         self.config = config
         self.delivery_service = delivery_service
         self.formatter = formatter or WorldCupComboFormatter(config.timezone_display)
-        self.public_channel_key = public_channel_key
         self.staff_channel_key = staff_channel_key
-        self.no_bet_public = no_bet_public
         self.policy = WorldCupComboPublicationPolicy(config)
 
     def publish_watchlist_staff(
@@ -100,11 +96,11 @@ class WorldCupComboPublicationService:
             return self._send(
                 ticket=ticket,
                 markdown=self.formatter.format_public_locked(ticket, locked_at=locked_at),
-                channel_key=self.public_channel_key,
-                message_type="worldcup_combo_public",
+                channel_key=self.staff_channel_key,
+                message_type="worldcup_combo_staff",
                 dry_run=dry_run or not execute,
                 execute=execute,
-                target_status=ComboTicketStatus.PUBLIC_PUBLISHED,
+                target_status=ComboTicketStatus.STAFF_ONLY,
             )
         return self._send(
             ticket=ticket,
@@ -132,11 +128,10 @@ class WorldCupComboPublicationService:
                 ticket_key=ticket.ticket_key if ticket else None,
                 reason="feature_disabled",
             )
-        channel_key = self.public_channel_key if self.no_bet_public else self.staff_channel_key
         return self._send(
             ticket=ticket,
             markdown=self.formatter.format_no_bet(reason=reason, ticket=ticket),
-            channel_key=channel_key,
+            channel_key=self.staff_channel_key,
             message_type="worldcup_combo_no_bet",
             dry_run=dry_run or not execute,
             execute=execute,
@@ -157,7 +152,15 @@ class WorldCupComboPublicationService:
         idempotency_key: str | None = None,
     ) -> ComboPublicationResult:
         ticket_key = ticket.ticket_key if ticket else idempotency_key
-        if ticket_key and self._existing_message(ticket_key, message_type) is not None:
+        if (
+            ticket_key
+            and self._existing_message(
+                ticket_key,
+                message_type,
+                include_dry_run=dry_run,
+            )
+            is not None
+        ):
             return ComboPublicationResult(
                 status="duplicate_skipped",
                 channel_key=channel_key,
@@ -201,10 +204,13 @@ class WorldCupComboPublicationService:
         self,
         ticket_key: str,
         message_type: str,
+        *,
+        include_dry_run: bool,
     ) -> DiscordMessage | None:
+        statuses = ("sent", "dry_run") if include_dry_run else ("sent",)
         stmt = select(DiscordMessage).where(
             DiscordMessage.message_type == message_type,
-            DiscordMessage.status.in_(("sent", "dry_run")),
+            DiscordMessage.status.in_(statuses),
         )
         for row in self.session.execute(stmt).scalars():
             payload = row.payload_json if isinstance(row.payload_json, dict) else {}

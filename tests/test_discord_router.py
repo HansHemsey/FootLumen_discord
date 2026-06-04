@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from football_predictor.discord.config import (
+    DiscordWebhookRouteConfig,
     DiscordWebhooksConfig,
     load_discord_channels_config,
     load_discord_webhooks_config,
@@ -136,6 +137,36 @@ def test_router_routes_world_cup_calendar(tmp_path: Path, reference_path: Path) 
 
     assert route.competition_key == "cdm_2026"
     assert route.channel_key == "calendrier"
+
+
+def test_router_routes_world_cup_combo_messages_to_global_staff() -> None:
+    webhooks = DiscordWebhooksConfig(
+        routes=[
+            DiscordWebhookRouteConfig(
+                competition_key="global",
+                channel_key="predictions_staff",
+                webhook_url="https://example.invalid/staff",
+            )
+        ]
+    )
+
+    for message_type in (
+        "worldcup_combo_public",
+        "worldcup_combo_locked",
+        "worldcup_combo_staff",
+        "worldcup_combo_watchlist",
+        "worldcup_combo_no_bet",
+    ):
+        route = resolve_discord_route(
+            channels_config=None,
+            webhooks_config=webhooks,
+            competition_key="cdm_2026",
+            league_id=1,
+            season=2026,
+            message_type=message_type,
+        )
+        assert route.channel_key == "predictions_staff"
+        assert route.competition_key == "global"
 
 
 def test_router_maps_daily_matches_to_matchs_du_jour(

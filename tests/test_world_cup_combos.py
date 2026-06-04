@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from football_predictor.db.session import (
     init_db,
     session_scope,
 )
+from football_predictor.discord.service import DiscordDeliveryService
 from football_predictor.world_cup_combos.config import (
     WorldCupComboConfig,
     load_world_cup_combo_config,
@@ -37,15 +39,28 @@ from football_predictor.world_cup_combos.persistence import (
     persist_combo_ticket_with_snapshots,
 )
 from football_predictor.world_cup_combos.worldcup_combo_builder import WorldCupComboBuilder
+from football_predictor.world_cup_combos.worldcup_combo_formatter import WorldCupComboFormatter
 from football_predictor.world_cup_combos.worldcup_combo_leg_selector import (
     WorldCupComboLegSelector,
+)
+from football_predictor.world_cup_combos.worldcup_combo_lock_service import (
+    WorldCupComboLockService,
 )
 from football_predictor.world_cup_combos.worldcup_combo_publication_policy import (
     WorldCupComboPublicationPolicy,
 )
+from football_predictor.world_cup_combos.worldcup_combo_publication_service import (
+    WorldCupComboPublicationService,
+)
+from football_predictor.world_cup_combos.worldcup_combo_refresh_policy import (
+    WorldCupComboRefreshPolicy,
+)
 from football_predictor.world_cup_combos.worldcup_combo_scoring import WorldCupComboScoring
 from football_predictor.world_cup_combos.worldcup_combo_sessions import (
     WorldCupComboSessionService,
+)
+from football_predictor.world_cup_combos.worldcup_combo_settlement import (
+    WorldCupComboSettlementService,
 )
 
 
@@ -600,6 +615,211 @@ def test_worldcup_combo_persistence_stores_lifecycle_snapshots(tmp_path: Path) -
     assert _count_rows(engine, "combo_ticket_snapshots") == 3
 
 
+def test_worldcup_combo_refresh_policy_lock_time_and_freshness() -> None:
+    config = _enabled_config()
+    session = _combo_session((-3201, -3202))
+    ticket = WorldCupComboBuilder(config).build_for_session(
+        session,
+        (
+            _leg_candidate(fixture_id=-3201),
+            _leg_candidate(fixture_id=-3202),
+        ),
+    )[0]
+    policy = WorldCupComboRefreshPolicy(config)
+    now = ticket.first_kickoff_at - timedelta(minutes=25)
+
+    assert ticket.lock_time == ticket.first_kickoff_at - timedelta(
+        minutes=config.lock_buffer_minutes
+    )
+    assert policy.required_freshness_minutes("odds", now, ticket.first_kickoff_at) == 10
+
+
+def test_worldcup_combo_lock_does_not_modify_locked_ticket() -> None:
+    config = _enabled_config(staff_only_shadow_mode=False)
+    ticket = replace(
+        _ticket_candidate(
+            legs=(
+                _leg_candidate(fixture_id=-3301),
+                _leg_candidate(fixture_id=-3302),
+            )
+        ),
+        publication_decision=ComboTicketStatus.LOCKED,
+        warnings=["locked-original"],
+    )
+
+    locked = WorldCupComboLockService(config).lock_ticket(
+        ticket,
+        now=datetime(2026, 6, 11, 17, 40, tzinfo=UTC),
+    )
+
+    assert locked is ticket
+    assert locked.warnings == ["locked-original"]
+
+
+def test_worldcup_combo_lock_revalidates_no_bet_if_ev_turns_negative() -> None:
+    config = _enabled_config(staff_only_shadow_mode=False)
+    ticket = _ticket_candidate(
+        legs=(
+            _leg_candidate(
+                fixture_id=-3401,
+                decimal_odd=1.8,
+                model_probability=0.45,
+                edge=0.01,
+                ev=-0.19,
+            ),
+            _leg_candidate(
+                fixture_id=-3402,
+                decimal_odd=1.8,
+                model_probability=0.45,
+                edge=0.01,
+                ev=-0.19,
+            ),
+        )
+    )
+
+    locked = WorldCupComboLockService(config).lock_ticket(
+        ticket,
+        now=datetime(2026, 6, 11, 17, 40, tzinfo=UTC),
+    )
+
+    assert locked.publication_decision == ComboTicketStatus.NO_BET
+    assert locked.no_publish_reason == "combined_ev_adjusted_non_positive"
+
+
+def test_worldcup_combo_lock_revalidates_staff_if_post_lock_risk_high() -> None:
+    config = _enabled_config(staff_only_shadow_mode=False)
+    ticket = _ticket_candidate(
+        legs=(
+            _leg_candidate(
+                fixture_id=-3501,
+                lineup_status="missing",
+                warnings=["lineup_missing_close_to_kickoff"],
+            ),
+            _leg_candidate(
+                fixture_id=-3502,
+                lineup_status="missing",
+                warnings=["lineup_missing_close_to_kickoff"],
+            ),
+        )
+    )
+
+    locked = WorldCupComboLockService(config).lock_ticket(
+        ticket,
+        now=datetime(2026, 6, 11, 17, 45, tzinfo=UTC),
+    )
+
+    assert locked.publication_decision == ComboTicketStatus.STAFF_ONLY
+    assert locked.no_publish_reason == "post_lock_risk_above_public_threshold"
+
+
+def test_worldcup_combo_formatter_outputs_watchlist_public_and_no_bet() -> None:
+    formatter = WorldCupComboFormatter()
+    ticket = _ticket_candidate(
+        legs=(
+            _leg_candidate(fixture_id=-3601),
+            _leg_candidate(fixture_id=-3602),
+        )
+    )
+
+    watchlist = formatter.format_watchlist_staff(ticket)
+    public = formatter.format_public_locked(
+        replace(ticket, publication_decision=ComboTicketStatus.LOCKED),
+        locked_at=datetime(2026, 6, 11, 17, 40, tzinfo=UTC),
+    )
+    no_bet = formatter.format_no_bet(reason="risk_too_high", ticket=ticket)
+
+    assert "COMBINÉ CDM — WATCHLIST STAFF" in watchlist
+    assert "COMBINÉ CDM — VERROUILLÉ" in public
+    assert "Aucun combiné CDM public" in no_bet
+    assert "pas une certitude" in public
+
+
+def test_worldcup_combo_publication_is_idempotent(tmp_path: Path) -> None:
+    engine = _init_full_db(tmp_path)
+    config = _enabled_config()
+    ticket = _ticket_candidate(
+        legs=(
+            _leg_candidate(fixture_id=-3701),
+            _leg_candidate(fixture_id=-3702),
+        )
+    )
+
+    with session_scope(create_session_factory(engine)) as session:
+        delivery = DiscordDeliveryService(session)
+        service = WorldCupComboPublicationService(
+            session,
+            config,
+            delivery_service=delivery,
+        )
+        first = service.publish_watchlist_staff(ticket, dry_run=True, execute=False)
+        second = service.publish_watchlist_staff(ticket, dry_run=True, execute=False)
+
+    assert first.status == "dry_run"
+    assert second.status == "duplicate_skipped"
+
+
+def test_worldcup_combo_settlement_won_and_lost(tmp_path: Path) -> None:
+    engine = _init_full_db(tmp_path)
+    session_factory = create_session_factory(engine)
+    won_ticket = _ticket_candidate(
+        legs=(
+            _leg_candidate(fixture_id=-3801, market_type=ComboMarketType.HOME),
+            _leg_candidate(fixture_id=-3802, market_type=ComboMarketType.OVER_25),
+        )
+    )
+    lost_ticket = replace(
+        _ticket_candidate(
+            legs=(
+                _leg_candidate(fixture_id=-3803, market_type=ComboMarketType.HOME),
+                _leg_candidate(fixture_id=-3804, market_type=ComboMarketType.UNDER_25),
+            )
+        ),
+        ticket_key="synthetic-lost-ticket",
+    )
+
+    with session_scope(session_factory) as session:
+        _seed_finished_fixture(session, fixture_id=-3801, home_goals=2, away_goals=0)
+        _seed_finished_fixture(session, fixture_id=-3802, home_goals=2, away_goals=1)
+        _seed_finished_fixture(session, fixture_id=-3803, home_goals=0, away_goals=1)
+        _seed_finished_fixture(session, fixture_id=-3804, home_goals=2, away_goals=2)
+        won_record = persist_combo_ticket_candidate(session, won_ticket)
+        lost_record = persist_combo_ticket_candidate(session, lost_ticket)
+        service = WorldCupComboSettlementService(session)
+        won = service.settle_record(
+            won_record,
+            settled_at=datetime(2026, 6, 12, 0, tzinfo=UTC),
+            execute=True,
+        )
+        lost = service.settle_record(
+            lost_record,
+            settled_at=datetime(2026, 6, 12, 0, tzinfo=UTC),
+            execute=True,
+        )
+
+    assert won.status == "WON"
+    assert won.profit_unit > 0
+    assert lost.status == "LOST"
+    assert lost.profit_unit == -1.0
+
+
+def test_worldcup_combo_services_disabled_noop(tmp_path: Path) -> None:
+    engine = _init_full_db(tmp_path)
+    config = WorldCupComboConfig(enabled=False)
+    ticket = _ticket_candidate(
+        legs=(
+            _leg_candidate(fixture_id=-3901),
+            _leg_candidate(fixture_id=-3902),
+        )
+    )
+
+    with session_scope(create_session_factory(engine)) as session:
+        service = WorldCupComboPublicationService(session, config)
+        result = service.publish_watchlist_staff(ticket, dry_run=True, execute=False)
+
+    assert result.status == "skipped"
+    assert result.reason == "feature_disabled"
+
+
 def _leg_candidate(
     *,
     fixture_id: int = -101,
@@ -797,6 +1017,40 @@ def _seed_fixture(
             home_team="Synthetic Home",
             away_team="Synthetic Away",
             payload_json={"synthetic": True, "competition_key": "fifa_world_cup_2026"},
+        )
+    )
+
+
+def _seed_finished_fixture(
+    session,
+    *,
+    fixture_id: int,
+    home_goals: int,
+    away_goals: int,
+) -> None:
+    kickoff = datetime(2026, 6, 11, 18, tzinfo=UTC)
+    _ensure_synthetic_teams(session)
+    session.add(
+        db_models.Fixture(
+            fixture_id=fixture_id,
+            date=kickoff,
+            timestamp=int(kickoff.timestamp()),
+            timezone="UTC",
+            round="Group Stage - 1",
+            league_id=1,
+            season=2026,
+            status="Match Finished",
+            status_long="Match Finished",
+            status_short="FT",
+            home_team_id=-1,
+            away_team_id=-2,
+            home_team="Synthetic Home",
+            away_team="Synthetic Away",
+            home_goals=home_goals,
+            away_goals=away_goals,
+            goals_home=home_goals,
+            goals_away=away_goals,
+            payload_json={"synthetic": True},
         )
     )
 

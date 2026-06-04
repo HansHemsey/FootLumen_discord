@@ -67,10 +67,10 @@ class WorldCupComboPublicationPolicy:
             return "staff_only_shadow_mode"
         if ticket.legs_count > self.config.max_public_legs:
             return "too_many_public_legs"
-        if ticket.combined_confidence_score < self.config.min_combined_confidence_public:
-            return "combined_confidence_below_public_threshold"
         if ticket.post_lock_risk_score > self.config.max_post_lock_risk_public:
             return "post_lock_risk_above_public_threshold"
+        if ticket.combined_confidence_score < self.config.min_combined_confidence_public:
+            return "combined_confidence_below_public_threshold"
         if "matchday3_public_risk" in ticket.warnings and not self.config.allow_public_matchday3:
             return "matchday3_public_forbidden"
         if "knockout_public_risk" in ticket.warnings and not self.config.allow_public_knockout:

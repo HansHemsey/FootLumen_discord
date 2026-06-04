@@ -117,6 +117,25 @@ def test_init_db_creates_sprint_3_tables_and_columns(tmp_path: Path) -> None:
             "warnings_json",
         },
     )
+    assert _has_columns(inspector, "discord_messages", {"idempotency_key"})
+    assert "ix_combo_tickets_status_combo_date" in _index_names(inspector, "combo_tickets")
+    assert "ix_combo_tickets_ticket_key" in _index_names(inspector, "combo_tickets")
+    assert "ix_combo_ticket_legs_combo_ticket_id" in _index_names(
+        inspector,
+        "combo_ticket_legs",
+    )
+    assert "ix_combo_ticket_snapshots_ticket_status_time" in _index_names(
+        inspector,
+        "combo_ticket_snapshots",
+    )
+    assert "ix_discord_messages_idempotency_key" in _index_names(
+        inspector,
+        "discord_messages",
+    )
+    assert "ix_discord_messages_type_created" in _index_names(
+        inspector,
+        "discord_messages",
+    )
     assert _is_not_nullable(inspector, "fixture_statistics", "fetched_at")
     assert _is_not_nullable(inspector, "injuries", "fetched_at")
     assert _is_not_nullable(inspector, "odds_snapshots", "fetched_at")
@@ -263,6 +282,10 @@ def test_alembic_upgrade_head_creates_initial_schema(tmp_path: Path, repo_root: 
 def _has_columns(inspector, table_name: str, expected_columns: set[str]) -> bool:
     columns = {column["name"] for column in inspector.get_columns(table_name)}
     return expected_columns.issubset(columns)
+
+
+def _index_names(inspector, table_name: str) -> set[str]:
+    return {index["name"] for index in inspector.get_indexes(table_name)}
 
 
 def _is_not_nullable(inspector, table_name: str, column_name: str) -> bool:

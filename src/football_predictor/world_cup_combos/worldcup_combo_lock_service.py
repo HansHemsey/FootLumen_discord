@@ -106,7 +106,10 @@ class WorldCupComboLockService:
         locked = self._locked_if_public(revalidation.ticket, now=now)
         if execute:
             _apply_ticket_to_record(record, locked)
-            for snapshot_type in revalidation.snapshot_types:
+            snapshot_types = list(revalidation.snapshot_types)
+            if locked.publication_decision == ComboTicketStatus.LOCKED:
+                snapshot_types.append("locked")
+            for snapshot_type in snapshot_types:
                 persist_combo_ticket_snapshot(
                     session,
                     ComboTicketSnapshot(
@@ -117,6 +120,7 @@ class WorldCupComboLockService:
                         warnings_json=[*locked.warnings, f"snapshot_type:{snapshot_type}"],
                     ),
                     ticket_id=record.id,
+                    throttle_minutes=self.config.snapshot_duplicate_throttle_minutes,
                 )
         return locked
 

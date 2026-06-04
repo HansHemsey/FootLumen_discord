@@ -38,6 +38,7 @@ class WorldCupComboConfig:
     public_channel_key: str = "combines"
     mirror_public_to_staff: bool = True
     publish_no_bet_public: bool = False
+    snapshot_duplicate_throttle_minutes: int = 30
 
     def as_dict(self) -> JsonDict:
         return asdict(self)
@@ -91,6 +92,10 @@ def world_cup_combo_config_from_mapping(payload: JsonDict) -> WorldCupComboConfi
         public_channel_key=str(payload.get("public_channel_key") or "combines"),
         mirror_public_to_staff=_bool(payload.get("mirror_public_to_staff"), True),
         publish_no_bet_public=_bool(payload.get("publish_no_bet_public"), False),
+        snapshot_duplicate_throttle_minutes=_int(
+            payload.get("snapshot_duplicate_throttle_minutes"),
+            30,
+        ),
     )
 
 

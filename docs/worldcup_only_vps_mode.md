@@ -149,6 +149,7 @@ football-predictor worldcup-combos-run --dry-run
 football-predictor worldcup-combos-publish --dry-run
 PYTHONPATH=src .venv/bin/python scripts/lock_worldcup_combos.py --config config/worldcup_combos.yaml
 PYTHONPATH=src .venv/bin/python scripts/settle_worldcup_combos.py --config config/worldcup_combos.yaml
+PYTHONPATH=src .venv/bin/python scripts/maintenance_worldcup_combo_snapshots.py --config config/worldcup_combos.yaml
 ```
 
 Configuration combinés CDM en production staff-only :
@@ -160,6 +161,7 @@ staff_channel_key: predictions_staff
 public_channel_key: combines
 mirror_public_to_staff: true
 publish_no_bet_public: false
+snapshot_duplicate_throttle_minutes: 30
 allow_public_matchday3: false
 allow_public_knockout: false
 ```

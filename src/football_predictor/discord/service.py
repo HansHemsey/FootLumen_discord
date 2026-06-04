@@ -327,6 +327,7 @@ class DiscordDeliveryService:
         metadata = sanitize_mapping(payload_metadata or {})
         sanitized_markdown = sanitize_text(markdown)
         sanitized_response_json = sanitize_mapping(response_json)
+        idempotency_key = metadata.get("idempotency_key")
         row = DiscordMessage(
             fixture_id=fixture_id,
             model_prediction_id=model_prediction_id,
@@ -342,6 +343,7 @@ class DiscordDeliveryService:
             webhook_url_hash=webhook_hash,
             webhook_hash=webhook_hash,
             message_hash=message_hash,
+            idempotency_key=str(idempotency_key) if idempotency_key else None,
             message_markdown=sanitized_markdown,
             route_json=route.safe_dict(),
             response_json=sanitized_response_json,

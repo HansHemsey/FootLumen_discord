@@ -28,3 +28,4 @@ staff_channel_key: predictions_staff
 public_channel_key: combines
 mirror_public_to_staff: true
 publish_no_bet_public: false
+snapshot_duplicate_throttle_minutes: 30

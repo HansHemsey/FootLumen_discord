@@ -11,9 +11,11 @@ from sqlalchemy.orm import Session
 
 from football_predictor.db.models import ComboTicket, DiscordMessage
 from football_predictor.discord.service import DiscordDeliveryService, DiscordSendResult
+from football_predictor.utils.time import utc_now
 from football_predictor.world_cup_combos.config import WorldCupComboConfig
 from football_predictor.world_cup_combos.enums import ComboTicketStatus
-from football_predictor.world_cup_combos.models import ComboTicketCandidate
+from football_predictor.world_cup_combos.models import ComboTicketCandidate, ComboTicketSnapshot
+from football_predictor.world_cup_combos.persistence import persist_combo_ticket_snapshot
 from football_predictor.world_cup_combos.worldcup_combo_formatter import WorldCupComboFormatter
 from football_predictor.world_cup_combos.worldcup_combo_publication_policy import (
     WorldCupComboPublicationPolicy,
@@ -228,7 +230,7 @@ class WorldCupComboPublicationService:
             },
         )
         if execute and mark_ticket and ticket is not None:
-            self._mark_ticket(ticket.ticket_key, target_status, result)
+            self._mark_ticket(ticket, target_status, result)
         return ComboPublicationResult(
             status=result.status,
             channel_key=channel_key,
@@ -252,6 +254,8 @@ class WorldCupComboPublicationService:
             DiscordMessage.status.in_(statuses),
         )
         for row in self.session.execute(stmt).scalars():
+            if row.idempotency_key == idempotency_key:
+                return row
             payload = row.payload_json if isinstance(row.payload_json, dict) else {}
             if payload.get("idempotency_key") == idempotency_key:
                 return row
@@ -259,11 +263,11 @@ class WorldCupComboPublicationService:
 
     def _mark_ticket(
         self,
-        ticket_key: str,
+        ticket: ComboTicketCandidate,
         status: ComboTicketStatus,
         result: DiscordSendResult,
     ) -> None:
-        stmt = select(ComboTicket).where(ComboTicket.ticket_key == ticket_key)
+        stmt = select(ComboTicket).where(ComboTicket.ticket_key == ticket.ticket_key)
         record = self.session.execute(stmt).scalars().first()
         if record is None:
             return
@@ -281,6 +285,21 @@ class WorldCupComboPublicationService:
                 "channel_key": result.route.channel_key,
             },
         }
+        persist_combo_ticket_snapshot(
+            self.session,
+            ComboTicketSnapshot(
+                ticket_key=ticket.ticket_key,
+                status=f"published:{status.value.lower()}",
+                candidate=ticket,
+                captured_at=utc_now(),
+                warnings_json=[
+                    *ticket.warnings,
+                    f"snapshot_type:published:{status.value.lower()}",
+                ],
+            ),
+            ticket_id=record.id,
+            throttle_minutes=self.config.snapshot_duplicate_throttle_minutes,
+        )
 
 
 def _idempotency_key(

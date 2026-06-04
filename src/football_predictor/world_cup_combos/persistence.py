@@ -7,7 +7,10 @@ or settle combo tickets.
 
 from __future__ import annotations
 
-from datetime import datetime
+import hashlib
+import json
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
@@ -25,6 +28,9 @@ COMBO_TABLES = (
     db_models.ComboTicketLeg.__table__,
     db_models.ComboTicketSnapshot.__table__,
 )
+
+CRITICAL_SNAPSHOT_PREFIXES = ("generated", "pre_lock", "locked", "published", "settled")
+DEFAULT_SNAPSHOT_DUPLICATE_THROTTLE_MINUTES = 30
 
 
 def ensure_combo_tables(engine: Engine) -> None:
@@ -108,17 +114,34 @@ def persist_combo_ticket_snapshot(
     snapshot: ComboTicketSnapshot,
     *,
     ticket_id: int | None = None,
+    throttle_minutes: int = DEFAULT_SNAPSHOT_DUPLICATE_THROTTLE_MINUTES,
 ) -> db_models.ComboTicketSnapshot:
+    status = _snapshot_status_value(snapshot.status)
+    snapshot_hash = _semantic_snapshot_hash(snapshot)
+    if not _is_critical_snapshot_status(status):
+        existing = _matching_recent_snapshot(
+            session,
+            ticket_key=snapshot.ticket_key,
+            status=status,
+            snapshot_hash=snapshot_hash,
+            captured_at=snapshot.captured_at,
+            throttle_minutes=throttle_minutes,
+        )
+        if existing is not None:
+            return existing
+    snapshot_json = snapshot.to_json_dict()
+    snapshot_json["snapshot_hash"] = snapshot_hash
     record = db_models.ComboTicketSnapshot(
         ticket_id=ticket_id,
         ticket_key=snapshot.ticket_key,
-        status=_snapshot_status_value(snapshot.status),
+        status=status,
         captured_at=snapshot.captured_at,
-        snapshot_json=snapshot.to_json_dict(),
+        snapshot_json=snapshot_json,
         model_versions_json=snapshot.model_versions_json,
         warnings_json=snapshot.warnings_json,
     )
     session.add(record)
+    session.flush()
     return record
 
 
@@ -129,6 +152,7 @@ def persist_combo_ticket_with_snapshots(
     captured_at: datetime,
     model_versions_json: dict | None = None,
     snapshot_types: tuple[str, ...] = ("generated", "scored", "policy_decided"),
+    snapshot_duplicate_throttle_minutes: int = DEFAULT_SNAPSHOT_DUPLICATE_THROTTLE_MINUTES,
 ) -> db_models.ComboTicket:
     record = persist_combo_ticket_candidate(
         session,
@@ -148,6 +172,7 @@ def persist_combo_ticket_with_snapshots(
                 warnings_json=[*ticket.warnings, f"snapshot_type:{snapshot_type}"],
             ),
             ticket_id=record.id,
+            throttle_minutes=snapshot_duplicate_throttle_minutes,
         )
     return record
 
@@ -175,3 +200,69 @@ def persist_combo_leg_snapshot(
 def _snapshot_status_value(status: object) -> str:
     value = getattr(status, "value", status)
     return str(value)
+
+
+def _is_critical_snapshot_status(status: str) -> bool:
+    normalized = status.strip().lower()
+    return normalized.startswith(CRITICAL_SNAPSHOT_PREFIXES)
+
+
+def _matching_recent_snapshot(
+    session: Session,
+    *,
+    ticket_key: str,
+    status: str,
+    snapshot_hash: str,
+    captured_at: datetime,
+    throttle_minutes: int,
+) -> db_models.ComboTicketSnapshot | None:
+    if throttle_minutes <= 0:
+        return None
+    cutoff = _as_utc(captured_at) - timedelta(minutes=throttle_minutes)
+    rows = (
+        session.query(db_models.ComboTicketSnapshot)
+        .filter(
+            db_models.ComboTicketSnapshot.ticket_key == ticket_key,
+            db_models.ComboTicketSnapshot.status == status,
+            db_models.ComboTicketSnapshot.captured_at >= cutoff,
+        )
+        .order_by(db_models.ComboTicketSnapshot.captured_at.desc())
+        .all()
+    )
+    for row in rows:
+        payload = row.snapshot_json if isinstance(row.snapshot_json, dict) else {}
+        if payload.get("snapshot_hash") == snapshot_hash:
+            return row
+    return None
+
+
+def _semantic_snapshot_hash(snapshot: ComboTicketSnapshot) -> str:
+    payload = snapshot.candidate.to_json_dict()
+    payload = _strip_volatile_snapshot_fields(payload)
+    material: dict[str, Any] = {
+        "status": _snapshot_status_value(snapshot.status),
+        "candidate": payload,
+        "model_versions_json": snapshot.model_versions_json,
+        "warnings_json": snapshot.warnings_json,
+    }
+    encoded = json.dumps(material, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _strip_volatile_snapshot_fields(value: Any) -> Any:
+    volatile_keys = {"captured_at", "generated_at"}
+    if isinstance(value, dict):
+        return {
+            key: _strip_volatile_snapshot_fields(item)
+            for key, item in value.items()
+            if key not in volatile_keys
+        }
+    if isinstance(value, list):
+        return [_strip_volatile_snapshot_fields(item) for item in value]
+    return value
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)

@@ -46,6 +46,7 @@ public_channel_key: combines
 mirror_public_to_staff: true
 publish_no_bet_public: false
 staff_only_shadow_mode: true
+snapshot_duplicate_throttle_minutes: 30
 ```
 
 Avec `staff_only_shadow_mode: true`, tout ticket est envoyé en staff, même s'il est
@@ -174,10 +175,20 @@ Règles staff/public/no bet :
 Idempotence Discord :
 
 - chaque publication stocke un `idempotency_key` dans `discord_messages.payload_json` ;
+- ce même `idempotency_key` est aussi stocké dans une colonne dédiée indexée ;
 - la clé est stable par `ticket_key`, statut cible, channel et `message_type` ;
 - une relance cron sur le même ticket/channel/statut est ignorée ;
 - un dry-run ne bloque pas une exécution réelle, car l'exécution ne déduplique que les
   messages `sent`.
+
+Politique de snapshots :
+
+- les snapshots critiques sont toujours conservés : `generated`, `pre_lock*`, `locked`,
+  `published*`, `settled` ;
+- les snapshots non critiques identiques, par exemple `scored` ou `policy_decided`, sont
+  dédupliqués sur `snapshot_duplicate_throttle_minutes` ;
+- chaque snapshot récent reçoit un `snapshot_hash` dans `snapshot_json` pour faciliter
+  l'audit et la maintenance.
 
 ## Commandes Contrôlées
 
@@ -195,6 +206,7 @@ PYTHONPATH=src .venv/bin/python scripts/run_worldcup_combos.py --config config/w
 PYTHONPATH=src .venv/bin/python scripts/publish_worldcup_combos.py --config config/worldcup_combos.yaml
 PYTHONPATH=src .venv/bin/python scripts/lock_worldcup_combos.py --config config/worldcup_combos.yaml
 PYTHONPATH=src .venv/bin/python scripts/settle_worldcup_combos.py --config config/worldcup_combos.yaml
+PYTHONPATH=src .venv/bin/python scripts/maintenance_worldcup_combo_snapshots.py --config config/worldcup_combos.yaml
 ```
 
 Execution explicite :
@@ -206,10 +218,38 @@ PYTHONPATH=src .venv/bin/python scripts/run_worldcup_combos.py --config config/w
 PYTHONPATH=src .venv/bin/python scripts/publish_worldcup_combos.py --config config/worldcup_combos.yaml --execute
 PYTHONPATH=src .venv/bin/python scripts/lock_worldcup_combos.py --config config/worldcup_combos.yaml --execute
 PYTHONPATH=src .venv/bin/python scripts/settle_worldcup_combos.py --config config/worldcup_combos.yaml --execute
+PYTHONPATH=src .venv/bin/python scripts/maintenance_worldcup_combo_snapshots.py --config config/worldcup_combos.yaml --execute
 ```
 
 `worldcup-combos-run` génère et persiste les tickets, mais ne publie aucun message Discord.
 `worldcup-combos-publish` publie uniquement des tickets déjà persistés, avec dry-run par défaut.
+
+La maintenance snapshots affiche le volume total, les groupes de doublons probables et les
+IDs proposés. Sans `--execute`, elle ne supprime rien.
+
+## Settlement
+
+Le settlement reste conservateur :
+
+- `NINETY_MIN` est settlé uniquement sur des matchs `FT` avec buts disponibles ;
+- `AET` et `PEN` déclenchent une revue manuelle, car le score 90 minutes peut être ambigu
+  selon la source disponible ;
+- `TO_QUALIFY`, `EXTRA_TIME_INCLUDED` et `UNKNOWN` déclenchent une revue manuelle tant
+  qu'un adaptateur dédié n'expose pas l'information correcte ;
+- `CANC`, `ABD`, `AWD` et `WO` sont traités comme legs void ;
+- `PST` reste pending ;
+- `PARTIAL_VOID` recalcule le profit sur les legs gagnants restants.
+
+La payload settlement expose `settlement_status`, `settlement_warning` et
+`manual_review_required`.
+
+## SQLite
+
+Le moteur SQLite active `busy_timeout=30000`, `foreign_keys=ON` et `journal_mode=WAL`
+quand la base n'est pas en mémoire. Cela réduit les erreurs de verrouillage entre crons,
+mais SQLite reste limité si plusieurs jobs écrivent en même temps. Si le volume de
+snapshots, odds et messages Discord augmente fortement, PostgreSQL est recommandé pour
+la production.
 
 ## Passage Production VPS
 
@@ -230,6 +270,7 @@ staff_channel_key: predictions_staff
 public_channel_key: combines
 mirror_public_to_staff: true
 publish_no_bet_public: false
+snapshot_duplicate_throttle_minutes: 30
 allow_public_matchday3: false
 allow_public_knockout: false
 ```

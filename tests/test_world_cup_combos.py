@@ -44,6 +44,7 @@ from football_predictor.world_cup_combos.persistence import (
 from football_predictor.world_cup_combos.pre_lock_revalidator import (
     WorldCupComboPreLockRevalidator,
 )
+from football_predictor.world_cup_combos.snapshot_maintenance import analyze_combo_snapshots
 from football_predictor.world_cup_combos.worldcup_combo_builder import WorldCupComboBuilder
 from football_predictor.world_cup_combos.worldcup_combo_formatter import WorldCupComboFormatter
 from football_predictor.world_cup_combos.worldcup_combo_leg_selector import (
@@ -88,6 +89,7 @@ def test_worldcup_combo_config_defaults_disabled() -> None:
     assert config.public_channel_key == "combines"
     assert config.mirror_public_to_staff is True
     assert config.publish_no_bet_public is False
+    assert config.snapshot_duplicate_throttle_minutes == 30
 
 
 def test_worldcup_combo_config_loads_yaml(tmp_path: Path) -> None:
@@ -119,6 +121,7 @@ staff_channel_key: predictions_staff
 public_channel_key: combines
 mirror_public_to_staff: true
 publish_no_bet_public: false
+snapshot_duplicate_throttle_minutes: 45
 """,
         encoding="utf-8",
     )
@@ -128,6 +131,7 @@ publish_no_bet_public: false
     assert config.enabled is True
     assert config.min_leg_ev == 0.03
     assert config.allow_public_matchday3 is False
+    assert config.snapshot_duplicate_throttle_minutes == 45
 
 
 def test_worldcup_combo_leg_candidate_serializes_warning_snapshot() -> None:
@@ -157,11 +161,21 @@ def test_worldcup_combo_ticket_candidate_serializes_nested_legs() -> None:
 def test_worldcup_combo_tables_are_created_idempotently(tmp_path: Path) -> None:
     engine = create_db_engine(f"sqlite:///{tmp_path / 'combos.db'}")
 
+    init_db(engine)
     ensure_combo_tables(engine)
     ensure_combo_tables(engine)
 
     tables = set(inspect(engine).get_table_names())
     assert {"combo_tickets", "combo_ticket_legs", "combo_ticket_snapshots"}.issubset(tables)
+    assert "ix_combo_tickets_status_combo_date" in _index_names(engine, "combo_tickets")
+    assert "ix_combo_tickets_ticket_key" in _index_names(engine, "combo_tickets")
+    assert "ix_combo_ticket_legs_combo_ticket_id" in _index_names(engine, "combo_ticket_legs")
+    assert (
+        "ix_combo_ticket_snapshots_ticket_status_time"
+        in _index_names(engine, "combo_ticket_snapshots")
+    )
+    assert "ix_discord_messages_idempotency_key" in _index_names(engine, "discord_messages")
+    assert "ix_discord_messages_type_created" in _index_names(engine, "discord_messages")
 
 
 def test_worldcup_combo_persistence_stores_ticket_legs_and_snapshot(tmp_path: Path) -> None:
@@ -191,6 +205,83 @@ def test_worldcup_combo_persistence_stores_ticket_legs_and_snapshot(tmp_path: Pa
     assert _count_rows(engine, "combo_ticket_legs") == 1
     assert _count_rows(engine, "combo_ticket_snapshots") == 1
     assert "warnings_json" in {column["name"] for column in inspector.get_columns("combo_tickets")}
+
+
+def test_worldcup_combo_critical_snapshots_are_always_created(tmp_path: Path) -> None:
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'critical_snapshots.db'}")
+    ensure_combo_tables(engine)
+    session_factory = create_session_factory(engine)
+    ticket = _ticket_candidate(legs=(_leg_candidate(),))
+
+    with session_scope(session_factory) as session:
+        record = persist_combo_ticket_candidate(session, ticket)
+        snapshot = ComboTicketSnapshot(
+            ticket_key=ticket.ticket_key,
+            status="generated",
+            candidate=ticket,
+            captured_at=datetime(2026, 6, 11, 12, tzinfo=UTC),
+        )
+        persist_combo_ticket_snapshot(session, snapshot, ticket_id=record.id)
+        persist_combo_ticket_snapshot(session, snapshot, ticket_id=record.id)
+
+    assert _count_rows(engine, "combo_ticket_snapshots") == 2
+
+
+def test_worldcup_combo_identical_noncritical_snapshots_are_throttled(
+    tmp_path: Path,
+) -> None:
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'throttled_snapshots.db'}")
+    ensure_combo_tables(engine)
+    session_factory = create_session_factory(engine)
+    ticket = _ticket_candidate(legs=(_leg_candidate(),))
+
+    with session_scope(session_factory) as session:
+        record = persist_combo_ticket_candidate(session, ticket)
+        snapshot = ComboTicketSnapshot(
+            ticket_key=ticket.ticket_key,
+            status="policy_decided",
+            candidate=ticket,
+            captured_at=datetime(2026, 6, 11, 12, tzinfo=UTC),
+        )
+        first = persist_combo_ticket_snapshot(session, snapshot, ticket_id=record.id)
+        second = persist_combo_ticket_snapshot(session, snapshot, ticket_id=record.id)
+
+    assert first.id == second.id
+    assert _count_rows(engine, "combo_ticket_snapshots") == 1
+
+
+def test_worldcup_combo_snapshot_maintenance_dry_run_deletes_nothing(tmp_path: Path) -> None:
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'snapshot_maintenance.db'}")
+    ensure_combo_tables(engine)
+    session_factory = create_session_factory(engine)
+    ticket = _ticket_candidate(legs=(_leg_candidate(),))
+
+    with session_scope(session_factory) as session:
+        record = persist_combo_ticket_candidate(session, ticket)
+        snapshot = ComboTicketSnapshot(
+            ticket_key=ticket.ticket_key,
+            status="policy_decided",
+            candidate=ticket,
+            captured_at=datetime(2026, 6, 11, 12, tzinfo=UTC),
+        )
+        persist_combo_ticket_snapshot(
+            session,
+            snapshot,
+            ticket_id=record.id,
+            throttle_minutes=0,
+        )
+        persist_combo_ticket_snapshot(
+            session,
+            snapshot,
+            ticket_id=record.id,
+            throttle_minutes=0,
+        )
+        summary = analyze_combo_snapshots(session, execute=False)
+
+    assert summary.duplicate_groups == 1
+    assert summary.duplicate_rows == 1
+    assert summary.deleted_rows == 0
+    assert _count_rows(engine, "combo_ticket_snapshots") == 2
 
 
 def test_worldcup_combo_sessions_group_by_public_time_span(tmp_path: Path) -> None:
@@ -1404,6 +1495,7 @@ def test_worldcup_combo_publication_idempotence_includes_channel_and_status(
     assert first.status == "dry_run"
     assert second.status == "duplicate_skipped"
     assert len(messages) == 1
+    assert messages[0].idempotency_key is not None
     assert messages[0].payload_json["idempotency_key"].endswith(
         ":PUBLIC_PUBLISHED:combines:worldcup_combo_public"
     )
@@ -1542,6 +1634,133 @@ def test_worldcup_combo_settlement_won_and_lost(tmp_path: Path) -> None:
     assert lost.profit_unit == -1.0
 
 
+def test_worldcup_combo_settlement_void_and_partial_void(tmp_path: Path) -> None:
+    engine = _init_full_db(tmp_path)
+    session_factory = create_session_factory(engine)
+    void_ticket = _ticket_candidate(
+        legs=(
+            _leg_candidate(fixture_id=-3811, market_type=ComboMarketType.HOME),
+            _leg_candidate(fixture_id=-3812, market_type=ComboMarketType.OVER_25),
+        )
+    )
+    partial_void_ticket = replace(
+        _ticket_candidate(
+            legs=(
+                _leg_candidate(fixture_id=-3813, market_type=ComboMarketType.HOME),
+                _leg_candidate(fixture_id=-3814, market_type=ComboMarketType.OVER_25),
+            )
+        ),
+        ticket_key="synthetic-partial-void-ticket",
+    )
+
+    with session_scope(session_factory) as session:
+        _seed_finished_fixture(
+            session,
+            fixture_id=-3811,
+            home_goals=None,
+            away_goals=None,
+            status_short="CANC",
+        )
+        _seed_finished_fixture(
+            session,
+            fixture_id=-3812,
+            home_goals=None,
+            away_goals=None,
+            status_short="CANC",
+        )
+        _seed_finished_fixture(session, fixture_id=-3813, home_goals=2, away_goals=0)
+        _seed_finished_fixture(
+            session,
+            fixture_id=-3814,
+            home_goals=None,
+            away_goals=None,
+            status_short="CANC",
+        )
+        void_record = persist_combo_ticket_candidate(session, void_ticket)
+        partial_record = persist_combo_ticket_candidate(session, partial_void_ticket)
+        service = WorldCupComboSettlementService(session)
+        void = service.settle_record(
+            void_record,
+            settled_at=datetime(2026, 6, 12, 0, tzinfo=UTC),
+            execute=True,
+        )
+        partial = service.settle_record(
+            partial_record,
+            settled_at=datetime(2026, 6, 12, 0, tzinfo=UTC),
+            execute=True,
+        )
+
+    assert void.status == "VOID"
+    assert void.profit_unit == 0.0
+    assert partial.status == "PARTIAL_VOID"
+    assert partial.profit_unit > 0
+    assert partial.settlement_warning == "fixture_void_status"
+
+
+def test_worldcup_combo_settlement_manual_review_if_scope_unknown(tmp_path: Path) -> None:
+    engine = _init_full_db(tmp_path)
+    session_factory = create_session_factory(engine)
+    ticket = _ticket_candidate(
+        legs=(
+            _leg_candidate(
+                fixture_id=-3821,
+                market_type=ComboMarketType.HOME,
+                market_scope=ComboMarketScope.UNKNOWN,
+            ),
+            _leg_candidate(fixture_id=-3822, market_type=ComboMarketType.OVER_25),
+        )
+    )
+
+    with session_scope(session_factory) as session:
+        _seed_finished_fixture(session, fixture_id=-3821, home_goals=2, away_goals=0)
+        _seed_finished_fixture(session, fixture_id=-3822, home_goals=2, away_goals=1)
+        record = persist_combo_ticket_candidate(session, ticket)
+        result = WorldCupComboSettlementService(session).settle_record(
+            record,
+            settled_at=datetime(2026, 6, 12, 0, tzinfo=UTC),
+            execute=True,
+        )
+        session.flush()
+        payload = record.payload_json["settlement"]
+
+    assert result.status == "MANUAL_REVIEW"
+    assert result.manual_review_required is True
+    assert payload["manual_review_required"] is True
+    assert payload["settlement_warning"] == "manual_review_required"
+    assert record.status != ComboTicketStatus.SETTLED.value
+
+
+def test_worldcup_combo_settlement_postponed_stays_pending(tmp_path: Path) -> None:
+    engine = _init_full_db(tmp_path)
+    session_factory = create_session_factory(engine)
+    ticket = _ticket_candidate(
+        legs=(
+            _leg_candidate(fixture_id=-3831, market_type=ComboMarketType.HOME),
+            _leg_candidate(fixture_id=-3832, market_type=ComboMarketType.OVER_25),
+        )
+    )
+
+    with session_scope(session_factory) as session:
+        _seed_finished_fixture(
+            session,
+            fixture_id=-3831,
+            home_goals=None,
+            away_goals=None,
+            status_short="PST",
+        )
+        _seed_finished_fixture(session, fixture_id=-3832, home_goals=2, away_goals=1)
+        record = persist_combo_ticket_candidate(session, ticket)
+        result = WorldCupComboSettlementService(session).settle_record(
+            record,
+            settled_at=datetime(2026, 6, 12, 0, tzinfo=UTC),
+            execute=True,
+        )
+
+    assert result.status == "PENDING"
+    assert result.reason == "fixture_postponed"
+    assert _count_rows(engine, "combo_ticket_snapshots") == 0
+
+
 def test_worldcup_combo_services_disabled_noop(tmp_path: Path) -> None:
     engine = _init_full_db(tmp_path)
     config = WorldCupComboConfig(enabled=False)
@@ -1649,6 +1868,10 @@ def _ticket_candidate(legs: tuple[ComboLegCandidate, ...]) -> ComboTicketCandida
 def _count_rows(engine, table_name: str) -> int:
     with engine.connect() as connection:
         return int(connection.exec_driver_sql(f"select count(*) from {table_name}").scalar_one())
+
+
+def _index_names(engine, table_name: str) -> set[str]:
+    return {index["name"] for index in inspect(engine).get_indexes(table_name)}
 
 
 def _combo_session(
@@ -1853,10 +2076,12 @@ def _seed_finished_fixture(
     session,
     *,
     fixture_id: int,
-    home_goals: int,
-    away_goals: int,
+    home_goals: int | None,
+    away_goals: int | None,
+    status_short: str = "FT",
 ) -> None:
     kickoff = datetime(2026, 6, 11, 18, tzinfo=UTC)
+    status_label = "Match Finished" if status_short == "FT" else status_short
     _ensure_synthetic_teams(session)
     session.add(
         db_models.Fixture(
@@ -1867,9 +2092,9 @@ def _seed_finished_fixture(
             round="Group Stage - 1",
             league_id=1,
             season=2026,
-            status="Match Finished",
-            status_long="Match Finished",
-            status_short="FT",
+            status=status_label,
+            status_long=status_label,
+            status_short=status_short,
             home_team_id=-1,
             away_team_id=-2,
             home_team="Synthetic Home",

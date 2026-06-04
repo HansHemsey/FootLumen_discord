@@ -567,11 +567,13 @@ class ComboTicket(Base, TimestampMixin):
     __table_args__ = (
         UniqueConstraint("ticket_key", name="uq_combo_ticket_key"),
         Index("ix_combo_ticket_date_status", "combo_date", "status"),
+        Index("ix_combo_tickets_status_combo_date", "status", "combo_date"),
+        Index("ix_combo_tickets_ticket_key", "ticket_key"),
         Index("ix_combo_ticket_session", "session_key"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    ticket_key: Mapped[str] = mapped_column(String(300), index=True)
+    ticket_key: Mapped[str] = mapped_column(String(300))
     status: Mapped[str] = mapped_column(String(32), index=True)
     competition_key: Mapped[str] = mapped_column(String(80), index=True)
     league_id: Mapped[int] = mapped_column(Integer, index=True)
@@ -605,6 +607,7 @@ class ComboTicketLeg(Base, TimestampMixin):
     __table_args__ = (
         UniqueConstraint("ticket_id", "leg_order", name="uq_combo_ticket_leg_order"),
         Index("ix_combo_ticket_leg_ticket", "ticket_id"),
+        Index("ix_combo_ticket_legs_combo_ticket_id", "ticket_id"),
         Index("ix_combo_ticket_leg_fixture", "fixture_id"),
     )
 
@@ -645,6 +648,12 @@ class ComboTicketSnapshot(Base, TimestampMixin):
     __table_args__ = (
         Index("ix_combo_ticket_snapshot_ticket", "ticket_id"),
         Index("ix_combo_ticket_snapshot_key", "ticket_key"),
+        Index(
+            "ix_combo_ticket_snapshots_ticket_status_time",
+            "ticket_id",
+            "status",
+            "captured_at",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -663,6 +672,10 @@ class ComboTicketSnapshot(Base, TimestampMixin):
 
 class DiscordMessage(Base, TimestampMixin):
     __tablename__ = "discord_messages"
+    __table_args__ = (
+        Index("ix_discord_messages_idempotency_key", "idempotency_key"),
+        Index("ix_discord_messages_type_created", "message_type", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     fixture_id: Mapped[int | None] = mapped_column(
@@ -685,6 +698,7 @@ class DiscordMessage(Base, TimestampMixin):
     webhook_url_hash: Mapped[str | None] = mapped_column(String(16), nullable=True)
     message_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     webhook_hash: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     message_markdown: Mapped[str] = mapped_column(Text)
     route_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
     payload_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)

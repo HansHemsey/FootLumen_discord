@@ -184,6 +184,9 @@ class WorldCupComboRunService:
                         ticket,
                         captured_at=captured_at,
                         model_versions_json={"worldcup_combos": "v1"},
+                        snapshot_duplicate_throttle_minutes=(
+                            self.config.snapshot_duplicate_throttle_minutes
+                        ),
                     )
                     persisted += 1
             session_summaries.append(

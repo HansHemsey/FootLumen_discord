@@ -229,7 +229,7 @@ ANALYSIS_GRACE_MINUTES=15
 Exemple avec marge plus large :
 
 ```bash
-ANALYSIS_GRACE_MINUTES=30 SEND_DISCORD=true DRY_RUN=false scripts/publish_match_analyses.sh
+ANALYSIS_GRACE_MINUTES=400 SEND_DISCORD=true DRY_RUN=false scripts/publish_match_analyses.sh
 ```
 
 Ce que contient l'analyse :

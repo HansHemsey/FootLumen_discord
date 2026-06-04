@@ -1,7 +1,11 @@
 .DS_Store
 .env
+.env.*
+!.env.example
+.claude/settings.local.json
 config/discord_webhooks.local.yaml
 config/discord_channels.local.yaml
+config/*.local.yaml
 *.secrets.yaml
 .venv/
 __pycache__/
@@ -25,3 +29,4 @@ data/models/*
 config/discord_channels.yaml
 reports/
 logs/
+exports/

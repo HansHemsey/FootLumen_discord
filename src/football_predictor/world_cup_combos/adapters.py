@@ -60,6 +60,8 @@ class MarketConsensus:
     odds_snapshot_id: int | None
     odds_last_update: datetime | None
     bookmaker_count: int
+    bookmaker_name: str | None = None
+    executable_decimal_odd: float | None = None
 
 
 class WorldCupComboReadAdapters:
@@ -206,33 +208,40 @@ class WorldCupComboReadAdapters:
         )
         latest = max(implied_rows, key=lambda row: (_as_utc(row[0].fetched_at), row[0].id))
         odds_last_update = _as_utc(latest[0].fetched_at)
+        latest_snapshot = latest[0]
         return {
             ComboMarketType.HOME: MarketConsensus(
                 market_type=ComboMarketType.HOME,
                 decimal_odd=_mean(snapshot.odd_home for snapshot, *_ in implied_rows),
                 market_probability=_mean(row[1] for row in implied_rows),
                 edge_source_probability=None,
-                odds_snapshot_id=latest[0].id,
+                odds_snapshot_id=latest_snapshot.id,
                 odds_last_update=odds_last_update,
                 bookmaker_count=bookmaker_count,
+                bookmaker_name=latest_snapshot.bookmaker_name or "consensus",
+                executable_decimal_odd=_optional_float(latest_snapshot.odd_home),
             ),
             ComboMarketType.DRAW: MarketConsensus(
                 market_type=ComboMarketType.DRAW,
                 decimal_odd=_mean(snapshot.odd_draw for snapshot, *_ in implied_rows),
                 market_probability=_mean(row[2] for row in implied_rows),
                 edge_source_probability=None,
-                odds_snapshot_id=latest[0].id,
+                odds_snapshot_id=latest_snapshot.id,
                 odds_last_update=odds_last_update,
                 bookmaker_count=bookmaker_count,
+                bookmaker_name=latest_snapshot.bookmaker_name or "consensus",
+                executable_decimal_odd=_optional_float(latest_snapshot.odd_draw),
             ),
             ComboMarketType.AWAY: MarketConsensus(
                 market_type=ComboMarketType.AWAY,
                 decimal_odd=_mean(snapshot.odd_away for snapshot, *_ in implied_rows),
                 market_probability=_mean(row[3] for row in implied_rows),
                 edge_source_probability=None,
-                odds_snapshot_id=latest[0].id,
+                odds_snapshot_id=latest_snapshot.id,
                 odds_last_update=odds_last_update,
                 bookmaker_count=bookmaker_count,
+                bookmaker_name=latest_snapshot.bookmaker_name or "consensus",
+                executable_decimal_odd=_optional_float(latest_snapshot.odd_away),
             ),
         }
 
@@ -356,6 +365,13 @@ def _valid_odd(value: float | None) -> bool:
         return value is not None and float(value) > 1.01
     except (TypeError, ValueError):
         return False
+
+
+def _optional_float(value: float | None) -> float | None:
+    try:
+        return None if value is None else float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _mean(values: Any) -> float:

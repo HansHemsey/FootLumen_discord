@@ -11,6 +11,9 @@ webhooks:
     predictions:
       webhook_url: "REPLACE_WITH_WEBHOOK_URL"
       enabled: true
+    combines:
+      webhook_url: "REPLACE_WITH_WEBHOOK_URL"
+      enabled: false
     analyses:
       webhook_url: "REPLACE_WITH_WEBHOOK_URL"
       enabled: true

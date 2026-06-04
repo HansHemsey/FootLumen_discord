@@ -34,6 +34,10 @@ class WorldCupComboConfig:
     allow_public_matchday3: bool = False
     allow_public_knockout: bool = False
     staff_only_shadow_mode: bool = True
+    staff_channel_key: str = "predictions_staff"
+    public_channel_key: str = "combines"
+    mirror_public_to_staff: bool = True
+    publish_no_bet_public: bool = False
 
     def as_dict(self) -> JsonDict:
         return asdict(self)
@@ -83,6 +87,10 @@ def world_cup_combo_config_from_mapping(payload: JsonDict) -> WorldCupComboConfi
         allow_public_matchday3=_bool(payload.get("allow_public_matchday3"), False),
         allow_public_knockout=_bool(payload.get("allow_public_knockout"), False),
         staff_only_shadow_mode=_bool(payload.get("staff_only_shadow_mode"), True),
+        staff_channel_key=str(payload.get("staff_channel_key") or "predictions_staff"),
+        public_channel_key=str(payload.get("public_channel_key") or "combines"),
+        mirror_public_to_staff=_bool(payload.get("mirror_public_to_staff"), True),
+        publish_no_bet_public=_bool(payload.get("publish_no_bet_public"), False),
     )
 
 

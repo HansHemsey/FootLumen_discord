@@ -180,6 +180,9 @@ class WorldCupComboLegSelector:
                 fixture_id=fixture.fixture_id,
                 cutoff_time=data_cutoff_time,
             ),
+            bookmaker_name=market.bookmaker_name or "consensus",
+            executable_decimal_odd=market.executable_decimal_odd or market.decimal_odd,
+            market_probability_consensus=market.market_probability,
         )
 
     def _ou_candidate(
@@ -232,6 +235,9 @@ class WorldCupComboLegSelector:
                 fixture_id=fixture.fixture_id,
                 cutoff_time=data_cutoff_time,
             ),
+            bookmaker_name="consensus",
+            executable_decimal_odd=prediction.odd_pick,
+            market_probability_consensus=prediction.market_p_pick,
         )
 
     def _candidate_or_reason(
@@ -257,6 +263,9 @@ class WorldCupComboLegSelector:
         odds_last_update: datetime | None,
         prediction_generated_at: datetime | None,
         lineup_status: str,
+        bookmaker_name: str | None,
+        executable_decimal_odd: float | None,
+        market_probability_consensus: float | None,
     ) -> tuple[ComboLegCandidate | None, str | None]:
         if decimal_odd <= 1.01:
             return None, "invalid_odds"
@@ -304,6 +313,15 @@ class WorldCupComboLegSelector:
                 lineup_status=lineup_status,
                 odds_last_update=odds_last_update,
                 prediction_generated_at=prediction_generated_at,
+                home_team_name=fixture.home_team,
+                away_team_name=fixture.away_team,
+                match_label=f"{fixture.home_team} vs {fixture.away_team}",
+                kickoff_display=fixture.kickoff_at_paris.strftime("%Y-%m-%d %H:%M Europe/Paris"),
+                bookmaker_name=bookmaker_name or "consensus",
+                executable_decimal_odd=executable_decimal_odd or decimal_odd,
+                market_probability_consensus=market_probability_consensus
+                if market_probability_consensus is not None
+                else market_probability,
                 freshness_score=_freshness_score(
                     lock_time=combo_session.lock_time,
                     odds_last_update=odds_last_update,

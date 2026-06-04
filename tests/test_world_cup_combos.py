@@ -5,6 +5,7 @@ from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
+import pytest
 from sqlalchemy import inspect
 
 from football_predictor.db import models as db_models
@@ -14,6 +15,7 @@ from football_predictor.db.session import (
     init_db,
     session_scope,
 )
+from football_predictor.discord.exceptions import DiscordWebhookError
 from football_predictor.discord.service import DiscordDeliveryService
 from football_predictor.world_cup_combos.config import (
     WorldCupComboConfig,
@@ -82,6 +84,10 @@ def test_worldcup_combo_config_defaults_disabled() -> None:
     assert config.max_staff_legs == 3
     assert config.lock_buffer_minutes == 20
     assert config.staff_only_shadow_mode is True
+    assert config.staff_channel_key == "predictions_staff"
+    assert config.public_channel_key == "combines"
+    assert config.mirror_public_to_staff is True
+    assert config.publish_no_bet_public is False
 
 
 def test_worldcup_combo_config_loads_yaml(tmp_path: Path) -> None:
@@ -109,6 +115,10 @@ forbid_same_group_md3_multiple_legs: true
 allow_public_matchday3: false
 allow_public_knockout: false
 staff_only_shadow_mode: true
+staff_channel_key: predictions_staff
+public_channel_key: combines
+mirror_public_to_staff: true
+publish_no_bet_public: false
 """,
         encoding="utf-8",
     )
@@ -1112,6 +1122,13 @@ def test_worldcup_combo_formatter_outputs_watchlist_public_and_no_bet() -> None:
     assert "COMBINÉ CDM — VERROUILLÉ" in public
     assert "Aucun combiné CDM publiable" in no_bet
     assert "pas une certitude" in public
+    assert "Synthetic Home vs Synthetic Away" in public
+    assert "fixture_id" not in public
+    assert "Fixture -3601" not in public
+    assert "prediction_snapshot_id" in watchlist
+    assert "odds_snapshot_id" in watchlist
+    forbidden = ("garanti", "sûr", "free money")
+    assert all(term not in public.lower() for term in forbidden)
 
 
 def test_worldcup_combo_publication_is_idempotent(tmp_path: Path) -> None:
@@ -1173,11 +1190,11 @@ def test_worldcup_combo_publication_dry_run_does_not_block_execute(
     assert execute.reason == "no_delivery_service"
 
 
-def test_worldcup_combo_locked_public_capable_ticket_still_publishes_to_staff(
+def test_worldcup_combo_shadow_mode_never_publishes_public(
     tmp_path: Path,
 ) -> None:
     engine = _init_full_db(tmp_path)
-    config = _enabled_config(staff_only_shadow_mode=False)
+    config = _enabled_config(staff_only_shadow_mode=True)
     ticket = replace(
         _ticket_candidate(
             legs=(
@@ -1204,6 +1221,232 @@ def test_worldcup_combo_locked_public_capable_ticket_still_publishes_to_staff(
     assert result.status == "dry_run"
     assert result.channel_key == "predictions_staff"
     assert result.message_type == "worldcup_combo_staff"
+
+
+def test_worldcup_combo_public_policy_routes_to_public_when_shadow_disabled(
+    tmp_path: Path,
+) -> None:
+    engine = _init_full_db(tmp_path)
+    config = _enabled_config(
+        staff_only_shadow_mode=False,
+        mirror_public_to_staff=False,
+        public_channel_key="combines",
+    )
+    ticket = replace(
+        _ticket_candidate(
+            legs=(
+                _leg_candidate(fixture_id=-3731),
+                _leg_candidate(fixture_id=-3732),
+            )
+        ),
+        publication_decision=ComboTicketStatus.LOCKED,
+    )
+
+    with session_scope(create_session_factory(engine)) as session:
+        service = WorldCupComboPublicationService(
+            session,
+            config,
+            delivery_service=DiscordDeliveryService(session),
+        )
+        result = service.publish_locked(
+            ticket,
+            locked_at=datetime(2026, 6, 11, 17, 40, tzinfo=UTC),
+            dry_run=True,
+            execute=False,
+        )
+
+    assert result.status == "dry_run"
+    assert result.channel_key == "combines"
+    assert result.message_type == "worldcup_combo_public"
+
+
+def test_worldcup_combo_staff_only_routes_to_staff(tmp_path: Path) -> None:
+    engine = _init_full_db(tmp_path)
+    config = _enabled_config(staff_only_shadow_mode=False)
+    ticket = replace(
+        _ticket_candidate(
+            legs=(
+                _leg_candidate(fixture_id=-3741, warnings=["lineup_missing_close_to_kickoff"]),
+                _leg_candidate(fixture_id=-3742, warnings=["lineup_missing_close_to_kickoff"]),
+            )
+        ),
+        publication_decision=ComboTicketStatus.LOCKED,
+        post_lock_risk_score=99.0,
+    )
+
+    with session_scope(create_session_factory(engine)) as session:
+        service = WorldCupComboPublicationService(
+            session,
+            config,
+            delivery_service=DiscordDeliveryService(session),
+        )
+        result = service.publish_locked(
+            ticket,
+            locked_at=datetime(2026, 6, 11, 17, 40, tzinfo=UTC),
+            dry_run=True,
+            execute=False,
+        )
+
+    assert result.status == "dry_run"
+    assert result.channel_key == "predictions_staff"
+    assert result.message_type == "worldcup_combo_staff"
+
+
+def test_worldcup_combo_no_bet_routes_to_staff_by_default(tmp_path: Path) -> None:
+    engine = _init_full_db(tmp_path)
+    config = _enabled_config(publish_no_bet_public=False)
+    ticket = _ticket_candidate(
+        legs=(
+            _leg_candidate(fixture_id=-3751),
+            _leg_candidate(fixture_id=-3752),
+        )
+    )
+
+    with session_scope(create_session_factory(engine)) as session:
+        service = WorldCupComboPublicationService(
+            session,
+            config,
+            delivery_service=DiscordDeliveryService(session),
+        )
+        result = service.publish_no_bet(
+            reason="risk_too_high",
+            ticket=ticket,
+            dry_run=True,
+            execute=False,
+        )
+
+    assert result.status == "dry_run"
+    assert result.channel_key == "predictions_staff"
+
+
+def test_worldcup_combo_public_mirror_to_staff(tmp_path: Path) -> None:
+    engine = _init_full_db(tmp_path)
+    config = _enabled_config(
+        staff_only_shadow_mode=False,
+        mirror_public_to_staff=True,
+        public_channel_key="combines",
+    )
+    ticket = replace(
+        _ticket_candidate(
+            legs=(
+                _leg_candidate(fixture_id=-3761),
+                _leg_candidate(fixture_id=-3762),
+            )
+        ),
+        publication_decision=ComboTicketStatus.LOCKED,
+    )
+
+    with session_scope(create_session_factory(engine)) as session:
+        service = WorldCupComboPublicationService(
+            session,
+            config,
+            delivery_service=DiscordDeliveryService(session),
+        )
+        result = service.publish_locked(
+            ticket,
+            locked_at=datetime(2026, 6, 11, 17, 40, tzinfo=UTC),
+            dry_run=True,
+            execute=False,
+        )
+        messages = [
+            message
+            for message in session.query(db_models.DiscordMessage).all()
+            if isinstance(message.payload_json, dict)
+            and message.payload_json.get("ticket_key") == ticket.ticket_key
+        ]
+
+    assert result.channel_key == "combines"
+    assert {message.channel_key for message in messages} == {"combines", "predictions_staff"}
+
+
+def test_worldcup_combo_publication_idempotence_includes_channel_and_status(
+    tmp_path: Path,
+) -> None:
+    engine = _init_full_db(tmp_path)
+    config = _enabled_config(
+        staff_only_shadow_mode=False,
+        mirror_public_to_staff=False,
+        public_channel_key="combines",
+    )
+    ticket = replace(
+        _ticket_candidate(
+            legs=(
+                _leg_candidate(fixture_id=-3771),
+                _leg_candidate(fixture_id=-3772),
+            )
+        ),
+        publication_decision=ComboTicketStatus.LOCKED,
+    )
+
+    with session_scope(create_session_factory(engine)) as session:
+        service = WorldCupComboPublicationService(
+            session,
+            config,
+            delivery_service=DiscordDeliveryService(session),
+        )
+        first = service.publish_locked(
+            ticket,
+            locked_at=datetime(2026, 6, 11, 17, 40, tzinfo=UTC),
+            dry_run=True,
+            execute=False,
+        )
+        second = service.publish_locked(
+            ticket,
+            locked_at=datetime(2026, 6, 11, 17, 40, tzinfo=UTC),
+            dry_run=True,
+            execute=False,
+        )
+        messages = session.query(db_models.DiscordMessage).filter(
+            db_models.DiscordMessage.channel_key == "combines",
+            db_models.DiscordMessage.message_type == "worldcup_combo_public",
+        ).all()
+
+    assert first.status == "dry_run"
+    assert second.status == "duplicate_skipped"
+    assert len(messages) == 1
+    assert messages[0].payload_json["idempotency_key"].endswith(
+        ":PUBLIC_PUBLISHED:combines:worldcup_combo_public"
+    )
+
+
+def test_worldcup_combo_publication_blocks_secret_message(tmp_path: Path) -> None:
+    engine = _init_full_db(tmp_path)
+    config = _enabled_config(
+        staff_only_shadow_mode=False,
+        mirror_public_to_staff=False,
+    )
+    ticket = replace(
+        _ticket_candidate(
+            legs=(
+                _leg_candidate(fixture_id=-3781),
+                _leg_candidate(fixture_id=-3782),
+            )
+        ),
+        publication_decision=ComboTicketStatus.LOCKED,
+    )
+
+    class SecretFormatter(WorldCupComboFormatter):
+        def format_public_locked(self, ticket, *, locked_at: datetime) -> str:
+            secret_url = (
+                "https://discord.com/api/"
+                "webhooks/123456789012345678/fake-secret-token-value"
+            )
+            return f"```md\nCOMBINÉ CDM\n{secret_url}\n```"
+
+    with session_scope(create_session_factory(engine)) as session:
+        service = WorldCupComboPublicationService(
+            session,
+            config,
+            delivery_service=DiscordDeliveryService(session),
+            formatter=SecretFormatter(),
+        )
+        with pytest.raises(DiscordWebhookError):
+            service.publish_locked(
+                ticket,
+                locked_at=datetime(2026, 6, 11, 17, 40, tzinfo=UTC),
+                dry_run=True,
+                execute=False,
+            )
 
 
 def test_worldcup_combo_run_service_dry_run_does_not_persist(tmp_path: Path) -> None:
@@ -1333,6 +1576,9 @@ def _leg_candidate(
     data_quality_score: float = 84.0,
     lineup_status: str = "available",
     freshness_score: float | None = 100.0,
+    home_team_name: str = "Synthetic Home",
+    away_team_name: str = "Synthetic Away",
+    bookmaker_name: str = "Synthetic Book",
     warnings: list[str] | None = None,
 ) -> ComboLegCandidate:
     kickoff = datetime(2026, 6, 11, 18, tzinfo=UTC)
@@ -1356,6 +1602,13 @@ def _leg_candidate(
         lineup_status=lineup_status,
         odds_last_update=kickoff - timedelta(minutes=45),
         prediction_generated_at=kickoff - timedelta(minutes=40),
+        home_team_name=home_team_name,
+        away_team_name=away_team_name,
+        match_label=f"{home_team_name} vs {away_team_name}",
+        kickoff_display="2026-06-11 20:00 Europe/Paris",
+        bookmaker_name=bookmaker_name,
+        executable_decimal_odd=decimal_odd,
+        market_probability_consensus=market_probability,
         freshness_score=freshness_score,
         warnings=warnings if warnings is not None else ["synthetic-warning"],
     )

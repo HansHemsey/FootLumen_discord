@@ -16,6 +16,8 @@ Le passage production ajoute une orchestration contrôlée `generate -> lock -> 
 sans activer de cron par défaut.
 Le sprint pre-lock public-ready relit les sources dynamiques juste avant lock et peut
 remplacer ou annuler un ticket si les données se dégradent.
+Le sprint public routing rend les tickets lisibles côté Discord, prépare le channel public
+`combines`, mais conserve `staff_only_shadow_mode: true` par défaut.
 
 La feature ne modifie pas les prédictions 1X2, V3 ou O/U existantes.
 
@@ -35,6 +37,27 @@ Le chemin peut être surchargé avec :
 WORLD_CUP_COMBOS_CONFIG_PATH=config/worldcup_combos.yaml
 WORLD_CUP_COMBOS_ENABLED=false
 ```
+
+Champs de publication Discord :
+
+```yaml
+staff_channel_key: predictions_staff
+public_channel_key: combines
+mirror_public_to_staff: true
+publish_no_bet_public: false
+staff_only_shadow_mode: true
+```
+
+Avec `staff_only_shadow_mode: true`, tout ticket est envoyé en staff, même s'il est
+techniquement publiable. Pour autoriser une publication publique contrôlée, il faut :
+
+1. créer et valider la route Discord CDM `combines` côté secrets VPS ;
+2. lancer les commandes en dry-run ;
+3. vérifier l'idempotence dans `discord_messages` ;
+4. passer seulement ensuite `staff_only_shadow_mode: false`.
+
+`mirror_public_to_staff: true` envoie une copie staff lorsqu'un ticket part en public.
+`publish_no_bet_public: false` garde les no bet en staff.
 
 ## Tables Ajoutées
 
@@ -104,9 +127,10 @@ Services ajoutés :
   anciennes selon la proximité du kickoff.
 - `worldcup_combo_lock_service.py` : revalide un ticket avant lock, recalcule scoring/policy,
   crée le snapshot `pre_lock`, puis passe `LOCKED`, `STAFF_ONLY` ou `NO_BET`.
-- `worldcup_combo_formatter.py` : formate watchlist staff, ticket verrouillé staff et no bet.
-- `worldcup_combo_publication_service.py` : publie uniquement dans le channel staff,
-  avec idempotence par `ticket_key`.
+- `worldcup_combo_formatter.py` : formate watchlist staff, ticket verrouillé public lisible
+  et no bet.
+- `worldcup_combo_publication_service.py` : route staff/public selon la config, avec
+  idempotence par ticket, statut, channel et type de message.
 - `worldcup_combo_settlement.py` : calcule `WON`, `LOST`, `VOID`, `PARTIAL_VOID` et
   `profit_unit` après résultats.
 
@@ -136,13 +160,24 @@ Snapshots pre-lock :
 - `pre_lock_replaced_leg` : au moins un leg a été remplacé ;
 - `pre_lock_no_bet` : ticket annulé avant lock.
 
-Règles staff/no bet :
+Règles staff/public/no bet :
 
-- toutes les publications Discord partent vers `predictions_staff` ;
-- un ticket théoriquement publiable reste staff-only pendant la CDM ;
+- `staff_only_shadow_mode: true` force toutes les publications vers `predictions_staff` ;
+- `staff_only_shadow_mode: false` permet `PUBLIC_PUBLISHED` vers `public_channel_key` ;
+- `STAFF_ONLY` reste toujours dans `staff_channel_key` ;
+- `NO_BET` reste dans `staff_channel_key` sauf `publish_no_bet_public: true` ;
+- `mirror_public_to_staff: true` conserve une copie staff des tickets publics ;
 - no bet si EV ajustée non positive, market scope inconnu, data insuffisante ou warning
   critique ;
 - aucun message ne promet un gain ou une certitude.
+
+Idempotence Discord :
+
+- chaque publication stocke un `idempotency_key` dans `discord_messages.payload_json` ;
+- la clé est stable par `ticket_key`, statut cible, channel et `message_type` ;
+- une relance cron sur le même ticket/channel/statut est ignorée ;
+- un dry-run ne bloque pas une exécution réelle, car l'exécution ne déduplique que les
+  messages `sent`.
 
 ## Commandes Contrôlées
 
@@ -191,13 +226,18 @@ Configuration de production :
 ```yaml
 enabled: true
 staff_only_shadow_mode: true
+staff_channel_key: predictions_staff
+public_channel_key: combines
+mirror_public_to_staff: true
+publish_no_bet_public: false
 allow_public_matchday3: false
 allow_public_knockout: false
 ```
 
 Les cron combinés de `config/prod_worldcup.crontab` sont actifs. Ils génèrent, verrouillent,
-publient en staff et settlent les tickets. Aucun channel public n'est nécessaire : la route
-réelle à vérifier côté VPS est `predictions_staff`.
+publient en staff et settlent les tickets tant que shadow mode reste activé. Le channel
+public `combines` peut être configuré à l'avance, mais il ne reçoit rien tant que
+`staff_only_shadow_mode` vaut `true`.
 
 La feature reste CDM 2026 uniquement : `competition_key=fifa_world_cup_2026`,
 `league_id=1`, `season=2026`.

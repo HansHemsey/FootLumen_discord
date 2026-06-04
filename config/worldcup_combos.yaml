@@ -1,5 +1,5 @@
 # World Cup 2026 combo tickets.
-# Production mode: enabled, but every Discord publication is routed to staff only.
+# Production mode: enabled, but shadow mode keeps every Discord publication staff-only.
 enabled: true
 competition_key: fifa_world_cup_2026
 league_id: 1
@@ -24,3 +24,7 @@ forbid_same_group_md3_multiple_legs: true
 allow_public_matchday3: false
 allow_public_knockout: false
 staff_only_shadow_mode: true
+staff_channel_key: predictions_staff
+public_channel_key: combines
+mirror_public_to_staff: true
+publish_no_bet_public: false

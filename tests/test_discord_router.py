@@ -139,19 +139,23 @@ def test_router_routes_world_cup_calendar(tmp_path: Path, reference_path: Path) 
     assert route.channel_key == "calendrier"
 
 
-def test_router_routes_world_cup_combo_messages_to_global_staff() -> None:
+def test_router_routes_world_cup_combo_messages_to_staff_or_public() -> None:
     webhooks = DiscordWebhooksConfig(
         routes=[
             DiscordWebhookRouteConfig(
                 competition_key="global",
                 channel_key="predictions_staff",
                 webhook_url="https://example.invalid/staff",
+            ),
+            DiscordWebhookRouteConfig(
+                competition_key="cdm_2026",
+                channel_key="combines",
+                webhook_url="https://example.invalid/combines",
             )
         ]
     )
 
     for message_type in (
-        "worldcup_combo_public",
         "worldcup_combo_locked",
         "worldcup_combo_staff",
         "worldcup_combo_watchlist",
@@ -167,6 +171,17 @@ def test_router_routes_world_cup_combo_messages_to_global_staff() -> None:
         )
         assert route.channel_key == "predictions_staff"
         assert route.competition_key == "global"
+
+    public_route = resolve_discord_route(
+        channels_config=None,
+        webhooks_config=webhooks,
+        competition_key="cdm_2026",
+        league_id=1,
+        season=2026,
+        message_type="worldcup_combo_public",
+    )
+    assert public_route.channel_key == "combines"
+    assert public_route.competition_key == "cdm_2026"
 
 
 def test_router_maps_daily_matches_to_matchs_du_jour(

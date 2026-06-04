@@ -17,12 +17,13 @@ class WorldCupComboFormatter:
             "```md",
             "🧾 COMBINÉ CDM — WATCHLIST STAFF",
             "",
+            f"Date : {ticket.combo_date.isoformat()}",
             f"Session : {ticket.session_key}",
             f"Premier kickoff : {_dt(ticket.first_kickoff_at, self.timezone)}",
             f"Lock prévu : {_dt(ticket.lock_time, self.timezone)}",
             "",
             "Legs :",
-            *_leg_lines(ticket),
+            *_staff_leg_lines(ticket),
             "",
             f"Cote combinée : {ticket.combined_decimal_odds:.2f}",
             f"EV ajustée : {_pct(ticket.combined_ev_adjusted)}",
@@ -44,11 +45,13 @@ class WorldCupComboFormatter:
             "```md",
             "🎯 COMBINÉ CDM — VERROUILLÉ",
             "",
+            f"Date : {ticket.combo_date.isoformat()}",
+            f"Session : {ticket.session_key}",
             f"Verrouillé à : {_dt(locked_at, self.timezone)}",
             f"Premier kickoff : {_dt(ticket.first_kickoff_at, self.timezone)}",
             "",
             "Legs :",
-            *_leg_lines(ticket),
+            *_public_leg_lines(ticket),
             "",
             f"Cote combinée : {ticket.combined_decimal_odds:.2f}",
             f"Proba ajustée : {_pct(ticket.combined_probability_adjusted)}",
@@ -56,7 +59,9 @@ class WorldCupComboFormatter:
             f"EV ajustée : {_pct(ticket.combined_ev_adjusted)}",
             "Confiance ticket : "
             f"{ticket.combined_confidence_label} ({ticket.combined_confidence_score:.1f})",
-            f"Data quality min : {min(leg.data_quality_score for leg in ticket.legs):.0f}/100",
+            "",
+            "État données :",
+            *_data_state_lines(ticket),
             "",
             "Note : pari combiné probabiliste. High = ticket propre/value positive/"
             "risque maîtrisé, pas une certitude.",
@@ -86,6 +91,9 @@ class WorldCupComboFormatter:
                     "",
                     "Warnings :",
                     *_warning_lines(ticket.warnings),
+                    "",
+                    "Legs audit :",
+                    *_staff_leg_lines(ticket),
                 ]
             )
         lines.extend(
@@ -98,15 +106,88 @@ class WorldCupComboFormatter:
         return _trim_markdown(lines)
 
 
-def _leg_lines(ticket: ComboTicketCandidate) -> list[str]:
+def _public_leg_lines(ticket: ComboTicketCandidate) -> list[str]:
     lines: list[str] = []
     for index, leg in enumerate(ticket.legs, start=1):
+        match_label = leg.match_label or _fallback_match_label(leg)
+        odd = leg.executable_decimal_odd or leg.decimal_odd
+        market_probability = (
+            leg.market_probability_consensus
+            if leg.market_probability_consensus is not None
+            else leg.market_probability
+        )
+        bookmaker = leg.bookmaker_name or "consensus"
+        kickoff = leg.kickoff_display or _dt(leg.kickoff_at_utc, ZoneInfo("Europe/Paris"))
         lines.append(
-            f"{index}. Fixture {leg.fixture_id} — {leg.selection} "
-            f"@ {leg.decimal_odd:.2f} | P modèle {_pct(leg.model_probability)} | "
-            f"edge {_pct(leg.edge)} | EV {_pct(leg.ev)} | data {leg.data_quality_score:.0f}/100"
+            f"{index}. {match_label} ({kickoff})"
+        )
+        lines.append(
+            f"   Sélection : {leg.selection} @ {odd:.2f} ({bookmaker})"
+        )
+        lines.append(
+            f"   P modèle {_pct(leg.model_probability)} | marché {_pct(market_probability)} "
+            f"| edge {_pct(leg.edge)} | EV {_pct(leg.ev)}"
         )
     return lines
+
+
+def _staff_leg_lines(ticket: ComboTicketCandidate) -> list[str]:
+    lines: list[str] = []
+    for index, leg in enumerate(ticket.legs, start=1):
+        match_label = leg.match_label or _fallback_match_label(leg)
+        odd = leg.executable_decimal_odd or leg.decimal_odd
+        bookmaker = leg.bookmaker_name or "consensus"
+        lines.append(
+            f"{index}. {match_label} — {leg.selection} @ {odd:.2f} ({bookmaker})"
+        )
+        lines.append(
+            f"   fixture_id={leg.fixture_id} prediction_snapshot_id="
+            f"{leg.prediction_snapshot_id or 'n.d.'} odds_snapshot_id="
+            f"{leg.odds_snapshot_id or 'n.d.'}"
+        )
+        lines.append(
+            f"   P modèle {_pct(leg.model_probability)} | edge {_pct(leg.edge)} | "
+            f"EV {_pct(leg.ev)} | data {leg.data_quality_score:.0f}/100 | "
+            f"lineups {_lineup_state(leg.lineup_status)}"
+        )
+        for warning in leg.warnings[:4]:
+            lines.append(f"   warning={warning}")
+    return lines
+
+
+def _data_state_lines(ticket: ComboTicketCandidate) -> list[str]:
+    if not ticket.legs:
+        return ["- n.d."]
+    min_quality = min(leg.data_quality_score for leg in ticket.legs)
+    odds_fresh = all(
+        leg.odds_last_update is not None
+        and "odds_stale" not in leg.warnings
+        and "odds_freshness_unknown" not in leg.warnings
+        for leg in ticket.legs
+    )
+    lineup_states = sorted({_lineup_state(leg.lineup_status) for leg in ticket.legs})
+    return [
+        f"- Odds : {'fraîches' if odds_fresh else 'à surveiller'}",
+        f"- Lineups : {', '.join(lineup_states)}",
+        f"- Data quality min : {min_quality:.0f}/100",
+    ]
+
+
+def _fallback_match_label(leg) -> str:
+    if leg.home_team_name and leg.away_team_name:
+        return f"{leg.home_team_name} vs {leg.away_team_name}"
+    return f"Fixture {leg.fixture_id}"
+
+
+def _lineup_state(value: str | None) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized == "available":
+        return "confirmées"
+    if normalized == "partial":
+        return "partielles"
+    if normalized == "missing":
+        return "non attendues/non disponibles"
+    return "n.d."
 
 
 def _warning_lines(warnings: list[str]) -> list[str]:

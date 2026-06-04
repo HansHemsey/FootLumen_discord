@@ -156,12 +156,17 @@ Configuration combinés CDM en production staff-only :
 ```yaml
 enabled: true
 staff_only_shadow_mode: true
+staff_channel_key: predictions_staff
+public_channel_key: combines
+mirror_public_to_staff: true
+publish_no_bet_public: false
 allow_public_matchday3: false
 allow_public_knockout: false
 ```
 
-Les combinés sont publiés uniquement dans `predictions_staff`. Aucun channel public dédié
-n'est requis pendant la Coupe du Monde.
+Avec `staff_only_shadow_mode: true`, les combinés restent publiés uniquement dans
+`predictions_staff`. Le channel public `combines` peut être préparé à l'avance, mais il
+ne reçoit rien tant que le shadow mode n'est pas désactivé.
 
 Installer le crontab CDM only :
 

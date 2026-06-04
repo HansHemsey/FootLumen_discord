@@ -72,6 +72,13 @@ class ComboLegCandidate:
     odds_last_update: datetime | None
     prediction_generated_at: datetime | None
     kickoff_at_paris: datetime | None = None
+    home_team_name: str | None = None
+    away_team_name: str | None = None
+    match_label: str | None = None
+    kickoff_display: str | None = None
+    bookmaker_name: str | None = None
+    executable_decimal_odd: float | None = None
+    market_probability_consensus: float | None = None
     freshness_score: float | None = None
     data_cutoff_time: datetime | None = None
     generated_at: datetime | None = None

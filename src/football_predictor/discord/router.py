@@ -19,7 +19,7 @@ MESSAGE_TYPE_CHANNELS = {
     "prediction": "predictions",
     "prediction_skipped": "predictions_staff",
     "ou_prediction_skipped": "predictions_staff",
-    "worldcup_combo_public": "predictions_staff",
+    "worldcup_combo_public": "combines",
     "worldcup_combo_locked": "predictions_staff",
     "worldcup_combo_staff": "predictions_staff",
     "worldcup_combo_watchlist": "predictions_staff",

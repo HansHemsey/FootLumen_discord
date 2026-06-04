@@ -44,6 +44,11 @@ competitions:
         channel_id: "REPLACE_WITH_CHANNEL_ID"
         webhook_name: "football-predictor-cdm-2026-predictions"
         enabled: true
+      combines:
+        channel_name: "🎯-combines-cdm"
+        channel_id: "REPLACE_WITH_CHANNEL_ID"
+        webhook_name: "football-predictor-cdm-2026-combines"
+        enabled: false
       resultats:
         channel_name: "✅-resultats"
         channel_id: "REPLACE_WITH_CHANNEL_ID"

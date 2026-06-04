@@ -633,6 +633,19 @@ avec edge positif, EV positive, confiance O/U V2 suffisante, data quality suffis
 couverture bookmaker minimale. Les prédictions non publiques restent routées staff ou
 marquées `no_bet`, et ne sont pas prises en compte dans le score public hebdomadaire.
 
+La couche de décision O/U V2 sépare explicitement :
+
+- `forecast_side` : côté le plus probable selon le modèle ;
+- `value_side` : côté publiable seulement si la value betting est positive ;
+- `no_bet_reason` : raison si aucun côté value n'est publiable.
+
+Une publication publique O/U exige `ou_decision_version="ou_v2"` et la policy
+`ou_publication_policy_v2`. Une sortie legacy ou sans version explicite est staff-only,
+même si elle contient un forecast probable. `bookmaker_count` manquant est traité comme
+`0`, donc non publiable public. Les combinés CDM consomment uniquement les décisions O/U
+V2 propres avec `value_side`, `edge_pick > 0`, `ev_pick > 0` et `publication_decision`
+publique.
+
 ### Backtest Publication O/U V2
 
 Le backtest publication O/U V2 ne retune pas le modèle. Il réutilise le dataset

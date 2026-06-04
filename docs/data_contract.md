@@ -854,16 +854,18 @@ car la FK pointe vers les prédictions V2. Le lien V3 est porté par
 - `v3_model_prediction_id` pour les prédictions V3 1X2 publiées ;
 - `v3_feature_snapshot_id` pour les prédictions V3 1X2 publiées ;
 - `ou_model_prediction_id` pour les prédictions O/U 2.5 publiées ;
+- `decision_version`, `ou_decision_version` et `ou_publication_policy_version` pour
+  auditer les décisions O/U V2 ;
 - `model_family` (`v3` ou `ou25`) ;
 - `shadow_mode` pour V3 ;
 - `daily_window` / `automation_window` ;
 - `automation_date` ;
 - `run_key`.
 
-Les prédictions V3 et O/U à confiance insuffisante sont persistées mais ne créent pas de
-message Discord réel. Le statut opérationnel est `confidence_skipped` avec la raison
-`confidence_below_publish_threshold`; ces lignes ne sont pas éligibles au score public
-hebdomadaire.
+Les prédictions V3 et O/U non publiables sont persistées mais ne créent pas de message
+public. Pour O/U, `forecast_side` décrit seulement la lecture modèle ; seul `value_side`
+peut devenir un pick. Une sortie O/U legacy ou sans `ou_decision_version="ou_v2"` reste
+staff-only. Les lignes non publiques ne sont pas éligibles au score public hebdomadaire.
 
 Les vrais messages `predictions` sont dédupliqués par `fixture_id + window` pour éviter un
 second envoi réel V2 ou V3 sur la même fenêtre. `dry_run` et `print_only` ne bloquent

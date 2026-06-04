@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from football_predictor.ou_model.prediction.ou_decision import decide_ou_prediction
+from football_predictor.ou_model.prediction.ou_publication_policy import (
+    evaluate_ou_publication,
+)
 
 
 def test_over_forecast_but_under_is_value() -> None:
@@ -40,6 +43,8 @@ def test_over_forecast_and_over_is_value() -> None:
     assert decision.value_ev == decision.ev_over
     assert decision.confidence_label_v2 in {"High", "Very High"}
     assert decision.publication_decision == "public"
+    assert decision.ou_decision_version == "ou_v2"
+    assert decision.ou_publication_policy_version.startswith("ou_publication_policy_v")
 
 
 def test_value_pick_with_low_data_quality_goes_to_staff() -> None:
@@ -72,6 +77,50 @@ def test_value_pick_with_single_bookmaker_goes_to_staff() -> None:
     assert decision.value_side == "OVER"
     assert decision.publication_decision == "staff"
     assert decision.non_publication_reason == "bookmaker_count_insufficient"
+
+
+def test_value_pick_with_missing_bookmaker_count_goes_to_staff() -> None:
+    decision = decide_ou_prediction(
+        p_over=0.64,
+        p_under=0.36,
+        market_p_over=0.56,
+        market_p_under=0.44,
+        odd_over=1.75,
+        odd_under=2.10,
+        data_quality_json={"overall_data_quality_score": 90},
+    )
+
+    assert decision.value_side == "OVER"
+    assert decision.bookmaker_count == 0
+    assert decision.publication_decision == "staff"
+    assert decision.non_publication_reason == "bookmaker_count_insufficient"
+
+
+def test_publication_policy_rejects_legacy_or_missing_ou_v2_marker() -> None:
+    common = {
+        "value_side": "OVER",
+        "edge_pick": 0.08,
+        "ev_pick": 0.15,
+        "confidence_score_v2": 82.0,
+        "data_quality_score": 88.0,
+        "bookmaker_count": 4,
+    }
+
+    missing_version = evaluate_ou_publication(**common)
+    legacy_version = evaluate_ou_publication(
+        **common,
+        ou_decision_version="ou_decision_v1",
+    )
+    v2_version = evaluate_ou_publication(
+        **common,
+        ou_decision_version="ou_v2",
+    )
+
+    assert missing_version.decision == "staff"
+    assert missing_version.reason == "legacy_decision_version"
+    assert legacy_version.decision == "staff"
+    assert legacy_version.reason == "legacy_decision_version"
+    assert v2_version.decision == "public"
 
 
 def test_under_forecast_but_no_side_has_enough_ev() -> None:
@@ -124,6 +173,25 @@ def test_negative_edge_is_not_publishable_even_with_positive_ev() -> None:
     assert decision.edge_over is not None and decision.edge_over < 0
     assert decision.value_side is None
     assert decision.no_bet_reason == "edge_below_threshold"
+
+
+def test_forecast_side_is_not_published_when_forecast_ev_is_negative() -> None:
+    decision = decide_ou_prediction(
+        p_over=0.56,
+        p_under=0.44,
+        market_p_over=0.51,
+        market_p_under=0.49,
+        odd_over=1.70,
+        odd_under=1.90,
+        data_quality_json={"overall_data_quality_score": 90, "ou_market_bookmaker_count": 6},
+    )
+
+    assert decision.forecast_side == "OVER"
+    assert decision.edge_over is not None and decision.edge_over > 0
+    assert decision.ev_over is not None and decision.ev_over < 0
+    assert decision.value_side is None
+    assert decision.is_value_pick is False
+    assert decision.publication_decision == "no_bet"
 
 
 def test_confidence_uses_pick_edge_not_edge_over_by_default() -> None:

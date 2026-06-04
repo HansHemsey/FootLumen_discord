@@ -41,8 +41,8 @@ def format_ou_prediction_markdown(
         fallback="OVER" if p_over >= p_under else "UNDER",
     )
     value_side = _side(getattr(prediction, "value_side", None), fallback=None)
-    legacy_pick = value_side is None and getattr(prediction, "no_bet_reason", None) is None
-    pick_side = value_side or (forecast_side if legacy_pick else None)
+    pick_side = value_side
+    is_legacy_decision = _is_legacy_ou_decision(prediction)
     forecast = _side_label(forecast_side)
     pick = _side_label(pick_side) if pick_side is not None else "No bet"
 
@@ -92,6 +92,8 @@ def format_ou_prediction_markdown(
             "Aucun pick public",
             f"Raison : {_reason_label(no_bet_reason or non_publication_reason)}",
         ]
+        if is_legacy_decision:
+            lines.append("Publication : staff-only / non publiable")
     else:
         lines += [
             f"Côté : {pick}",
@@ -115,7 +117,11 @@ def format_ou_prediction_markdown(
         _ou_probability_row("Moins 2.5", p_under, market_p_under),
         "",
         "💡 LECTURE PARIEUR",
-        _value_sentence(pick, pick_edge, no_bet_reason=no_bet_reason),
+        _value_sentence(
+            pick,
+            pick_edge,
+            no_bet_reason=no_bet_reason or (None if pick_side is not None else "no_value_side"),
+        ),
         _market_sentence(market_p_over, market_p_under),
         f"• xG attendu : {_xg_str(prediction)}.",
     ]
@@ -307,6 +313,7 @@ def _reason_label(reason: Any) -> str:
         "data_quality_insufficient": "data quality insuffisante",
         "bookmaker_count_insufficient": "nombre de bookmakers insuffisant",
         "no_value_side": "aucun côté value",
+        "legacy_decision_version": "version de décision O/U legacy",
     }
     key = str(reason or "").strip()
     return labels.get(key, _clean(key) if key else _NA)
@@ -333,6 +340,17 @@ def _side_label(side: str | None) -> str:
     if side == "UNDER":
         return "Moins de 2.5 buts"
     return "No bet"
+
+
+def _is_legacy_ou_decision(prediction: Any) -> bool:
+    version = getattr(prediction, "ou_decision_version", None)
+    if version == "ou_v2":
+        return False
+    return getattr(prediction, "value_side", None) is None and getattr(
+        prediction,
+        "no_bet_reason",
+        None,
+    ) is None
 
 
 def _number(value: Any, *, default: float | None = None) -> float | None:

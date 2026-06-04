@@ -566,6 +566,73 @@ def test_worldcup_combo_selector_includes_clean_ou_v2_value_leg(tmp_path: Path) 
     assert result.candidates[0].selection == "Under 2.5"
 
 
+def test_worldcup_combo_selector_uses_ou_value_side_not_forecast_side(tmp_path: Path) -> None:
+    engine = _init_full_db(tmp_path)
+    config = _enabled_config()
+    kickoff = datetime(2026, 6, 11, 18, tzinfo=UTC)
+    prediction_time = kickoff - timedelta(minutes=40)
+    with session_scope(create_session_factory(engine)) as session:
+        _seed_fixture(session, fixture_id=-1602, kickoff=kickoff)
+        _seed_ou_prediction(
+            session,
+            fixture_id=-1602,
+            prediction_time=prediction_time,
+            forecast_side="OVER",
+            value_side="UNDER",
+            p_pick=0.58,
+            market_p_pick=0.51,
+            odd_pick=2.0,
+            edge_pick=0.07,
+            ev_pick=0.16,
+        )
+
+    result = _select_for_date(engine, config, date(2026, 6, 11))
+
+    assert len(result.candidates) == 1
+    assert result.candidates[0].market_type == ComboMarketType.UNDER_25
+    assert result.candidates[0].selection == "Under 2.5"
+
+
+def test_worldcup_combo_selector_rejects_legacy_ou_prediction(tmp_path: Path) -> None:
+    engine = _init_full_db(tmp_path)
+    config = _enabled_config()
+    kickoff = datetime(2026, 6, 11, 18, tzinfo=UTC)
+    prediction_time = kickoff - timedelta(minutes=40)
+    with session_scope(create_session_factory(engine)) as session:
+        _seed_fixture(session, fixture_id=-1603, kickoff=kickoff)
+        _seed_ou_prediction(
+            session,
+            fixture_id=-1603,
+            prediction_time=prediction_time,
+            payload_json={"decision_version": "ou_decision_v1", "synthetic": True},
+        )
+
+    result = _select_for_date(engine, config, date(2026, 6, 11))
+
+    assert result.candidates == ()
+    assert _reason_counts(result)["no_ou_value_side"] == 1
+
+
+def test_worldcup_combo_selector_rejects_non_public_ou_policy(tmp_path: Path) -> None:
+    engine = _init_full_db(tmp_path)
+    config = _enabled_config()
+    kickoff = datetime(2026, 6, 11, 18, tzinfo=UTC)
+    prediction_time = kickoff - timedelta(minutes=40)
+    with session_scope(create_session_factory(engine)) as session:
+        _seed_fixture(session, fixture_id=-1604, kickoff=kickoff)
+        _seed_ou_prediction(
+            session,
+            fixture_id=-1604,
+            prediction_time=prediction_time,
+            publication_decision="staff",
+        )
+
+    result = _select_for_date(engine, config, date(2026, 6, 11))
+
+    assert result.candidates == ()
+    assert _reason_counts(result)["no_ou_value_side"] == 1
+
+
 def test_worldcup_combo_disabled_returns_no_sessions_or_legs(tmp_path: Path) -> None:
     engine = _init_full_db(tmp_path)
     config = WorldCupComboConfig(enabled=False)
@@ -2267,6 +2334,7 @@ def _seed_ou_prediction(
     *,
     fixture_id: int,
     prediction_time: datetime,
+    forecast_side: str | None = None,
     value_side: str = "OVER",
     p_pick: float = 0.58,
     market_p_pick: float = 0.51,
@@ -2275,8 +2343,18 @@ def _seed_ou_prediction(
     ev_pick: float = 0.16,
     confidence_score: float = 70.0,
     data_quality_score: float = 80.0,
+    is_value_pick: bool = True,
+    publication_decision: str = "public",
     payload_json: dict | None = None,
 ) -> None:
+    normalized_value_side = value_side.upper()
+    normalized_forecast_side = (forecast_side or value_side).upper()
+    resolved_payload = payload_json or {
+        "decision_version": "ou_decision_v2",
+        "ou_decision_version": "ou_v2",
+        "ou_publication_policy_version": "ou_publication_policy_v2",
+        "synthetic": True,
+    }
     feature = db_models.OUFeatureSnapshot(
         fixture_id=fixture_id,
         prediction_time=prediction_time,
@@ -2294,34 +2372,34 @@ def _seed_ou_prediction(
             prediction_time=prediction_time,
             model_version="synthetic-ou-v2",
             threshold=2.5,
-            p_over=p_pick if value_side.upper() == "OVER" else 1 - p_pick,
-            p_under=p_pick if value_side.upper() == "UNDER" else 1 - p_pick,
-            market_p_over=market_p_pick if value_side.upper() == "OVER" else 1 - market_p_pick,
-            market_p_under=market_p_pick if value_side.upper() == "UNDER" else 1 - market_p_pick,
-            edge_over=edge_pick if value_side.upper() == "OVER" else None,
-            edge_under=edge_pick if value_side.upper() == "UNDER" else None,
-            ev_over=ev_pick if value_side.upper() == "OVER" else None,
-            ev_under=ev_pick if value_side.upper() == "UNDER" else None,
-            market_odd_over=odd_pick if value_side.upper() == "OVER" else None,
-            market_odd_under=odd_pick if value_side.upper() == "UNDER" else None,
+            p_over=p_pick if normalized_value_side == "OVER" else 1 - p_pick,
+            p_under=p_pick if normalized_value_side == "UNDER" else 1 - p_pick,
+            market_p_over=market_p_pick if normalized_value_side == "OVER" else 1 - market_p_pick,
+            market_p_under=market_p_pick if normalized_value_side == "UNDER" else 1 - market_p_pick,
+            edge_over=edge_pick if normalized_value_side == "OVER" else None,
+            edge_under=edge_pick if normalized_value_side == "UNDER" else None,
+            ev_over=ev_pick if normalized_value_side == "OVER" else None,
+            ev_under=ev_pick if normalized_value_side == "UNDER" else None,
+            market_odd_over=odd_pick if normalized_value_side == "OVER" else None,
+            market_odd_under=odd_pick if normalized_value_side == "UNDER" else None,
             confidence_score=confidence_score,
             confidence_label="High",
-            forecast_side=value_side.upper(),
+            forecast_side=normalized_forecast_side,
             forecast_probability=p_pick,
-            value_side=value_side.upper(),
+            value_side=normalized_value_side,
             p_pick=p_pick,
             market_p_pick=market_p_pick,
             odd_pick=odd_pick,
             edge_pick=edge_pick,
             ev_pick=ev_pick,
-            is_value_pick=True,
+            is_value_pick=is_value_pick,
             no_bet_reason=None,
             confidence_score_v2=confidence_score,
             confidence_label_v2="High",
-            publication_decision="public",
+            publication_decision=publication_decision,
             expert_probabilities_json={},
             data_quality_json={"ou_data_quality_score": data_quality_score},
-            payload_json=payload_json or {"decision_version": "ou_decision_v2", "synthetic": True},
+            payload_json=resolved_payload,
         )
     )
     session.flush()

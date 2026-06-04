@@ -80,6 +80,8 @@ class OUPredictionOutput:
     confidence_label_v2: str | None = None
     publication_decision: str | None = None
     decision_version: str | None = None
+    ou_decision_version: str | None = None
+    ou_publication_policy_version: str | None = None
     data_quality_score: float | None = None
     bookmaker_count: float | None = None
     # Match context (resolved at prediction time)
@@ -249,6 +251,8 @@ class OUPredictionService:
             confidence_label_v2=decision.confidence_label_v2,
             publication_decision=decision.publication_decision,
             decision_version=decision.decision_version,
+            ou_decision_version=decision.ou_decision_version,
+            ou_publication_policy_version=decision.ou_publication_policy_version,
             data_quality_score=decision.data_quality_score,
             bookmaker_count=decision.bookmaker_count,
             kickoff_time=kickoff_time,
@@ -353,6 +357,10 @@ class OUPredictionService:
                     "payload_json": {
                         "ou_decision": {
                             "decision_version": output.decision_version,
+                            "ou_decision_version": output.ou_decision_version,
+                            "ou_publication_policy_version": (
+                                output.ou_publication_policy_version
+                            ),
                             "forecast_side": output.forecast_side,
                             "forecast_probability": output.forecast_probability,
                             "value_side": output.value_side,

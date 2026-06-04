@@ -12,6 +12,8 @@ MIN_PUBLIC_EV = 0.03
 MIN_PUBLIC_CONFIDENCE_SCORE = 65.0
 MIN_PUBLIC_DATA_QUALITY_SCORE = 70.0
 MIN_PUBLIC_BOOKMAKER_COUNT = 2
+OU_PUBLICATION_POLICY_VERSION = "ou_publication_policy_v2"
+REQUIRED_OU_DECISION_VERSION = "ou_v2"
 
 
 @dataclass(frozen=True)
@@ -28,10 +30,13 @@ def evaluate_ou_publication(
     confidence_score_v2: float | None,
     data_quality_score: float | None,
     bookmaker_count: float | None,
+    ou_decision_version: str | None = None,
 ) -> OUPublicationPolicyResult:
     """Return public/staff/no-bet using O/U betting-specific thresholds."""
     if value_side is None:
         return OUPublicationPolicyResult("no_bet", "no_value_side")
+    if ou_decision_version != REQUIRED_OU_DECISION_VERSION:
+        return OUPublicationPolicyResult("staff", "legacy_decision_version")
     if edge_pick is None or edge_pick < MIN_PUBLIC_EDGE:
         return OUPublicationPolicyResult("staff", "edge_insufficient")
     if ev_pick is None or ev_pick < MIN_PUBLIC_EV:
@@ -40,6 +45,6 @@ def evaluate_ou_publication(
         return OUPublicationPolicyResult("staff", "confidence_insufficient")
     if data_quality_score is None or data_quality_score < MIN_PUBLIC_DATA_QUALITY_SCORE:
         return OUPublicationPolicyResult("staff", "data_quality_insufficient")
-    if bookmaker_count is not None and bookmaker_count < MIN_PUBLIC_BOOKMAKER_COUNT:
+    if (bookmaker_count or 0.0) < MIN_PUBLIC_BOOKMAKER_COUNT:
         return OUPublicationPolicyResult("staff", "bookmaker_count_insufficient")
     return OUPublicationPolicyResult("public", None)

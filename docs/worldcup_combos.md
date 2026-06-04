@@ -76,7 +76,9 @@ Services ajoutés :
 - `worldcup_combo_sessions.py` : groupe les fixtures CDM 2026 par date Europe/Paris et
   fenêtres horaires.
 - `adapters.py` : lit les fixtures, prédictions 1X2, décisions O/U V2, odds et lineups
-  déjà stockées.
+  déjà stockées. Les legs O/U ne sont exposés que si la prédiction est explicitement
+  `ou_decision_version="ou_v2"`, possède un `value_side` clair et porte une décision de
+  publication O/U publique ; une sortie legacy ou staff-only est ignorée.
 - `worldcup_combo_leg_selector.py` : filtre les legs candidats selon EV, edge, qualité
   data, confiance, statut fixture et fraîcheur.
 - `scripts/dry_run_worldcup_combo_candidates.py` : affiche sessions, candidats et raisons

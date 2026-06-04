@@ -106,9 +106,12 @@ La V3 est activee en production malgre un backtest non valide. Surveiller les pr
 runs reels, la calibration des probabilites et la couverture odds/API/lineups issue du
 refresh live M-30. Pour verifier le rendu Discord V3 sans publier :
 
-Règle de publication publique : V3 1X2 et O/U 2.5 ne publient dans Discord que les
-pronostics `High` ou `Very High`. Les labels `Low`, `Medium`, `Uncertain` et assimilés
-sont persistés en base mais retournent `confidence_skipped`.
+Règle de publication publique : V3 1X2 publie selon ses seuils de confiance dédiés.
+O/U 2.5 utilise une policy séparée : public uniquement avec une décision
+`ou_decision_version="ou_v2"`, un vrai `value_side`, `edge_pick >= 0.03`,
+`ev_pick >= 0.03`, `confidence_score_v2 >= 65`, data quality suffisante et au moins deux
+bookmakers. `bookmaker_count` absent vaut `0`. Les sorties legacy O/U, les forecasts sans
+pick value et les décisions non publiques sont envoyés en staff ou marqués `no_bet`.
 
 Les messages V3 1X2 et O/U 2.5 utilisent un rendu compact oriente parieur : pick,
 probabilites modele/marche, ecart de value, facteurs traduits et qualite data. Ce rendu

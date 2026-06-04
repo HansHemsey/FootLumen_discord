@@ -103,6 +103,32 @@ def test_ou_formatter_displays_no_bet_reason() -> None:
     assert "Raison no bet : EV insuffisante" in message
 
 
+def test_ou_formatter_does_not_promote_legacy_forecast_as_value_pick() -> None:
+    prediction = _prediction(
+        value_side=None,
+        p_pick=None,
+        market_p_pick=None,
+        odd_pick=None,
+        edge_pick=None,
+        ev_pick=None,
+        value_edge=None,
+        value_ev=None,
+        no_bet_reason=None,
+        non_publication_reason="legacy_decision_version",
+        publication_decision="staff",
+        decision_version=None,
+        ou_decision_version=None,
+    )
+
+    message = format_ou_prediction_markdown(prediction)
+
+    assert "Scénario le plus probable : Plus de 2.5 buts — 72.0%" in message
+    assert "💰 PICK VALUE\nAucun pick public" in message
+    assert "Côté : Plus de 2.5 buts" not in message
+    assert "staff-only / non publiable" in message
+    assert "version de décision O/U legacy" in message
+
+
 def test_ou_formatter_truncates_and_masks_secrets() -> None:
     webhook = "https://discord.com/api/webhooks/123456/synthetic-secret"
     prediction = _prediction(match_label=f"Synthetic Home vs {webhook}")

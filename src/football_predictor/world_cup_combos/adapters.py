@@ -134,6 +134,9 @@ class WorldCupComboReadAdapters:
         for prediction in predictions:
             if not prediction.is_value_pick or not prediction.value_side:
                 continue
+            payload = prediction.payload_json or {}
+            if not _is_publishable_ou_v2_prediction(prediction, payload):
+                continue
             values = (
                 prediction.p_pick,
                 prediction.market_p_pick,
@@ -165,7 +168,7 @@ class WorldCupComboReadAdapters:
                     or _label_from_score(confidence_score)
                 ),
                 data_quality_score=_data_quality_score(prediction.data_quality_json),
-                payload_json=prediction.payload_json or {},
+                payload_json=payload,
             )
         return None
 
@@ -336,6 +339,31 @@ def _payload_value(payload: JsonDict | None, keys: tuple[str, ...]) -> Any:
         if value is not None:
             return value
     return None
+
+
+def _ou_payload_value(payload: JsonDict | None, keys: tuple[str, ...]) -> Any:
+    if not isinstance(payload, dict):
+        return None
+    nested = payload.get("ou_decision")
+    for source in (payload, nested if isinstance(nested, dict) else None):
+        if not isinstance(source, dict):
+            continue
+        for key in keys:
+            value = source.get(key)
+            if value is not None:
+                return value
+    return None
+
+
+def _is_publishable_ou_v2_prediction(
+    prediction: OUModelPrediction,
+    payload: JsonDict | None,
+) -> bool:
+    if _ou_payload_value(payload, ("ou_decision_version",)) != "ou_v2":
+        return False
+    if (prediction.publication_decision or "").strip().lower() != "public":
+        return False
+    return str(prediction.value_side or "").strip().upper() in {"OVER", "UNDER"}
 
 
 def _first_float(*values: Any, default: float) -> float:

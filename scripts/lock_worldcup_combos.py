@@ -43,7 +43,6 @@ def main() -> None:
                 db_models.ComboTicket.status.notin_(
                     (
                         ComboTicketStatus.LOCKED.value,
-                        ComboTicketStatus.PUBLIC_PUBLISHED.value,
                         ComboTicketStatus.SETTLED.value,
                     )
                 )

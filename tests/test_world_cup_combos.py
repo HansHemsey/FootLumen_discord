@@ -39,6 +39,9 @@ from football_predictor.world_cup_combos.persistence import (
     persist_combo_ticket_snapshot,
     persist_combo_ticket_with_snapshots,
 )
+from football_predictor.world_cup_combos.pre_lock_revalidator import (
+    WorldCupComboPreLockRevalidator,
+)
 from football_predictor.world_cup_combos.worldcup_combo_builder import WorldCupComboBuilder
 from football_predictor.world_cup_combos.worldcup_combo_formatter import WorldCupComboFormatter
 from football_predictor.world_cup_combos.worldcup_combo_leg_selector import (
@@ -844,6 +847,251 @@ def test_worldcup_combo_lock_revalidates_staff_if_post_lock_risk_high() -> None:
     assert locked.no_publish_reason == "post_lock_risk_above_public_threshold"
 
 
+def test_worldcup_combo_pre_lock_reloads_newer_odds(tmp_path: Path) -> None:
+    engine = _init_full_db(tmp_path)
+    config = _enabled_config(staff_only_shadow_mode=False)
+    now_build = datetime(2026, 6, 11, 12, tzinfo=UTC)
+    now_lock = datetime(2026, 6, 11, 17, 35, tzinfo=UTC)
+    newer_odds_time = datetime(2026, 6, 11, 17, 30, tzinfo=UTC)
+
+    with session_scope(create_session_factory(engine)) as session:
+        _seed_pre_lock_fixture_sources(session, fixture_ids=(-5001, -5002))
+        ticket = _build_ticket_from_db(
+            session,
+            config,
+            target_date=date(2026, 6, 11),
+            now=now_build,
+            fixture_ids=(-5001, -5002),
+        )
+        _seed_1x2_odds(session, fixture_id=-5001, fetched_at=newer_odds_time, odd_home=2.2)
+        _seed_1x2_odds(session, fixture_id=-5002, fetched_at=newer_odds_time, odd_home=2.2)
+        revalidated = WorldCupComboPreLockRevalidator(session, config).revalidate(
+            ticket,
+            now=now_lock,
+        ).ticket
+
+    assert {leg.odds_last_update for leg in revalidated.legs} == {newer_odds_time}
+    assert revalidated.data_cutoff_time == now_lock
+    assert "pre_lock_revalidated" in revalidated.warnings
+
+
+def test_worldcup_combo_pre_lock_removes_negative_ev_leg(tmp_path: Path) -> None:
+    engine = _init_full_db(tmp_path)
+    config = _enabled_config(staff_only_shadow_mode=False)
+    now_build = datetime(2026, 6, 11, 12, tzinfo=UTC)
+    now_lock = datetime(2026, 6, 11, 17, 35, tzinfo=UTC)
+
+    with session_scope(create_session_factory(engine)) as session:
+        _seed_pre_lock_fixture_sources(session, fixture_ids=(-5011, -5012))
+        ticket = _build_ticket_from_db(
+            session,
+            config,
+            target_date=date(2026, 6, 11),
+            now=now_build,
+            fixture_ids=(-5011, -5012),
+        )
+        _seed_1x2_odds(
+            session,
+            fixture_id=-5011,
+            fetched_at=now_lock - timedelta(minutes=5),
+            odd_home=1.2,
+        )
+        _seed_1x2_odds(
+            session,
+            fixture_id=-5012,
+            fetched_at=now_lock - timedelta(minutes=5),
+            odd_home=2.2,
+        )
+        revalidated = WorldCupComboPreLockRevalidator(session, config).revalidate(
+            ticket,
+            now=now_lock,
+        ).ticket
+
+    assert revalidated.publication_decision == ComboTicketStatus.NO_BET
+    assert revalidated.no_publish_reason == "not_enough_clean_legs"
+    assert "leg_ev_dropped" in revalidated.warnings
+    assert "no_clean_replacement" in revalidated.warnings
+
+
+def test_worldcup_combo_pre_lock_replaces_degraded_leg(tmp_path: Path) -> None:
+    engine = _init_full_db(tmp_path)
+    config = _enabled_config(staff_only_shadow_mode=False)
+    now_build = datetime(2026, 6, 11, 12, tzinfo=UTC)
+    now_lock = datetime(2026, 6, 11, 17, 35, tzinfo=UTC)
+
+    with session_scope(create_session_factory(engine)) as session:
+        _seed_pre_lock_fixture_sources(session, fixture_ids=(-5021, -5022, -5023))
+        ticket = _build_ticket_from_db(
+            session,
+            config,
+            target_date=date(2026, 6, 11),
+            now=now_build,
+            fixture_ids=(-5021, -5022),
+        )
+        _seed_1x2_odds(
+            session,
+            fixture_id=-5021,
+            fetched_at=now_lock - timedelta(minutes=5),
+            odd_home=2.2,
+        )
+        _seed_1x2_odds(
+            session,
+            fixture_id=-5022,
+            fetched_at=now_lock - timedelta(minutes=5),
+            odd_home=1.2,
+        )
+        _seed_1x2_odds(
+            session,
+            fixture_id=-5023,
+            fetched_at=now_lock - timedelta(minutes=5),
+            odd_home=2.2,
+        )
+        revalidated = WorldCupComboPreLockRevalidator(session, config).revalidate(
+            ticket,
+            now=now_lock,
+        ).ticket
+
+    assert -5022 not in {leg.fixture_id for leg in revalidated.legs}
+    assert -5023 in {leg.fixture_id for leg in revalidated.legs}
+    assert "replacement_used" in revalidated.warnings
+    assert "pre_lock_replaced_leg" in revalidated.warnings
+
+
+def test_worldcup_combo_pre_lock_staff_only_if_lineup_risk_high(tmp_path: Path) -> None:
+    engine = _init_full_db(tmp_path)
+    config = _enabled_config(staff_only_shadow_mode=False)
+    now_build = datetime(2026, 6, 11, 12, tzinfo=UTC)
+    now_lock = datetime(2026, 6, 11, 17, 10, tzinfo=UTC)
+
+    with session_scope(create_session_factory(engine)) as session:
+        _seed_pre_lock_fixture_sources(session, fixture_ids=(-5031, -5032))
+        ticket = _build_ticket_from_db(
+            session,
+            config,
+            target_date=date(2026, 6, 11),
+            now=now_build,
+            fixture_ids=(-5031, -5032),
+        )
+        _seed_1x2_odds(
+            session,
+            fixture_id=-5031,
+            fetched_at=now_lock - timedelta(minutes=5),
+            odd_home=2.2,
+        )
+        _seed_1x2_odds(
+            session,
+            fixture_id=-5032,
+            fetched_at=now_lock - timedelta(minutes=5),
+            odd_home=2.2,
+        )
+        revalidated = WorldCupComboPreLockRevalidator(session, config).revalidate(
+            ticket,
+            now=now_lock,
+        ).ticket
+
+    assert revalidated.publication_decision == ComboTicketStatus.STAFF_ONLY
+    assert revalidated.no_publish_reason == "lineup_risk_too_high"
+    assert "lineup_risk_too_high" in revalidated.warnings
+
+
+def test_worldcup_combo_pre_lock_does_not_use_future_data(tmp_path: Path) -> None:
+    engine = _init_full_db(tmp_path)
+    config = _enabled_config(staff_only_shadow_mode=False)
+    now_build = datetime(2026, 6, 11, 12, tzinfo=UTC)
+    now_lock = datetime(2026, 6, 11, 17, tzinfo=UTC)
+    future_time = datetime(2026, 6, 11, 17, 30, tzinfo=UTC)
+
+    with session_scope(create_session_factory(engine)) as session:
+        _seed_pre_lock_fixture_sources(session, fixture_ids=(-5041, -5042))
+        ticket = _build_ticket_from_db(
+            session,
+            config,
+            target_date=date(2026, 6, 11),
+            now=now_build,
+            fixture_ids=(-5041, -5042),
+        )
+        _seed_1x2_prediction(
+            session,
+            fixture_id=-5041,
+            prediction_time=future_time,
+            predicted_result="AWAY",
+            p_home=0.15,
+            p_draw=0.20,
+            p_away=0.65,
+        )
+        _seed_1x2_odds(session, fixture_id=-5041, fetched_at=future_time, odd_home=2.8)
+        _seed_1x2_odds(
+            session,
+            fixture_id=-5041,
+            fetched_at=now_lock - timedelta(minutes=5),
+            odd_home=2.2,
+        )
+        _seed_1x2_odds(
+            session,
+            fixture_id=-5042,
+            fetched_at=now_lock - timedelta(minutes=5),
+            odd_home=2.2,
+        )
+        revalidated = WorldCupComboPreLockRevalidator(session, config).revalidate(
+            ticket,
+            now=now_lock,
+        ).ticket
+
+    leg = next(item for item in revalidated.legs if item.fixture_id == -5041)
+    assert leg.market_type == ComboMarketType.HOME
+    assert leg.odds_last_update == now_lock - timedelta(minutes=5)
+    assert revalidated.data_cutoff_time == now_lock
+
+
+def test_worldcup_combo_pre_lock_execute_creates_revalidation_snapshot(tmp_path: Path) -> None:
+    engine = _init_full_db(tmp_path)
+    config = _enabled_config(staff_only_shadow_mode=False)
+    now_build = datetime(2026, 6, 11, 12, tzinfo=UTC)
+    now_lock = datetime(2026, 6, 11, 17, 35, tzinfo=UTC)
+
+    with session_scope(create_session_factory(engine)) as session:
+        _seed_pre_lock_fixture_sources(session, fixture_ids=(-5051, -5052))
+        ticket = _build_ticket_from_db(
+            session,
+            config,
+            target_date=date(2026, 6, 11),
+            now=now_build,
+            fixture_ids=(-5051, -5052),
+        )
+        record = persist_combo_ticket_candidate(session, ticket)
+        _seed_1x2_odds(
+            session,
+            fixture_id=-5051,
+            fetched_at=now_lock - timedelta(minutes=5),
+            odd_home=2.2,
+        )
+        _seed_1x2_odds(
+            session,
+            fixture_id=-5052,
+            fetched_at=now_lock - timedelta(minutes=5),
+            odd_home=2.2,
+        )
+        locked = WorldCupComboLockService(config).lock_persisted_ticket(
+            session,
+            record,
+            now=now_lock,
+            execute=True,
+        )
+        session.flush()
+        statuses = {
+            row[0]
+            for row in session.query(db_models.ComboTicketSnapshot.status)
+            .filter(db_models.ComboTicketSnapshot.ticket_id == record.id)
+            .all()
+        }
+
+    assert locked.publication_decision in {
+        ComboTicketStatus.LOCKED,
+        ComboTicketStatus.STAFF_ONLY,
+    }
+    assert "pre_lock_revalidated" in statuses
+
+
 def test_worldcup_combo_formatter_outputs_watchlist_public_and_no_bet() -> None:
     formatter = WorldCupComboFormatter()
     ticket = _ticket_candidate(
@@ -1245,6 +1493,43 @@ def _select_for_date(
         )
 
 
+def _build_ticket_from_db(
+    session,
+    config: WorldCupComboConfig,
+    *,
+    target_date: date,
+    now: datetime,
+    fixture_ids: tuple[int, ...],
+) -> ComboTicketCandidate:
+    sessions = WorldCupComboSessionService(session, config).build_sessions(
+        target_date=target_date
+    )
+    combo_session = next(
+        item
+        for item in sessions
+        if set(fixture_ids).issubset({fixture.fixture_id for fixture in item.fixtures})
+    )
+    selection = WorldCupComboLegSelector(session, config).select_candidates(
+        (combo_session,),
+        now=now,
+    )
+    selected_legs = tuple(
+        candidate
+        for candidate in selection.candidates
+        if candidate.fixture_id in set(fixture_ids)
+        and candidate.market_type == ComboMarketType.HOME
+    )
+    tickets = WorldCupComboBuilder(config).build_for_session(combo_session, selected_legs)
+    if not tickets:
+        reasons = _reason_counts(selection)
+        raise AssertionError(f"synthetic pre-lock ticket could not be built: {reasons}")
+    ticket = next(
+        (item for item in tickets if item.legs_count == min(len(fixture_ids), 3)),
+        tickets[0],
+    )
+    return replace(ticket, ticket_key=f"synthetic-pre-lock:{'-'.join(map(str, fixture_ids))}")
+
+
 def _seed_fixture(
     session,
     *,
@@ -1273,6 +1558,42 @@ def _seed_fixture(
             payload_json={"synthetic": True, "competition_key": "fifa_world_cup_2026"},
         )
     )
+
+
+def _seed_pre_lock_fixture_sources(
+    session,
+    *,
+    fixture_ids: tuple[int, ...],
+) -> None:
+    first_kickoff = datetime(2026, 6, 11, 18, tzinfo=UTC)
+    prediction_time = datetime(2026, 6, 11, 11, 45, tzinfo=UTC)
+    odds_time = datetime(2026, 6, 11, 11, 50, tzinfo=UTC)
+    for index, fixture_id in enumerate(fixture_ids):
+        _seed_fixture(
+            session,
+            fixture_id=fixture_id,
+            kickoff=first_kickoff + timedelta(minutes=30 * index),
+            round_name="Group A - 1",
+        )
+        _seed_1x2_prediction(
+            session,
+            fixture_id=fixture_id,
+            prediction_time=prediction_time,
+            p_home=0.62,
+            p_draw=0.20,
+            p_away=0.18,
+            predicted_result="HOME",
+            confidence_score=82.0,
+            data_quality_score=88.0,
+        )
+        _seed_1x2_odds(
+            session,
+            fixture_id=fixture_id,
+            fetched_at=odds_time,
+            odd_home=2.0,
+            odd_draw=3.5,
+            odd_away=4.0,
+        )
 
 
 def _seed_finished_fixture(
@@ -1411,6 +1732,7 @@ def _seed_1x2_prediction(
             payload_json=payload_json or {"model_family": "worldcup_1x2", "synthetic": True},
         )
     )
+    session.flush()
 
 
 def _seed_1x2_odds(
@@ -1441,6 +1763,7 @@ def _seed_1x2_odds(
             payload_json={"synthetic": True},
         )
     )
+    session.flush()
 
 
 def _seed_lineups(session, *, fixture_id: int, fetched_at: datetime) -> None:
@@ -1523,6 +1846,7 @@ def _seed_ou_prediction(
             payload_json=payload_json or {"decision_version": "ou_decision_v2", "synthetic": True},
         )
     )
+    session.flush()
 
 
 def _reason_counts(result: ComboLegSelectionResult) -> Counter:

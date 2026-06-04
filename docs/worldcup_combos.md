@@ -14,6 +14,8 @@ Le sprint 4 ajoute refresh policy, revalidation pre-lock, lock final, formatage 
 publication contrôlée et settlement.
 Le passage production ajoute une orchestration contrôlée `generate -> lock -> publish -> settle`
 sans activer de cron par défaut.
+Le sprint pre-lock public-ready relit les sources dynamiques juste avant lock et peut
+remplacer ou annuler un ticket si les données se dégradent.
 
 La feature ne modifie pas les prédictions 1X2, V3 ou O/U existantes.
 
@@ -107,6 +109,32 @@ Services ajoutés :
   avec idempotence par `ticket_key`.
 - `worldcup_combo_settlement.py` : calcule `WON`, `LOST`, `VOID`, `PARTIAL_VOID` et
   `profit_unit` après résultats.
+
+Cycle opérationnel :
+
+- `DRAFT` : ticket généré à partir des snapshots disponibles à `generated_at` ;
+- `WATCHLIST_STAFF` : ticket observé côté staff, sans promesse de publication ;
+- `PRE_LOCK_REVALIDATION` : relecture des fixtures, prédictions, odds et lineups avec
+  `effective_cutoff_time = min(now, lock_time)` ;
+- `LOCKED` : ticket verrouillé seulement si la policy reste publiable après revalidation ;
+- `STAFF_ONLY` : ticket intéressant mais trop risqué pour public ;
+- `NO_BET` : ticket annulé avant publication ;
+- `SETTLED` : résultat calculé après matchs terminés.
+
+Revalidation pre-lock :
+
+- chaque leg d'origine est reconstruit depuis les sources point-in-time les plus récentes ;
+- si EV, edge, odds, data quality ou market scope se dégradent, le leg est retiré ;
+- un remplaçant propre peut être utilisé s'il respecte les seuils et ne crée pas de
+  conflit de fixture ;
+- sans au moins deux legs propres, le ticket passe `NO_BET` ;
+- un risque lineups élevé force `STAFF_ONLY`, même si l'EV reste correcte.
+
+Snapshots pre-lock :
+
+- `pre_lock_revalidated` : ticket relu et rescored ;
+- `pre_lock_replaced_leg` : au moins un leg a été remplacé ;
+- `pre_lock_no_bet` : ticket annulé avant lock.
 
 Règles staff/no bet :
 

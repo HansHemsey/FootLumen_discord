@@ -21,6 +21,9 @@ from football_predictor.world_cup_combos.models import (
     ComboTicketSnapshot,
 )
 from football_predictor.world_cup_combos.persistence import persist_combo_ticket_snapshot
+from football_predictor.world_cup_combos.pre_lock_revalidator import (
+    WorldCupComboPreLockRevalidator,
+)
 from football_predictor.world_cup_combos.worldcup_combo_publication_policy import (
     WorldCupComboPublicationPolicy,
 )
@@ -31,17 +34,22 @@ from football_predictor.world_cup_combos.worldcup_combo_scoring import WorldCupC
 
 FINAL_LOCK_STATUSES = {
     ComboTicketStatus.LOCKED,
-    ComboTicketStatus.PUBLIC_PUBLISHED,
     ComboTicketStatus.SETTLED,
 }
 
 
 class WorldCupComboLockService:
-    def __init__(self, config: WorldCupComboConfig) -> None:
+    def __init__(
+        self,
+        config: WorldCupComboConfig,
+        *,
+        revalidator: WorldCupComboPreLockRevalidator | None = None,
+    ) -> None:
         self.config = config
         self.scoring = WorldCupComboScoring()
         self.policy = WorldCupComboPublicationPolicy(config)
         self.refresh_policy = WorldCupComboRefreshPolicy(config)
+        self.revalidator = revalidator
 
     def lock_ticket(
         self,
@@ -52,21 +60,28 @@ class WorldCupComboLockService:
         if ticket.publication_decision in FINAL_LOCK_STATUSES:
             return ticket
 
-        scored = self._rescore(ticket, now=now)
-        decided = self.policy.decide(scored)
-        if decided.publication_decision == ComboTicketStatus.PUBLIC_PUBLISHED:
-            warnings = [
-                *decided.warnings,
-                "pre_lock_policy:PUBLIC_PUBLISHED",
-                f"locked_at:{now.isoformat()}",
-            ]
-            return replace(
-                decided,
-                publication_decision=ComboTicketStatus.LOCKED,
-                no_publish_reason=None,
-                warnings=_dedupe(warnings),
-            )
-        return decided
+        decided = self.policy.decide(self._rescore(ticket, now=now))
+        return self._locked_if_public(decided, now=now)
+
+    def _locked_if_public(
+        self,
+        ticket: ComboTicketCandidate,
+        *,
+        now: datetime,
+    ) -> ComboTicketCandidate:
+        if ticket.publication_decision != ComboTicketStatus.PUBLIC_PUBLISHED:
+            return ticket
+        warnings = [
+            *ticket.warnings,
+            "pre_lock_policy:PUBLIC_PUBLISHED",
+            f"locked_at:{now.isoformat()}",
+        ]
+        return replace(
+            ticket,
+            publication_decision=ComboTicketStatus.LOCKED,
+            no_publish_reason=None,
+            warnings=_dedupe(warnings),
+        )
 
     def lock_persisted_ticket(
         self,
@@ -79,25 +94,30 @@ class WorldCupComboLockService:
         ticket = combo_ticket_candidate_from_payload(record.payload_json)
         if record.status in {
             ComboTicketStatus.LOCKED.value,
-            ComboTicketStatus.PUBLIC_PUBLISHED.value,
             ComboTicketStatus.SETTLED.value,
         }:
             return ticket
 
-        locked = self.lock_ticket(ticket, now=now)
+        revalidator = self.revalidator or WorldCupComboPreLockRevalidator(
+            session,
+            self.config,
+        )
+        revalidation = revalidator.revalidate(ticket, now=now)
+        locked = self._locked_if_public(revalidation.ticket, now=now)
         if execute:
             _apply_ticket_to_record(record, locked)
-            persist_combo_ticket_snapshot(
-                session,
-                ComboTicketSnapshot(
-                    ticket_key=locked.ticket_key,
-                    status="pre_lock",
-                    candidate=locked,
-                    captured_at=now,
-                    warnings_json=locked.warnings,
-                ),
-                ticket_id=record.id,
-            )
+            for snapshot_type in revalidation.snapshot_types:
+                persist_combo_ticket_snapshot(
+                    session,
+                    ComboTicketSnapshot(
+                        ticket_key=locked.ticket_key,
+                        status=snapshot_type,
+                        candidate=locked,
+                        captured_at=now,
+                        warnings_json=[*locked.warnings, f"snapshot_type:{snapshot_type}"],
+                    ),
+                    ticket_id=record.id,
+                )
         return locked
 
     def _rescore(

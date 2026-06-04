@@ -137,6 +137,14 @@ class Settings(BaseSettings):
         default=Path("data/reference/historical_worldcup_result.csv"),
         validation_alias="WORLD_CUP_HISTORICAL_RESULTS_PATH",
     )
+    world_cup_combos_enabled: bool = Field(
+        default=False,
+        validation_alias="WORLD_CUP_COMBOS_ENABLED",
+    )
+    world_cup_combos_config_path: Path = Field(
+        default=Path("config/worldcup_combos.yaml"),
+        validation_alias="WORLD_CUP_COMBOS_CONFIG_PATH",
+    )
 
     @field_validator("market_1x2_bet_id", mode="before")
     @classmethod

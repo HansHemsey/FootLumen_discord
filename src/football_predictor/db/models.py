@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import JSON as SAJSON
 from sqlalchemy import (
     Boolean,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -559,6 +560,105 @@ class V3ModelPrediction(Base, TimestampMixin):
     explanations_json: Mapped[JsonValue] = mapped_column(SAJSON, default=list)
     data_quality_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
     payload_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+
+
+class ComboTicket(Base, TimestampMixin):
+    __tablename__ = "combo_tickets"
+    __table_args__ = (
+        UniqueConstraint("ticket_key", name="uq_combo_ticket_key"),
+        Index("ix_combo_ticket_date_status", "combo_date", "status"),
+        Index("ix_combo_ticket_session", "session_key"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ticket_key: Mapped[str] = mapped_column(String(300), index=True)
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    competition_key: Mapped[str] = mapped_column(String(80), index=True)
+    league_id: Mapped[int] = mapped_column(Integer, index=True)
+    season: Mapped[int] = mapped_column(Integer, index=True)
+    combo_date: Mapped[date] = mapped_column(Date, index=True)
+    session_key: Mapped[str] = mapped_column(String(240), index=True)
+    first_kickoff_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    last_kickoff_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    lock_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    legs_count: Mapped[int] = mapped_column(Integer)
+    combined_decimal_odds: Mapped[float] = mapped_column(Float)
+    combined_probability_raw: Mapped[float] = mapped_column(Float)
+    combined_probability_adjusted: Mapped[float] = mapped_column(Float)
+    combined_fair_odds: Mapped[float] = mapped_column(Float)
+    combined_ev_raw: Mapped[float] = mapped_column(Float)
+    combined_ev_adjusted: Mapped[float] = mapped_column(Float)
+    combined_confidence_score: Mapped[float] = mapped_column(Float)
+    combined_confidence_label: Mapped[str] = mapped_column(String(32))
+    post_lock_risk_score: Mapped[float] = mapped_column(Float)
+    freshness_score: Mapped[float] = mapped_column(Float)
+    lineup_risk_score: Mapped[float] = mapped_column(Float)
+    publication_decision: Mapped[str] = mapped_column(String(32), index=True)
+    no_publish_reason: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    model_versions_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+    warnings_json: Mapped[JsonValue] = mapped_column(SAJSON, default=list)
+    payload_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+
+
+class ComboTicketLeg(Base, TimestampMixin):
+    __tablename__ = "combo_ticket_legs"
+    __table_args__ = (
+        UniqueConstraint("ticket_id", "leg_order", name="uq_combo_ticket_leg_order"),
+        Index("ix_combo_ticket_leg_ticket", "ticket_id"),
+        Index("ix_combo_ticket_leg_fixture", "fixture_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ticket_id: Mapped[int] = mapped_column(ForeignKey("combo_tickets.id"), index=True)
+    fixture_id: Mapped[int] = mapped_column(ForeignKey("fixtures.fixture_id"), index=True)
+    leg_order: Mapped[int] = mapped_column(Integer)
+    kickoff_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    market_type: Mapped[str] = mapped_column(String(32), index=True)
+    market_scope: Mapped[str] = mapped_column(String(32), index=True)
+    selection: Mapped[str] = mapped_column(String(120))
+    decimal_odd: Mapped[float] = mapped_column(Float)
+    model_probability: Mapped[float] = mapped_column(Float)
+    market_probability: Mapped[float] = mapped_column(Float)
+    edge: Mapped[float] = mapped_column(Float)
+    ev: Mapped[float] = mapped_column(Float)
+    confidence_score: Mapped[float] = mapped_column(Float)
+    confidence_label: Mapped[str] = mapped_column(String(32))
+    data_quality_score: Mapped[float] = mapped_column(Float)
+    odds_snapshot_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    prediction_snapshot_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    lineup_status: Mapped[str] = mapped_column(String(32))
+    odds_last_update: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    prediction_generated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    model_versions_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+    warnings_json: Mapped[JsonValue] = mapped_column(SAJSON, default=list)
+    payload_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+
+
+class ComboTicketSnapshot(Base, TimestampMixin):
+    __tablename__ = "combo_ticket_snapshots"
+    __table_args__ = (
+        Index("ix_combo_ticket_snapshot_ticket", "ticket_id"),
+        Index("ix_combo_ticket_snapshot_key", "ticket_key"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ticket_id: Mapped[int | None] = mapped_column(
+        ForeignKey("combo_tickets.id"),
+        nullable=True,
+        index=True,
+    )
+    ticket_key: Mapped[str] = mapped_column(String(300), index=True)
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    snapshot_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+    model_versions_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+    warnings_json: Mapped[JsonValue] = mapped_column(SAJSON, default=list)
 
 
 class DiscordMessage(Base, TimestampMixin):

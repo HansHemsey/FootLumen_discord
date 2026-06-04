@@ -70,6 +70,53 @@ def test_init_db_creates_sprint_3_tables_and_columns(tmp_path: Path) -> None:
             "publication_decision",
         },
     )
+    assert _has_columns(
+        inspector,
+        "combo_tickets",
+        {
+            "ticket_key",
+            "status",
+            "competition_key",
+            "combo_date",
+            "session_key",
+            "legs_count",
+            "combined_decimal_odds",
+            "combined_ev_adjusted",
+            "combined_confidence_score",
+            "post_lock_risk_score",
+            "model_versions_json",
+            "warnings_json",
+            "payload_json",
+        },
+    )
+    assert _has_columns(
+        inspector,
+        "combo_ticket_legs",
+        {
+            "fixture_id",
+            "market_type",
+            "market_scope",
+            "selection",
+            "decimal_odd",
+            "model_probability",
+            "ev",
+            "odds_snapshot_id",
+            "prediction_snapshot_id",
+            "warnings_json",
+        },
+    )
+    assert _has_columns(
+        inspector,
+        "combo_ticket_snapshots",
+        {
+            "ticket_key",
+            "status",
+            "captured_at",
+            "snapshot_json",
+            "model_versions_json",
+            "warnings_json",
+        },
+    )
     assert _is_not_nullable(inspector, "fixture_statistics", "fetched_at")
     assert _is_not_nullable(inspector, "injuries", "fetched_at")
     assert _is_not_nullable(inspector, "odds_snapshots", "fetched_at")

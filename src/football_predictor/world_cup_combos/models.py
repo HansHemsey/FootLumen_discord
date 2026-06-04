@@ -73,6 +73,9 @@ class ComboLegCandidate:
     prediction_generated_at: datetime | None
     kickoff_at_paris: datetime | None = None
     freshness_score: float | None = None
+    data_cutoff_time: datetime | None = None
+    generated_at: datetime | None = None
+    lock_time: datetime | None = None
     no_candidate_reason: str | None = None
     warnings: list[str] = field(default_factory=list)
 
@@ -128,6 +131,8 @@ class ComboTicketCandidate:
     publication_decision: ComboTicketStatus
     no_publish_reason: str | None
     legs: tuple[ComboLegCandidate, ...] = field(default_factory=tuple)
+    data_cutoff_time: datetime | None = None
+    generated_at: datetime | None = None
     warnings: list[str] = field(default_factory=list)
 
     def to_json_dict(self) -> JsonDict:

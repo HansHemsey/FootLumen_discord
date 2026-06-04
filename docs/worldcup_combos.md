@@ -56,11 +56,22 @@ Services ajoutés :
 - `scripts/dry_run_worldcup_combo_candidates.py` : affiche sessions, candidats et raisons
   d'exclusion sans écrire en DB.
 
-Règles point-in-time :
+Règles point-in-time et anti time-travel :
 
-- prédictions avec `prediction_time <= lock_time` uniquement ;
-- odds avec `fetched_at <= lock_time` uniquement ;
-- lineups avec `fetched_at <= lock_time` uniquement.
+- `lock_time` est uniquement l'heure prévue de verrouillage du ticket ;
+- `effective_cutoff_time = min(now, lock_time)` est l'heure maximale réellement autorisée
+  pour lire les snapshots dynamiques ;
+- prédictions avec `prediction_time <= effective_cutoff_time` uniquement ;
+- odds avec `fetched_at <= effective_cutoff_time` uniquement ;
+- lineups avec `fetched_at <= effective_cutoff_time` uniquement ;
+- toute source dynamique ajoutée ensuite, par exemple injuries ou prédictions API,
+  doit utiliser le même cutoff effectif.
+
+Exemple : si le job tourne à `09:00` et que le lock est prévu à `18:40`, le système
+ne peut lire que des snapshots disponibles à `09:00` ou avant. Il ne doit jamais
+"voir" les odds, lineups ou prédictions qui seront collectées plus tard dans la journée.
+Les sorties dry-run et les payloads tickets exposent `generated_at`, `lock_time` et
+`data_cutoff_time` pour auditer cette règle.
 
 ## Sprint 3
 

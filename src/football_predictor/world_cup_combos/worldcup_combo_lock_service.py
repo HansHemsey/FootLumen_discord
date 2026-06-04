@@ -170,6 +170,8 @@ def combo_ticket_candidate_from_payload(payload: dict[str, Any] | None) -> Combo
         publication_decision=ComboTicketStatus(str(payload["publication_decision"])),
         no_publish_reason=payload.get("no_publish_reason"),
         legs=legs,
+        data_cutoff_time=_optional_datetime(payload.get("data_cutoff_time")),
+        generated_at=_optional_datetime(payload.get("generated_at")),
         warnings=list(payload.get("warnings") or []),
     )
 
@@ -196,6 +198,9 @@ def _leg_from_payload(payload: dict[str, Any]) -> ComboLegCandidate:
         odds_last_update=_optional_datetime(payload.get("odds_last_update")),
         prediction_generated_at=_optional_datetime(payload.get("prediction_generated_at")),
         freshness_score=payload.get("freshness_score"),
+        data_cutoff_time=_optional_datetime(payload.get("data_cutoff_time")),
+        generated_at=_optional_datetime(payload.get("generated_at")),
+        lock_time=_optional_datetime(payload.get("lock_time")),
         no_candidate_reason=payload.get("no_candidate_reason"),
         warnings=list(payload.get("warnings") or []),
     )

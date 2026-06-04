@@ -6,12 +6,13 @@ from __future__ import annotations
 import argparse
 import json
 from collections import defaultdict
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from football_predictor.config.settings import get_settings
 from football_predictor.db.session import create_db_engine, create_session_factory, session_scope
 from football_predictor.world_cup_combos.config import load_world_cup_combo_config
+from football_predictor.world_cup_combos.cutoff import compute_effective_cutoff
 from football_predictor.world_cup_combos.worldcup_combo_builder import WorldCupComboBuilder
 from football_predictor.world_cup_combos.worldcup_combo_leg_selector import (
     WorldCupComboLegSelector,
@@ -27,6 +28,7 @@ def main() -> None:
     config_path = args.config or settings.world_cup_combos_config_path
     config = load_world_cup_combo_config(config_path)
     target_date = date.fromisoformat(args.date) if args.date else None
+    generated_at = datetime.now(tz=UTC)
 
     if not config.enabled:
         print(
@@ -36,6 +38,7 @@ def main() -> None:
                     "config_path": str(config_path),
                     "sessions": 0,
                     "tickets": 0,
+                    "generated_at": generated_at.isoformat(),
                     "message": "worldcup_combos disabled; builder dry-run is a no-op",
                 },
                 indent=2,
@@ -49,7 +52,10 @@ def main() -> None:
     with session_scope(session_factory) as db_session:
         session_service = WorldCupComboSessionService(db_session, config)
         sessions = session_service.build_sessions(target_date=target_date)
-        selection = WorldCupComboLegSelector(db_session, config).select_candidates(sessions)
+        selection = WorldCupComboLegSelector(db_session, config).select_candidates(
+            sessions,
+            now=generated_at,
+        )
         candidates_by_session = defaultdict(list)
         for candidate in selection.candidates:
             for combo_session in selection.sessions:
@@ -73,12 +79,18 @@ def main() -> None:
         "enabled": True,
         "config_path": str(config_path),
         "target_date": target_date.isoformat() if target_date else None,
+        "generated_at": generated_at.isoformat(),
         "sessions": len(sessions),
         "candidate_legs": len(selection.candidates),
         "tickets": len(tickets),
         "session_summaries": [
             {
                 "session_key": combo_session.session_key,
+                "lock_time": combo_session.lock_time.isoformat(),
+                "data_cutoff_time": compute_effective_cutoff(
+                    generated_at,
+                    combo_session.lock_time,
+                ).isoformat(),
                 "fixtures": len(combo_session.fixtures),
                 "candidate_legs": len(candidates_by_session.get(combo_session.session_key, [])),
                 "tickets": [
@@ -91,6 +103,14 @@ def main() -> None:
                         "combined_confidence_label": ticket.combined_confidence_label,
                         "publication_decision": ticket.publication_decision.value,
                         "no_publish_reason": ticket.no_publish_reason,
+                        "data_cutoff_time": (
+                            ticket.data_cutoff_time.isoformat()
+                            if ticket.data_cutoff_time
+                            else None
+                        ),
+                        "generated_at": (
+                            ticket.generated_at.isoformat() if ticket.generated_at else None
+                        ),
                         "post_lock_risk_score": ticket.post_lock_risk_score,
                         "warnings": ticket.warnings,
                     }

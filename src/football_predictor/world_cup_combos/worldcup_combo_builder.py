@@ -153,6 +153,8 @@ class WorldCupComboBuilder:
             publication_decision=ComboTicketStatus.DRAFT,
             no_publish_reason=None,
             legs=legs,
+            data_cutoff_time=_ticket_data_cutoff_time(legs),
+            generated_at=_ticket_generated_at(legs),
             warnings=_dedupe(
                 [
                     *combo_session.warnings,
@@ -225,6 +227,20 @@ def _ticket_key(
         f"{leg.fixture_id}:{leg.market_type.value}:{leg.selection}" for leg in legs
     )
     return f"{combo_session.session_key}:{ticket_type}:{leg_part}"[:300]
+
+
+def _ticket_data_cutoff_time(legs: tuple[ComboLegCandidate, ...]):
+    values = [leg.data_cutoff_time for leg in legs if leg.data_cutoff_time is not None]
+    if not values:
+        return None
+    return min(values)
+
+
+def _ticket_generated_at(legs: tuple[ComboLegCandidate, ...]):
+    values = [leg.generated_at for leg in legs if leg.generated_at is not None]
+    if not values:
+        return None
+    return max(values)
 
 
 def _dedupe(values: list[str]) -> list[str]:

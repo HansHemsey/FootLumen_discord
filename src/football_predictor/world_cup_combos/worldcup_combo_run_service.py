@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from football_predictor.world_cup_combos.config import WorldCupComboConfig
+from football_predictor.world_cup_combos.cutoff import compute_effective_cutoff
 from football_predictor.world_cup_combos.models import (
     ComboLegSelectionResult,
     ComboTicketCandidate,
@@ -74,6 +75,9 @@ class WorldCupComboTicketSummary:
 @dataclass(frozen=True)
 class WorldCupComboSessionRunSummary:
     session_key: str
+    lock_time: datetime
+    data_cutoff_time: datetime
+    generated_at: datetime
     fixtures: int
     candidate_legs: int
     tickets: tuple[WorldCupComboTicketSummary, ...] = field(default_factory=tuple)
@@ -81,6 +85,9 @@ class WorldCupComboSessionRunSummary:
     def as_dict(self) -> JsonDict:
         return {
             "session_key": self.session_key,
+            "lock_time": self.lock_time.isoformat(),
+            "data_cutoff_time": self.data_cutoff_time.isoformat(),
+            "generated_at": self.generated_at.isoformat(),
             "fixtures": self.fixtures,
             "candidate_legs": self.candidate_legs,
             "tickets": [ticket.as_dict() for ticket in self.tickets],
@@ -92,6 +99,7 @@ class WorldCupComboRunSummary:
     enabled: bool
     execute: bool
     target_date: str | None
+    generated_at: datetime | None
     sessions: int
     candidate_legs: int
     tickets: int
@@ -105,6 +113,7 @@ class WorldCupComboRunSummary:
             "enabled": self.enabled,
             "execute": self.execute,
             "target_date": self.target_date,
+            "generated_at": self.generated_at.isoformat() if self.generated_at else None,
             "sessions": self.sessions,
             "candidate_legs": self.candidate_legs,
             "tickets": self.tickets,
@@ -150,6 +159,7 @@ class WorldCupComboRunService:
                 enabled=False,
                 execute=execute,
                 target_date=target_date.isoformat() if target_date else None,
+                generated_at=None,
                 sessions=0,
                 candidate_legs=0,
                 tickets=0,
@@ -159,7 +169,7 @@ class WorldCupComboRunService:
 
         captured_at = captured_at or datetime.now(tz=UTC)
         combo_sessions = self.session_service.build_sessions(target_date=target_date)
-        selection = self.leg_selector.select_candidates(combo_sessions)
+        selection = self.leg_selector.select_candidates(combo_sessions, now=captured_at)
         candidates_by_session = _candidates_by_session(selection)
 
         persisted = 0
@@ -179,6 +189,12 @@ class WorldCupComboRunService:
             session_summaries.append(
                 WorldCupComboSessionRunSummary(
                     session_key=combo_session.session_key,
+                    lock_time=combo_session.lock_time,
+                    data_cutoff_time=compute_effective_cutoff(
+                        captured_at,
+                        combo_session.lock_time,
+                    ),
+                    generated_at=captured_at,
                     fixtures=len(combo_session.fixtures),
                     candidate_legs=len(session_candidates),
                     tickets=tuple(
@@ -192,6 +208,7 @@ class WorldCupComboRunService:
             enabled=True,
             execute=execute,
             target_date=target_date.isoformat() if target_date else None,
+            generated_at=captured_at,
             sessions=len(combo_sessions),
             candidate_legs=len(selection.candidates),
             tickets=ticket_count,

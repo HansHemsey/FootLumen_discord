@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from football_predictor.db.models import (
@@ -65,7 +66,7 @@ class WorldCupComboReadAdapters:
     """Small read adapters around existing DB tables.
 
     These methods intentionally do not call predictors or external APIs. They only
-    load persisted snapshots that already exist before the combo lock time.
+    load persisted snapshots that already exist before the effective data cutoff.
     """
 
     def __init__(self, db_session: Session) -> None:
@@ -75,12 +76,12 @@ class WorldCupComboReadAdapters:
         self,
         *,
         fixture_id: int,
-        lock_time: datetime,
+        cutoff_time: datetime,
     ) -> OneXTwoPredictionRecord | None:
         statement = (
             select(ModelPrediction)
             .where(ModelPrediction.fixture_id == fixture_id)
-            .where(ModelPrediction.prediction_time <= lock_time)
+            .where(ModelPrediction.prediction_time <= cutoff_time)
             .order_by(ModelPrediction.prediction_time.desc(), ModelPrediction.id.desc())
         )
         prediction = self.db_session.execute(statement).scalars().first()
@@ -114,15 +115,21 @@ class WorldCupComboReadAdapters:
         self,
         *,
         fixture_id: int,
-        lock_time: datetime,
+        cutoff_time: datetime,
     ) -> OUPredictionRecord | None:
         statement = (
             select(OUModelPrediction)
             .where(OUModelPrediction.fixture_id == fixture_id)
-            .where(OUModelPrediction.prediction_time <= lock_time)
+            .where(OUModelPrediction.prediction_time <= cutoff_time)
             .order_by(OUModelPrediction.prediction_time.desc(), OUModelPrediction.id.desc())
         )
-        for prediction in self.db_session.execute(statement).scalars():
+        try:
+            predictions = self.db_session.execute(statement).scalars()
+        except OperationalError as exc:
+            if _is_missing_optional_schema_error(exc):
+                return None
+            raise
+        for prediction in predictions:
             if not prediction.is_value_pick or not prediction.value_side:
                 continue
             values = (
@@ -164,11 +171,11 @@ class WorldCupComboReadAdapters:
         self,
         *,
         fixture_id: int,
-        lock_time: datetime,
+        cutoff_time: datetime,
     ) -> dict[ComboMarketType, MarketConsensus]:
         snapshots = self._load_odds_snapshots(
             fixture_id=fixture_id,
-            lock_time=lock_time,
+            cutoff_time=cutoff_time,
             bet_id=1,
             bet_name="match winner",
         )
@@ -233,11 +240,11 @@ class WorldCupComboReadAdapters:
         self,
         *,
         fixture_id: int,
-        lock_time: datetime,
+        cutoff_time: datetime,
     ) -> tuple[int | None, datetime | None]:
         snapshots = self._load_odds_snapshots(
             fixture_id=fixture_id,
-            lock_time=lock_time,
+            cutoff_time=cutoff_time,
             bet_id=5,
             bet_name="goals over/under",
         )
@@ -246,11 +253,11 @@ class WorldCupComboReadAdapters:
         latest = max(snapshots, key=lambda snapshot: (_as_utc(snapshot.fetched_at), snapshot.id))
         return latest.id, _as_utc(latest.fetched_at)
 
-    def lineup_status(self, *, fixture_id: int, lock_time: datetime) -> str:
+    def lineup_status(self, *, fixture_id: int, cutoff_time: datetime) -> str:
         statement = (
             select(FixtureLineup.team_id)
             .where(FixtureLineup.fixture_id == fixture_id)
-            .where(FixtureLineup.fetched_at <= lock_time)
+            .where(FixtureLineup.fetched_at <= cutoff_time)
         )
         teams = {row[0] for row in self.db_session.execute(statement).all()}
         if len(teams) >= 2:
@@ -263,14 +270,14 @@ class WorldCupComboReadAdapters:
         self,
         *,
         fixture_id: int,
-        lock_time: datetime,
+        cutoff_time: datetime,
         bet_id: int,
         bet_name: str,
     ) -> list[OddsSnapshot]:
         statement = (
             select(OddsSnapshot)
             .where(OddsSnapshot.fixture_id == fixture_id)
-            .where(OddsSnapshot.fetched_at <= lock_time)
+            .where(OddsSnapshot.fetched_at <= cutoff_time)
             .where(OddsSnapshot.is_live.is_(False))
             .order_by(OddsSnapshot.fetched_at.desc(), OddsSnapshot.id.desc())
         )
@@ -356,6 +363,11 @@ def _mean(values: Any) -> float:
     if not numbers:
         return 0.0
     return sum(numbers) / len(numbers)
+
+
+def _is_missing_optional_schema_error(exc: OperationalError) -> bool:
+    message = str(getattr(exc, "orig", exc)).lower()
+    return "no such column" in message or "no such table" in message
 
 
 def _optional_utc(value: datetime | None) -> datetime | None:

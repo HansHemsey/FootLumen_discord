@@ -19,6 +19,7 @@ from football_predictor.world_cup_combos.config import (
     WorldCupComboConfig,
     load_world_cup_combo_config,
 )
+from football_predictor.world_cup_combos.cutoff import compute_effective_cutoff
 from football_predictor.world_cup_combos.enums import (
     ComboMarketScope,
     ComboMarketType,
@@ -219,6 +220,134 @@ def test_worldcup_combo_selector_excludes_started_fixture(tmp_path: Path) -> Non
 
     assert result.candidates == ()
     assert _reason_counts(result)["fixture_started"] == 1
+
+
+def test_worldcup_combo_effective_cutoff_uses_now_before_lock() -> None:
+    now = datetime(2026, 6, 11, 9, tzinfo=UTC)
+    lock_time = datetime(2026, 6, 11, 18, 40, tzinfo=UTC)
+
+    assert compute_effective_cutoff(now, lock_time) == now
+
+
+def test_worldcup_combo_effective_cutoff_uses_lock_after_lock() -> None:
+    now = datetime(2026, 6, 11, 18, 50, tzinfo=UTC)
+    lock_time = datetime(2026, 6, 11, 18, 40, tzinfo=UTC)
+
+    assert compute_effective_cutoff(now, lock_time) == lock_time
+
+
+def test_worldcup_combo_selector_excludes_future_1x2_prediction_before_lock(
+    tmp_path: Path,
+) -> None:
+    engine = _init_full_db(tmp_path)
+    config = _enabled_config()
+    kickoff = datetime(2026, 6, 11, 18, tzinfo=UTC)
+    now = datetime(2026, 6, 11, 14, tzinfo=UTC)
+    with session_scope(create_session_factory(engine)) as session:
+        _seed_fixture(session, fixture_id=-1111, kickoff=kickoff)
+        _seed_1x2_prediction(
+            session,
+            fixture_id=-1111,
+            prediction_time=kickoff - timedelta(minutes=30),
+        )
+        _seed_1x2_odds(session, fixture_id=-1111, fetched_at=now - timedelta(minutes=5))
+
+    result = _select_for_date(engine, config, date(2026, 6, 11), now=now)
+
+    assert result.candidates == ()
+    assert _reason_counts(result)["missing_prediction"] == 1
+
+
+def test_worldcup_combo_selector_excludes_future_1x2_prediction_after_lock(
+    tmp_path: Path,
+) -> None:
+    engine = _init_full_db(tmp_path)
+    config = _enabled_config()
+    kickoff = datetime(2026, 6, 11, 18, tzinfo=UTC)
+    lock_time = kickoff - timedelta(minutes=config.lock_buffer_minutes)
+    now = lock_time + timedelta(minutes=10)
+    with session_scope(create_session_factory(engine)) as session:
+        _seed_fixture(session, fixture_id=-1112, kickoff=kickoff)
+        _seed_1x2_prediction(
+            session,
+            fixture_id=-1112,
+            prediction_time=lock_time + timedelta(minutes=5),
+        )
+        _seed_1x2_odds(session, fixture_id=-1112, fetched_at=lock_time - timedelta(minutes=5))
+
+    result = _select_for_date(engine, config, date(2026, 6, 11), now=now)
+
+    assert result.candidates == ()
+    assert _reason_counts(result)["missing_prediction"] == 1
+
+
+def test_worldcup_combo_selector_excludes_future_odds_before_lock(tmp_path: Path) -> None:
+    engine = _init_full_db(tmp_path)
+    config = _enabled_config()
+    kickoff = datetime(2026, 6, 11, 18, tzinfo=UTC)
+    now = datetime(2026, 6, 11, 14, tzinfo=UTC)
+    with session_scope(create_session_factory(engine)) as session:
+        _seed_fixture(session, fixture_id=-1113, kickoff=kickoff)
+        _seed_1x2_prediction(
+            session,
+            fixture_id=-1113,
+            prediction_time=now - timedelta(minutes=10),
+        )
+        _seed_1x2_odds(
+            session,
+            fixture_id=-1113,
+            fetched_at=kickoff - timedelta(minutes=30),
+        )
+
+    result = _select_for_date(engine, config, date(2026, 6, 11), now=now)
+
+    assert result.candidates == ()
+    assert _reason_counts(result)["market_unavailable"] == 1
+
+
+def test_worldcup_combo_selector_excludes_future_lineups_before_lock(tmp_path: Path) -> None:
+    engine = _init_full_db(tmp_path)
+    config = _enabled_config()
+    kickoff = datetime(2026, 6, 11, 18, tzinfo=UTC)
+    now = datetime(2026, 6, 11, 17, tzinfo=UTC)
+    with session_scope(create_session_factory(engine)) as session:
+        _seed_fixture(session, fixture_id=-1114, kickoff=kickoff)
+        _seed_1x2_prediction(
+            session,
+            fixture_id=-1114,
+            prediction_time=now - timedelta(minutes=10),
+        )
+        _seed_1x2_odds(session, fixture_id=-1114, fetched_at=now - timedelta(minutes=10))
+        _seed_lineups(session, fixture_id=-1114, fetched_at=now + timedelta(minutes=20))
+
+    result = _select_for_date(engine, config, date(2026, 6, 11), now=now)
+
+    assert len(result.candidates) == 1
+    assert result.candidates[0].lineup_status == "missing"
+    assert "lineup_missing_close_to_kickoff" in result.candidates[0].warnings
+
+
+def test_worldcup_combo_selector_excludes_future_ou_prediction_before_lock(
+    tmp_path: Path,
+) -> None:
+    engine = _init_full_db(tmp_path)
+    config = _enabled_config()
+    kickoff = datetime(2026, 6, 11, 18, tzinfo=UTC)
+    now = datetime(2026, 6, 11, 14, tzinfo=UTC)
+    with session_scope(create_session_factory(engine)) as session:
+        _seed_fixture(session, fixture_id=-1115, kickoff=kickoff)
+        _seed_ou_prediction(
+            session,
+            fixture_id=-1115,
+            prediction_time=kickoff - timedelta(minutes=30),
+            edge_pick=0.07,
+            ev_pick=0.16,
+        )
+
+    result = _select_for_date(engine, config, date(2026, 6, 11), now=now)
+
+    assert result.candidates == ()
+    assert _reason_counts(result)["no_ou_value_side"] == 1
 
 
 def test_worldcup_combo_selector_excludes_ev_negative_leg(tmp_path: Path) -> None:
@@ -846,6 +975,14 @@ def test_worldcup_combo_run_service_dry_run_does_not_persist(tmp_path: Path) -> 
     assert summary.candidate_legs >= 2
     assert summary.tickets >= 1
     assert summary.persisted_tickets == 0
+    assert summary.generated_at == datetime(2026, 6, 11, 12, tzinfo=UTC)
+    assert summary.session_summaries[0].data_cutoff_time == datetime(
+        2026,
+        6,
+        11,
+        12,
+        tzinfo=UTC,
+    )
     assert _count_rows(engine, "combo_tickets") == 0
     assert _count_rows(engine, "combo_ticket_snapshots") == 0
 
@@ -1094,13 +1231,18 @@ def _select_for_date(
     engine,
     config: WorldCupComboConfig,
     target_date: date,
+    *,
+    now: datetime | None = None,
 ) -> ComboLegSelectionResult:
     with session_scope(create_session_factory(engine)) as session:
         sessions = WorldCupComboSessionService(session, config).build_sessions(
             target_date=target_date
         )
-        now = datetime(2026, 6, 11, 14, tzinfo=UTC)
-        return WorldCupComboLegSelector(session, config).select_candidates(sessions, now=now)
+        current_time = now or datetime(2026, 6, 11, 17, 35, tzinfo=UTC)
+        return WorldCupComboLegSelector(session, config).select_candidates(
+            sessions,
+            now=current_time,
+        )
 
 
 def _seed_fixture(
@@ -1169,8 +1311,8 @@ def _seed_finished_fixture(
 
 def _seed_combo_run_sources(session) -> None:
     first_kickoff = datetime(2026, 6, 11, 18, tzinfo=UTC)
-    prediction_time = first_kickoff - timedelta(hours=3)
-    odds_time = first_kickoff - timedelta(hours=3, minutes=5)
+    prediction_time = first_kickoff - timedelta(hours=7)
+    odds_time = first_kickoff - timedelta(hours=7, minutes=5)
     for index, fixture_id in enumerate((-4101, -4102), start=1):
         kickoff = first_kickoff + timedelta(hours=index - 1)
         _seed_fixture(
@@ -1299,6 +1441,24 @@ def _seed_1x2_odds(
             payload_json={"synthetic": True},
         )
     )
+
+
+def _seed_lineups(session, *, fixture_id: int, fetched_at: datetime) -> None:
+    _ensure_synthetic_teams(session)
+    for team_id in (-1, -2):
+        session.add(
+            db_models.FixtureLineup(
+                fixture_id=fixture_id,
+                team_id=team_id,
+                coach_id=None,
+                formation="4-3-3",
+                fetched_at=fetched_at,
+                start_xi_json=[],
+                substitutes_json=[],
+                players_json=[],
+                payload_json={"synthetic": True},
+            )
+        )
 
 
 def _seed_ou_prediction(

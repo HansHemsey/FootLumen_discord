@@ -6,12 +6,13 @@ from __future__ import annotations
 import argparse
 import json
 from collections import Counter
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from football_predictor.config.settings import get_settings
 from football_predictor.db.session import create_db_engine, create_session_factory, session_scope
 from football_predictor.world_cup_combos.config import load_world_cup_combo_config
+from football_predictor.world_cup_combos.cutoff import compute_effective_cutoff
 from football_predictor.world_cup_combos.worldcup_combo_leg_selector import (
     WorldCupComboLegSelector,
 )
@@ -26,6 +27,7 @@ def main() -> None:
     config_path = args.config or settings.world_cup_combos_config_path
     config = load_world_cup_combo_config(config_path)
     target_date = date.fromisoformat(args.date) if args.date else None
+    generated_at = datetime.now(tz=UTC)
 
     if not config.enabled:
         print(
@@ -36,6 +38,7 @@ def main() -> None:
                     "sessions": 0,
                     "fixtures": 0,
                     "candidates": 0,
+                    "generated_at": generated_at.isoformat(),
                     "message": "worldcup_combos disabled; dry-run is a no-op",
                 },
                 indent=2,
@@ -50,13 +53,14 @@ def main() -> None:
         session_service = WorldCupComboSessionService(db_session, config)
         sessions = session_service.build_sessions(target_date=target_date)
         selector = WorldCupComboLegSelector(db_session, config)
-        result = selector.select_candidates(sessions)
+        result = selector.select_candidates(sessions, now=generated_at)
 
     reason_counts = Counter(item.reason for item in result.no_candidates)
     summary = {
         "enabled": True,
         "config_path": str(config_path),
         "target_date": target_date.isoformat() if target_date else None,
+        "generated_at": generated_at.isoformat(),
         "sessions": len(result.sessions),
         "fixtures": sum(len(session.fixtures) for session in result.sessions),
         "candidates": len(result.candidates),
@@ -69,6 +73,10 @@ def main() -> None:
                 "first_kickoff_at": session.first_kickoff_at.isoformat(),
                 "last_kickoff_at": session.last_kickoff_at.isoformat(),
                 "lock_time": session.lock_time.isoformat(),
+                "data_cutoff_time": compute_effective_cutoff(
+                    generated_at,
+                    session.lock_time,
+                ).isoformat(),
                 "stage": session.stage,
                 "group_matchday": session.group_matchday,
                 "is_matchday3": session.is_matchday3,
@@ -90,6 +98,15 @@ def main() -> None:
                 "ev": round(candidate.ev, 4),
                 "confidence_score": round(candidate.confidence_score, 2),
                 "data_quality_score": round(candidate.data_quality_score, 2),
+                "data_cutoff_time": (
+                    candidate.data_cutoff_time.isoformat()
+                    if candidate.data_cutoff_time
+                    else None
+                ),
+                "generated_at": (
+                    candidate.generated_at.isoformat() if candidate.generated_at else None
+                ),
+                "lock_time": candidate.lock_time.isoformat() if candidate.lock_time else None,
                 "warnings": candidate.warnings,
             }
             for candidate in result.candidates

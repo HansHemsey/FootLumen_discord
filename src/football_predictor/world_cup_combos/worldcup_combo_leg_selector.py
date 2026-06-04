@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from football_predictor.world_cup_combos.adapters import WorldCupComboReadAdapters
 from football_predictor.world_cup_combos.config import WorldCupComboConfig
+from football_predictor.world_cup_combos.cutoff import compute_effective_cutoff
 from football_predictor.world_cup_combos.enums import ComboMarketScope, ComboMarketType
 from football_predictor.world_cup_combos.models import (
     ComboFixtureNoCandidate,
@@ -50,6 +51,10 @@ class WorldCupComboLegSelector:
         no_candidates: list[ComboFixtureNoCandidate] = []
 
         for combo_session in sessions:
+            data_cutoff_time = compute_effective_cutoff(
+                current_time,
+                combo_session.lock_time,
+            )
             for fixture in combo_session.fixtures:
                 fixture_rejection = self._fixture_rejection_reason(fixture, current_time)
                 if fixture_rejection is not None:
@@ -67,6 +72,7 @@ class WorldCupComboLegSelector:
                     combo_session,
                     fixture,
                     current_time=current_time,
+                    data_cutoff_time=data_cutoff_time,
                 )
                 if one_x_two_candidate is not None:
                     candidates.append(one_x_two_candidate)
@@ -84,6 +90,7 @@ class WorldCupComboLegSelector:
                     combo_session,
                     fixture,
                     current_time=current_time,
+                    data_cutoff_time=data_cutoff_time,
                 )
                 if ou_candidate is not None:
                     candidates.append(ou_candidate)
@@ -120,10 +127,11 @@ class WorldCupComboLegSelector:
         fixture: WorldCupComboFixtureRef,
         *,
         current_time: datetime,
+        data_cutoff_time: datetime,
     ) -> tuple[ComboLegCandidate | None, str | None]:
         prediction = self.adapters.latest_1x2_prediction(
             fixture_id=fixture.fixture_id,
-            lock_time=combo_session.lock_time,
+            cutoff_time=data_cutoff_time,
         )
         if prediction is None:
             return None, "missing_prediction"
@@ -137,7 +145,7 @@ class WorldCupComboLegSelector:
 
         markets = self.adapters.latest_1x2_market_consensus(
             fixture_id=fixture.fixture_id,
-            lock_time=combo_session.lock_time,
+            cutoff_time=data_cutoff_time,
         )
         market = markets.get(market_type)
         if market is None:
@@ -152,6 +160,7 @@ class WorldCupComboLegSelector:
             combo_session=combo_session,
             fixture=fixture,
             current_time=current_time,
+            data_cutoff_time=data_cutoff_time,
             market_type=market_type,
             market_scope=market_scope,
             selection=_selection_label(market_type, fixture),
@@ -169,7 +178,7 @@ class WorldCupComboLegSelector:
             prediction_generated_at=prediction.generated_at or prediction.prediction_time,
             lineup_status=self.adapters.lineup_status(
                 fixture_id=fixture.fixture_id,
-                lock_time=combo_session.lock_time,
+                cutoff_time=data_cutoff_time,
             ),
         )
 
@@ -179,10 +188,11 @@ class WorldCupComboLegSelector:
         fixture: WorldCupComboFixtureRef,
         *,
         current_time: datetime,
+        data_cutoff_time: datetime,
     ) -> tuple[ComboLegCandidate | None, str | None]:
         prediction = self.adapters.latest_ou_value_prediction(
             fixture_id=fixture.fixture_id,
-            lock_time=combo_session.lock_time,
+            cutoff_time=data_cutoff_time,
         )
         if prediction is None:
             return None, "no_ou_value_side"
@@ -196,12 +206,13 @@ class WorldCupComboLegSelector:
 
         odds_snapshot_id, odds_last_update = self.adapters.latest_ou_odds_update(
             fixture_id=fixture.fixture_id,
-            lock_time=combo_session.lock_time,
+            cutoff_time=data_cutoff_time,
         )
         return self._candidate_or_reason(
             combo_session=combo_session,
             fixture=fixture,
             current_time=current_time,
+            data_cutoff_time=data_cutoff_time,
             market_type=market_type,
             market_scope=market_scope,
             selection="Over 2.5" if market_type == ComboMarketType.OVER_25 else "Under 2.5",
@@ -219,7 +230,7 @@ class WorldCupComboLegSelector:
             prediction_generated_at=prediction.generated_at or prediction.prediction_time,
             lineup_status=self.adapters.lineup_status(
                 fixture_id=fixture.fixture_id,
-                lock_time=combo_session.lock_time,
+                cutoff_time=data_cutoff_time,
             ),
         )
 
@@ -229,6 +240,7 @@ class WorldCupComboLegSelector:
         combo_session: WorldCupComboSession,
         fixture: WorldCupComboFixtureRef,
         current_time: datetime,
+        data_cutoff_time: datetime,
         market_type: ComboMarketType,
         market_scope: ComboMarketScope,
         selection: str,
@@ -297,6 +309,9 @@ class WorldCupComboLegSelector:
                     odds_last_update=odds_last_update,
                     prediction_generated_at=prediction_generated_at,
                 ),
+                data_cutoff_time=data_cutoff_time,
+                generated_at=current_time,
+                lock_time=combo_session.lock_time,
                 warnings=warnings,
             ),
             None,

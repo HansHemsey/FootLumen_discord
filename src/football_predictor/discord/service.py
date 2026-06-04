@@ -18,6 +18,11 @@ from football_predictor.discord.exceptions import DiscordWebhookError
 from football_predictor.discord.formatter import format_prediction_markdown
 from football_predictor.discord.router import DiscordRoute, resolve_discord_route
 from football_predictor.discord.webhook import DiscordWebhookClient
+from football_predictor.security.sanitize import (
+    find_sensitive_data,
+    sanitize_mapping,
+    sanitize_text,
+)
 from football_predictor.utils.secrets import hash_secret
 from football_predictor.utils.time import utc_now
 
@@ -82,8 +87,34 @@ class DiscordDeliveryService:
             allow_missing_webhook=dry_run or print_only,
             force=force,
         )
+        blocked_findings = find_sensitive_data(
+            {"content": markdown, "payload_metadata": payload_metadata or {}},
+            path="discord_message",
+        )
         message_hash = hash_message(markdown)
         webhook_hash = route.webhook_hash
+        if blocked_findings:
+            row = self._persist_message(
+                sanitize_text(markdown),
+                route=route,
+                message_hash=message_hash,
+                status="blocked_secret",
+                fixture_id=fixture_id,
+                model_prediction_id=model_prediction_id,
+                dry_run=dry_run,
+                print_only=print_only,
+                response_json={
+                    "blocked_reason": "secret_detected",
+                    "findings": [finding.as_dict() for finding in blocked_findings],
+                },
+                payload_metadata=payload_metadata,
+            )
+            self._result("blocked_secret", route, message_hash, row)
+            raise DiscordWebhookError(
+                "Discord message blocked by secret sanitizer",
+                webhook_hash=webhook_hash,
+                response_text=f"findings={len(blocked_findings)}",
+            )
         if not force and webhook_hash is not None:
             existing = self._existing_sent(webhook_hash, message_hash)
             if existing is not None:
@@ -209,19 +240,19 @@ class DiscordDeliveryService:
             try:
                 response = client.delete_message(message_id)
             except DiscordWebhookError as exc:
-                errors.append(str(exc))
+                errors.append(sanitize_text(str(exc)))
                 continue
             payload = row.payload_json if isinstance(row.payload_json, dict) else {}
-            row.payload_json = {
+            row.payload_json = sanitize_mapping({
                 **payload,
                 "deleted_replaced_at": utc_now().isoformat(),
                 "delete_response": response,
-            }
+            })
             row.status = "deleted_replaced"
-            row.response_json = {
+            row.response_json = sanitize_mapping({
                 **(row.response_json if isinstance(row.response_json, dict) else {}),
                 "delete_response": response,
-            }
+            })
             deleted += 1
         self.session.flush()
         result["deleted"] = deleted
@@ -293,7 +324,9 @@ class DiscordDeliveryService:
         payload_metadata: dict[str, Any] | None = None,
     ) -> DiscordMessage:
         webhook_hash = route.webhook_hash
-        metadata = payload_metadata or {}
+        metadata = sanitize_mapping(payload_metadata or {})
+        sanitized_markdown = sanitize_text(markdown)
+        sanitized_response_json = sanitize_mapping(response_json)
         row = DiscordMessage(
             fixture_id=fixture_id,
             model_prediction_id=model_prediction_id,
@@ -309,15 +342,17 @@ class DiscordDeliveryService:
             webhook_url_hash=webhook_hash,
             webhook_hash=webhook_hash,
             message_hash=message_hash,
-            message_markdown=markdown,
+            message_markdown=sanitized_markdown,
             route_json=route.safe_dict(),
-            response_json=response_json,
+            response_json=sanitized_response_json,
             payload_json={
-                "content": markdown,
-                "discord_api_message_id": _response_message_id(response_json),
+                "content": sanitized_markdown,
+                "discord_api_message_id": _response_message_id(sanitized_response_json),
                 **metadata,
             },
-            response_text=str(response_json)[:500] if response_json else None,
+            response_text=sanitize_text(str(sanitized_response_json)[:500])
+            if sanitized_response_json
+            else None,
         )
         self.session.add(row)
         self.session.flush()

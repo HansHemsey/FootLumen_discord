@@ -130,7 +130,7 @@ def test_doctor_masks_configured_secrets_in_json(tmp_path: Path, repo_root: Path
     get_settings.cache_clear()
     runner = CliRunner()
     synthetic_key = "synthetic-api-key-value"
-    synthetic_webhook = "https://discord.com/api/webhooks/synthetic/id"
+    synthetic_webhook = "https://discord.com/api/" + "webhooks/123456789012345678/" + ("a" * 48)
 
     result = runner.invoke(
         app,

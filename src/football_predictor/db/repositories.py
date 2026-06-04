@@ -9,6 +9,7 @@ from sqlalchemy import Select, and_, or_, select
 from sqlalchemy.orm import Session
 
 from football_predictor.db import models
+from football_predictor.security.sanitize import sanitize_mapping, sanitize_text, sanitize_value
 from football_predictor.utils.secrets import hash_secret
 from football_predictor.utils.time import ensure_aware_utc
 
@@ -53,8 +54,8 @@ def insert_raw_api_snapshot(
     """Insert an immutable raw API snapshot."""
     snapshot = models.RawApiSnapshot(
         endpoint=endpoint,
-        params_json=params_json,
-        payload_json=payload_json,
+        params_json=sanitize_mapping(params_json),
+        payload_json=sanitize_value(payload_json),
         fetched_at=ensure_aware_utc(fetched_at),
         status_code=status_code,
         source=source,
@@ -169,13 +170,13 @@ def create_discord_message_log(
         webhook_url_hash=webhook_hash,
         webhook_hash=webhook_hash,
         message_hash=message_hash,
-        message_markdown=message_markdown,
+        message_markdown=sanitize_text(message_markdown),
         sent_at=sent_at,
         status=status,
-        response_text=response_text,
-        payload_json=payload_json or {},
-        route_json=route_json or {},
-        response_json=response_json or {},
+        response_text=sanitize_text(response_text) if response_text else None,
+        payload_json=sanitize_mapping(payload_json or {}),
+        route_json=sanitize_mapping(route_json or {}),
+        response_json=sanitize_mapping(response_json or {}),
     )
     session.add(row)
     session.flush()

@@ -7,6 +7,11 @@ from typing import Any
 import httpx
 
 from football_predictor.discord.exceptions import DiscordWebhookError
+from football_predictor.security.sanitize import (
+    contains_sensitive_data,
+    sanitize_text,
+    sanitize_value,
+)
 from football_predictor.utils.secrets import hash_secret
 
 NO_MENTIONS: dict[str, list[str]] = {"parse": []}
@@ -56,6 +61,11 @@ class DiscordWebhookClient:
         wait: bool = False,
     ) -> dict[str, object]:
         payload.setdefault("allowed_mentions", NO_MENTIONS)
+        if contains_sensitive_data(payload):
+            raise DiscordWebhookError(
+                "Discord webhook payload blocked by secret sanitizer",
+                webhook_hash=self.webhook_hash,
+            )
         params = {"wait": "true"} if wait else None
         if self._client is not None:
             response = self._client.post(self.webhook_url, json=payload, params=params)
@@ -91,12 +101,12 @@ def _response_payload(response: httpx.Response) -> dict[str, object]:
     try:
         data: Any = response.json()
     except ValueError:
-        return {"status_code": response.status_code, "body": response.text[:200]}
+        return {"status_code": response.status_code, "body": sanitize_text(response.text[:200])}
     if isinstance(data, dict):
-        return data
-    return {"status_code": response.status_code, "body": data}
+        return sanitize_value(data)
+    return {"status_code": response.status_code, "body": sanitize_value(data)}
 
 
 def _safe_response_text(response: httpx.Response) -> str:
     text = response.text[:200]
-    return text.replace("\n", " ").replace("\r", " ")
+    return sanitize_text(text.replace("\n", " ").replace("\r", " "))

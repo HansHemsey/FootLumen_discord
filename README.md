@@ -32,6 +32,7 @@ Le Sprint 1 fournit une base Python installable avec Python 3.11, `pyproject.tom
 un layout `src/`, `typer`, `pydantic-settings`, `pytest`, `ruff` et `mypy`.
 Le détail reproductible pour un clone propre, la CI et le scan anti-secret est documenté
 dans `docs/development.md`.
+Les règles de secrets, sanitization et rotation sont documentées dans `docs/security.md`.
 
 ```bash
 python -m venv .venv

@@ -7,15 +7,21 @@ from football_predictor.world_cup_combos.enums import (
     ComboTicketStatus,
 )
 from football_predictor.world_cup_combos.models import (
+    ComboFixtureNoCandidate,
     ComboLegCandidate,
+    ComboLegSelectionResult,
     ComboLegSnapshot,
     ComboTicketCandidate,
     ComboTicketDecision,
     ComboTicketSnapshot,
+    WorldCupComboFixtureRef,
+    WorldCupComboSession,
 )
 
 __all__ = [
+    "ComboFixtureNoCandidate",
     "ComboLegCandidate",
+    "ComboLegSelectionResult",
     "ComboLegSnapshot",
     "ComboMarketScope",
     "ComboMarketType",
@@ -24,4 +30,6 @@ __all__ = [
     "ComboTicketSnapshot",
     "ComboTicketStatus",
     "WorldCupComboConfig",
+    "WorldCupComboFixtureRef",
+    "WorldCupComboSession",
 ]

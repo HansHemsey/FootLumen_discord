@@ -16,6 +16,42 @@ JsonDict = dict[str, Any]
 
 
 @dataclass(frozen=True)
+class WorldCupComboFixtureRef:
+    fixture_id: int
+    kickoff_at_utc: datetime
+    kickoff_at_paris: datetime
+    home_team: str
+    away_team: str
+    status_short: str | None
+    round_name: str | None
+    league_id: int
+    season: int
+    competition_key: str
+    warnings: list[str] = field(default_factory=list)
+
+    def to_json_dict(self) -> JsonDict:
+        return _json_dict(asdict(self))
+
+
+@dataclass(frozen=True)
+class WorldCupComboSession:
+    session_key: str
+    combo_date_paris: date
+    first_kickoff_at: datetime
+    last_kickoff_at: datetime
+    fixtures: tuple[WorldCupComboFixtureRef, ...]
+    stage: str
+    group_matchday: int | None
+    is_matchday3: bool
+    is_knockout: bool
+    lock_time: datetime
+    warnings: list[str] = field(default_factory=list)
+
+    def to_json_dict(self) -> JsonDict:
+        return _json_dict(asdict(self))
+
+
+@dataclass(frozen=True)
 class ComboLegCandidate:
     fixture_id: int
     kickoff_at_utc: datetime
@@ -36,7 +72,31 @@ class ComboLegCandidate:
     odds_last_update: datetime | None
     prediction_generated_at: datetime | None
     kickoff_at_paris: datetime | None = None
+    freshness_score: float | None = None
+    no_candidate_reason: str | None = None
     warnings: list[str] = field(default_factory=list)
+
+    def to_json_dict(self) -> JsonDict:
+        return _json_dict(asdict(self))
+
+
+@dataclass(frozen=True)
+class ComboFixtureNoCandidate:
+    fixture_id: int
+    session_key: str
+    source_type: str
+    reason: str
+    warnings: list[str] = field(default_factory=list)
+
+    def to_json_dict(self) -> JsonDict:
+        return _json_dict(asdict(self))
+
+
+@dataclass(frozen=True)
+class ComboLegSelectionResult:
+    sessions: tuple[WorldCupComboSession, ...] = field(default_factory=tuple)
+    candidates: tuple[ComboLegCandidate, ...] = field(default_factory=tuple)
+    no_candidates: tuple[ComboFixtureNoCandidate, ...] = field(default_factory=tuple)
 
     def to_json_dict(self) -> JsonDict:
         return _json_dict(asdict(self))

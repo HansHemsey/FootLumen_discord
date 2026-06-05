@@ -240,6 +240,7 @@ def test_repository_upserts_and_raw_snapshot_insert_are_idempotent_ready(tmp_pat
     engine = create_db_and_tables(f"sqlite:///{tmp_path / 'repositories.db'}")
     session_factory = create_session_factory(engine)
     now = datetime(2026, 5, 2, 12, tzinfo=UTC)
+    synthetic_key = "abc123DEF456ghi789JKL012mno345"
 
     with session_scope(session_factory) as session:
         # Synthetic DB-only IDs. They are not API-Football examples.
@@ -292,8 +293,11 @@ def test_repository_upserts_and_raw_snapshot_insert_are_idempotent_ready(tmp_pat
         insert_raw_api_snapshot(
             session,
             endpoint="/synthetic",
-            params_json={"synthetic": True},
-            payload_json={"response": []},
+            params_json={"synthetic": True, "api_key": synthetic_key},
+            payload_json={
+                "headers": {"x-apisports-key": synthetic_key},
+                "response": [{"note": "API_FOOTBALL_KEY=" + synthetic_key}],
+            },
             fetched_at=now,
             status_code=200,
         )
@@ -309,6 +313,9 @@ def test_repository_upserts_and_raw_snapshot_insert_are_idempotent_ready(tmp_pat
     assert fixtures[0].home_goals is None
     assert len(snapshots) == 1
     assert snapshots[0].fetched_at is not None
+    assert snapshots[0].params_json["api_key"] == "<redacted>"
+    assert snapshots[0].payload_json["headers"]["x-apisports-key"] == "<redacted>"
+    assert synthetic_key not in str(snapshots[0].payload_json)
 
 
 def test_dynamic_snapshot_and_prediction_models_insert_on_sqlite(tmp_path: Path) -> None:

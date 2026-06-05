@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import httpx
+import pytest
 from sqlalchemy import select
 
 from football_predictor.db import models
@@ -12,6 +13,7 @@ from football_predictor.discord.config import (
     load_discord_channels_config,
     load_discord_webhooks_config,
 )
+from football_predictor.discord.exceptions import DiscordWebhookError
 from football_predictor.discord.service import DiscordDeliveryService
 from football_predictor.reference.loaders import load_api_football_reference
 
@@ -190,3 +192,51 @@ def test_delivery_print_only_does_not_send(reference_path: Path, tmp_path: Path)
 
     assert result.status == "print_only"
     assert calls == 0
+
+
+def test_delivery_blocks_secret_markdown_before_webhook(
+    reference_path: Path,
+    tmp_path: Path,
+) -> None:
+    calls = 0
+    webhook = "https://discord.com/api/" + "webhooks/123456789012345678/" + ("a" * 48)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(204)
+
+    reference = load_api_football_reference(reference_path)
+    channels = load_discord_channels_config("config/discord_channels.example.yaml", reference)
+    webhooks = load_discord_webhooks_config(
+        _write_webhooks(tmp_path / "discord_webhooks.yaml"),
+        reference,
+    )
+    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'discord_block.db'}")
+    session_factory = create_session_factory(engine)
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler)) as client,
+        session_scope(session_factory) as session,
+        pytest.raises(DiscordWebhookError),
+    ):
+        DiscordDeliveryService(
+            session,
+            channels_config=channels,
+            webhooks_config=webhooks,
+            http_client=client,
+        ).send_markdown(
+            "```md\nsecret " + webhook + "\n```",
+            competition_key="ligue1",
+            message_type="prediction",
+        )
+
+    with session_scope(session_factory) as session:
+        row = session.scalar(select(models.DiscordMessage))
+
+    assert calls == 0
+    assert row is not None
+    assert row.status == "blocked_secret"
+    assert webhook not in row.message_markdown
+    assert webhook not in str(row.payload_json)
+    assert "<redacted>" in row.message_markdown

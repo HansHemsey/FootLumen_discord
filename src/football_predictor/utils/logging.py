@@ -3,26 +3,15 @@
 from __future__ import annotations
 
 import logging as stdlib_logging
-import re
 import sys
-from collections.abc import Mapping
 from typing import Any
 
-SENSITIVE_KEY_PARTS = (
-    "authorization",
-    "key",
-    "secret",
-    "token",
-    "webhook",
-    "x-apisports-key",
+from football_predictor.security.sanitize import (
+    sanitize_mapping,
+    sanitize_text,
 )
-REDACTED_VALUE = "<redacted>"
+
 DEFAULT_LOG_FORMAT = "%(levelname)s %(name)s - %(message)s"
-SECRET_TEXT_PATTERNS = (
-    re.compile(r"https://discord(?:app)?\.com/api/webhooks/[^\s'\"<>]+", re.IGNORECASE),
-    re.compile(r"(?i)(Bearer)\s+[A-Za-z0-9._~+/=-]+"),
-    re.compile(r"(?i)((?:api[_-]?key|token|secret|webhook)[=:]\s*)[^\s,;]+"),
-)
 
 
 def configure_logging(level: int | str = stdlib_logging.INFO) -> stdlib_logging.Logger:
@@ -45,47 +34,6 @@ def get_logger(name: str | None = None) -> stdlib_logging.Logger:
     if name.startswith("football_predictor"):
         return stdlib_logging.getLogger(name)
     return stdlib_logging.getLogger(f"football_predictor.{name}")
-
-
-def is_sensitive_key(key: str) -> bool:
-    normalized = key.lower().replace("_", "-")
-    return any(part in normalized for part in SENSITIVE_KEY_PARTS)
-
-
-def sanitize_mapping(values: Mapping[str, Any]) -> dict[str, Any]:
-    """Return a copy of mapping values with secret-looking keys redacted."""
-    sanitized: dict[str, Any] = {}
-    for key, value in values.items():
-        if is_sensitive_key(str(key)):
-            sanitized[str(key)] = REDACTED_VALUE
-        else:
-            sanitized[str(key)] = sanitize_value(value)
-    return sanitized
-
-
-def sanitize_value(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return sanitize_mapping(value)
-    if isinstance(value, list):
-        return [sanitize_value(item) for item in value]
-    if isinstance(value, tuple):
-        return tuple(sanitize_value(item) for item in value)
-    if isinstance(value, str):
-        return sanitize_text(value)
-    return value
-
-
-def sanitize_text(value: str) -> str:
-    """Mask secret-looking fragments inside free-form text."""
-    sanitized = value
-    for pattern in SECRET_TEXT_PATTERNS:
-        if pattern.pattern.startswith("(?i)((?:api"):
-            sanitized = pattern.sub(r"\1<redacted>", sanitized)
-        elif pattern.pattern.startswith("(?i)(Bearer"):
-            sanitized = pattern.sub(r"\1 <redacted>", sanitized)
-        else:
-            sanitized = pattern.sub("<redacted>", sanitized)
-    return sanitized
 
 
 def log_event(

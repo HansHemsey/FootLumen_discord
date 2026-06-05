@@ -13,7 +13,6 @@ import numpy as np
 import pandas as pd  # type: ignore[import-untyped]
 from sklearn.metrics import (  # type: ignore[import-untyped]
     average_precision_score,
-    precision_recall_fscore_support,
     roc_auc_score,
 )
 
@@ -24,6 +23,10 @@ from football_predictor.backtesting.v3_dataset_builder import (
     chronological_splits,
 )
 from football_predictor.modeling.constants import CLASSES
+from football_predictor.modeling.draw_metrics import (
+    evaluate_draw_metrics,
+    legacy_v3_draw_metrics,
+)
 from football_predictor.modeling.evaluation import evaluate_probabilities
 from football_predictor.modeling.poisson import poisson_baseline_probability
 from football_predictor.modeling.probabilities import ProbabilityTriple
@@ -302,9 +305,14 @@ def _metrics_for_predictions(
     metrics["coverage"] = len(covered_predictions) / len(y_true) if y_true else 0.0
     metrics["missing_predictions"] = len(y_true) - len(covered_predictions)
     metrics["avg_confidence_gap"] = _average_confidence_gap(covered_predictions)
-    draw_metrics = _draw_metrics(covered_true, covered_predictions, config=config)
-    metrics["draw_metrics"] = draw_metrics
-    metrics["draw_ece"] = draw_metrics.get("ece")
+    draw_metrics = evaluate_draw_metrics(
+        covered_true,
+        covered_predictions,
+        calibration_bins=config.calibration_bins,
+    )
+    metrics.update(draw_metrics)
+    metrics["draw_metrics"] = legacy_v3_draw_metrics(draw_metrics)
+    metrics["draw_ece"] = draw_metrics.get("draw_ece")
     metrics["no_draw_metrics"] = _no_draw_metrics(covered_true, covered_predictions)
     return metrics
 
@@ -346,32 +354,13 @@ def _draw_metrics(
     *,
     config: V3BacktestConfig,
 ) -> JsonDict:
+    shared = evaluate_draw_metrics(y_true, predictions, calibration_bins=config.calibration_bins)
     y_binary = [1 if label == "DRAW" else 0 for label in y_true]
     p_draw = [prediction.as_dict()["DRAW"] for prediction in predictions]
-    predicted_draw = [
-        1 if prediction.predicted_result() == "DRAW" else 0 for prediction in predictions
-    ]
-    precision, recall, f1, _support = precision_recall_fscore_support(
-        y_binary,
-        predicted_draw,
-        average="binary",
-        zero_division=0,
-    )
-    return {
-        "row_count": len(y_binary),
-        "positive_rate": sum(y_binary) / len(y_binary) if y_binary else None,
-        "precision": float(precision),
-        "recall": float(recall),
-        "f1": float(f1),
-        "roc_auc": _binary_auc(y_binary, p_draw),
-        "pr_auc": _binary_pr_auc(y_binary, p_draw),
-        "calibration_bins": _binary_calibration_bins(
-            y_binary,
-            p_draw,
-            n_bins=config.calibration_bins,
-        ),
-        "ece": _binary_ece(y_binary, p_draw, n_bins=config.calibration_bins),
-    }
+    legacy = legacy_v3_draw_metrics(shared)
+    legacy["roc_auc"] = _binary_auc(y_binary, p_draw)
+    legacy["pr_auc"] = _binary_pr_auc(y_binary, p_draw)
+    return legacy
 
 
 def _no_draw_metrics(y_true: list[str], predictions: list[ProbabilityTriple]) -> JsonDict:
@@ -598,8 +587,8 @@ def _markdown_report(payload: JsonDict) -> str:
             "## Comparatif Test",
             "",
             "| Modèle | Rows | Coverage | Accuracy | Log loss | Brier | "
-            "Draw F1 | Draw AUC | Draw ECE | Conf. gap |",
-            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+            "Draw F1 | Draw rate | Mean p_draw | Draw ECE | Conf. gap |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
         ]
     )
     for name, metrics in payload.get("metrics", {}).get("test", {}).items():
@@ -608,7 +597,9 @@ def _markdown_report(payload: JsonDict) -> str:
             f"| {name} | {metrics.get('row_count', 0)} | {_fmt(metrics.get('coverage'))} | "
             f"{_fmt(metrics.get('accuracy'))} | {_fmt(metrics.get('log_loss'))} | "
             f"{_fmt(metrics.get('brier_score'))} | {_fmt(draw.get('f1'))} | "
-            f"{_fmt(draw.get('roc_auc'))} | {_fmt(metrics.get('draw_ece'))} | "
+            f"{_fmt(metrics.get('observed_draw_rate'))} | "
+            f"{_fmt(metrics.get('mean_predicted_p_draw'))} | "
+            f"{_fmt(metrics.get('draw_ece'))} | "
             f"{_fmt(metrics.get('avg_confidence_gap'))} |"
         )
     lines.extend(["", "## Critères V3", ""])

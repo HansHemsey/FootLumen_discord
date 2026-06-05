@@ -23,6 +23,7 @@ src/football_predictor/
 ├── cli.py
 ├── api/
 ├── backtesting/
+├── commands/
 ├── config/
 ├── db/
 ├── discord/

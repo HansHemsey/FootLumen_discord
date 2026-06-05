@@ -109,6 +109,14 @@ class Settings(BaseSettings):
         default=5,
         validation_alias="MARKET_OU25_BET_ID",
     )
+    market_btts_bet_name: str = Field(
+        default="Both Teams Score",
+        validation_alias="MARKET_BTTS_BET_NAME",
+    )
+    market_btts_bet_id: int = Field(
+        default=8,
+        validation_alias="MARKET_BTTS_BET_ID",
+    )
     ou_model_dir: Path = Field(
         default=Path("data/models/ou-v1"),
         validation_alias="OU_MODEL_DIR",
@@ -136,6 +144,30 @@ class Settings(BaseSettings):
     world_cup_historical_results_path: Path = Field(
         default=Path("data/reference/historical_worldcup_result.csv"),
         validation_alias="WORLD_CUP_HISTORICAL_RESULTS_PATH",
+    )
+    world_cup_combos_enabled: bool = Field(
+        default=False,
+        validation_alias="WORLD_CUP_COMBOS_ENABLED",
+    )
+    world_cup_combos_config_path: Path = Field(
+        default=Path("config/worldcup_combos.yaml"),
+        validation_alias="WORLD_CUP_COMBOS_CONFIG_PATH",
+    )
+    draw_safety_enabled: bool = Field(
+        default=True,
+        validation_alias="DRAW_SAFETY_ENABLED",
+    )
+    draw_risk_high_threshold: float = Field(
+        default=0.32,
+        validation_alias="DRAW_RISK_HIGH_THRESHOLD",
+    )
+    min_p_draw_when_draw_risk_high: float = Field(
+        default=0.22,
+        validation_alias="MIN_P_DRAW_WHEN_DRAW_RISK_HIGH",
+    )
+    confidence_cap_on_draw_conflict: str = Field(
+        default="Medium",
+        validation_alias="CONFIDENCE_CAP_ON_DRAW_CONFLICT",
     )
 
     @field_validator("market_1x2_bet_id", mode="before")

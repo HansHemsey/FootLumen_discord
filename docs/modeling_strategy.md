@@ -312,6 +312,27 @@ source reste strictement filtrée par `fetched_at <= prediction_time`. En backte
 donnée récupérée après coup n'est utilisée pour simuler M-30 : les rapports indiquent la
 couverture dynamique disponible et évaluent seulement les snapshots réellement point-in-time.
 
+### Enrichissement CDM 2026 Point-In-Time
+
+Les sources FIFA/Elo/historique ne doivent plus être considérées comme des constantes
+globales lorsqu'elles servent à une matrice de features reproductible. La couche
+`worldcup.enrichment` persiste :
+
+- l'historique international dans `national_team_matches` ;
+- les aliases nationaux dans `national_team_aliases` ;
+- les Elo et rankings FIFA dans des tables de snapshots datés ;
+- les états de groupe et les scores d'effectif dans des snapshots horodatés.
+
+La règle est unique : `cutoff = prediction_time`. Les historiques utilisent seulement les
+matchs `match_date < cutoff`, les rankings utilisent le dernier snapshot `<= cutoff`, les
+odds utilisent `fetched_at <= cutoff`, et les effectifs utilisent `snapshot_at <= cutoff`.
+Les rankings courants ne sont donc utilisables en production CDM 2026 que s'ils sont importés
+avec une date explicite.
+
+Les marchés complémentaires O/U 2.5 et BTTS restent stockés dans `odds_snapshots` et servent
+d'abord à la couverture, aux combinés et aux audits. Ils ne remplacent pas le marché 1X2 du
+modèle principal sans backtest dédié.
+
 - modèle final chargé depuis `model.joblib` si `--model-dir` est fourni ;
 - `stacking_final` quand le modèle sportif et au moins une source marché/API existent ;
 - `odds_only` ;
@@ -633,6 +654,47 @@ avec edge positif, EV positive, confiance O/U V2 suffisante, data quality suffis
 couverture bookmaker minimale. Les prédictions non publiques restent routées staff ou
 marquées `no_bet`, et ne sont pas prises en compte dans le score public hebdomadaire.
 
+#### Safety DRAW V3 / Coupe du Monde
+
+La publication 1X2 applique une couche de sécurité dédiée au nul afin d'éviter les faux
+`High` quand le modèle final sous-estime fortement `P(Draw)`. Cette couche ne modifie pas
+les probabilités `p_home`, `p_draw`, `p_away` persistées : elle agit uniquement sur le
+label/score de confiance, les warnings d'audit et la décision public vs staff.
+
+Profil conservateur par défaut :
+
+- warning si `draw_risk_p >= 0.32` et `p_draw < 0.22` ;
+- conflit sévère si `draw_risk_p >= 0.38` et `p_draw < 0.18` ;
+- confiance plafonnée à `Medium` en conflit standard et `Low` en conflit sévère ;
+- publication publique bloquée quand la confiance est plafonnée par cette safety.
+
+Pour la Coupe du Monde, les signaux de draw proviennent des sources existantes
+rating/Poisson/marché/API quand elles existent. Si aucun signal dédié n'est disponible
+mais que le match est très équilibré et que `p_draw` est très bas, la prédiction est
+plafonnée et routée staff avec le warning `draw_safety_unavailable`.
+
+Variables de configuration :
+
+```env
+DRAW_SAFETY_ENABLED=true
+DRAW_RISK_HIGH_THRESHOLD=0.32
+MIN_P_DRAW_WHEN_DRAW_RISK_HIGH=0.22
+CONFIDENCE_CAP_ON_DRAW_CONFLICT=Medium
+```
+
+La couche de décision O/U V2 sépare explicitement :
+
+- `forecast_side` : côté le plus probable selon le modèle ;
+- `value_side` : côté publiable seulement si la value betting est positive ;
+- `no_bet_reason` : raison si aucun côté value n'est publiable.
+
+Une publication publique O/U exige `ou_decision_version="ou_v2"` et la policy
+`ou_publication_policy_v2`. Une sortie legacy ou sans version explicite est staff-only,
+même si elle contient un forecast probable. `bookmaker_count` manquant est traité comme
+`0`, donc non publiable public. Les combinés CDM consomment uniquement les décisions O/U
+V2 propres avec `value_side`, `edge_pick > 0`, `ev_pick > 0` et `publication_decision`
+publique.
+
 ### Backtest Publication O/U V2
 
 Le backtest publication O/U V2 ne retune pas le modèle. Il réutilise le dataset
@@ -647,20 +709,35 @@ football-predictor ou backtest-publication-v2 \
   --output-dir reports/ou_v2
 ```
 
+Wrapper script reproductible :
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/backtest_ou_v2_publication.py \
+  --dataset data/processed/training_ou_v1.parquet \
+  --output-dir reports/ou_v2 \
+  --start-date 2025-08-01 \
+  --end-date 2026-05-31
+```
+
 Sorties :
 
 - `backtest_summary.json` : synthèse modèle vs marché, ROI, CLV si disponible,
   recommandation de policy ;
 - `roi_by_edge_bucket.csv` : ROI par bucket d'edge ;
 - `roi_by_ev_bucket.csv` : ROI par bucket d'EV ;
+- `roi_by_confidence_bucket.csv` : ROI par bucket de confiance O/U V2 ;
 - `calibration_bins.csv` : calibration modèle et marché ;
 - `publication_policy_grid.csv` : grille `min_edge`, `min_ev`, `min_confidence`,
-  `min_data_quality` ;
+  `min_data_quality`, `min_bookmaker_count` ;
 - `backtest_report.md` : rapport lisible avec recommandation.
 
 La recommandation de policy privilégie ROI positif, volume suffisant, drawdown acceptable
 et cohérence avec les métriques probabilistes. Si aucune policy n'est robuste, le rapport
 recommande de garder O/U en staff-only.
+
+Les cotes closing, si présentes dans le dataset, sont utilisées uniquement pour calculer
+la CLV après sélection. Elles ne doivent jamais entrer dans le masque de sélection d'un
+pick value.
 
 Pour valider le rendu Discord V3 sans envoi réel :
 

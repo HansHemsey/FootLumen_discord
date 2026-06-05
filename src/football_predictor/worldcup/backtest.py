@@ -214,6 +214,10 @@ def _markdown_report(metrics: JsonDict) -> str:
             f"- Test rows: {test.get('row_count')}",
             f"- WorldCup 1X2 accuracy: {test.get('accuracy')}",
             f"- WorldCup 1X2 log_loss: {test.get('log_loss')}",
+            f"- DRAW precision/recall/F1: {test.get('draw_precision')} / "
+            f"{test.get('draw_recall')} / {test.get('draw_f1')}",
+            f"- DRAW observed/predicted rate: {test.get('observed_draw_rate')} / "
+            f"{test.get('mean_predicted_p_draw')}",
             f"- Rating baseline accuracy: {rating.get('accuracy')}",
             f"- Poisson baseline accuracy: {poisson.get('accuracy')}",
             f"- Dynamic source coverage: {json.dumps(dynamic, sort_keys=True)}",

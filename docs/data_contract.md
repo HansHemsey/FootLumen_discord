@@ -252,6 +252,8 @@ Champs principaux :
 - `p_wc_poisson_home`, `p_wc_poisson_draw`, `p_wc_poisson_away` ;
 - `wc_market_*` et `p_wc_market_*` : consensus odds 1X2 pré-match, uniquement si
   `OddsSnapshot.fetched_at <= prediction_time` ;
+- `wc_odds_ou25_available` et `wc_odds_btts_available` : disponibilité auditée des marchés
+  O/U 2.5 et BTTS dans `OddsSnapshot`, toujours filtrée par `fetched_at <= prediction_time` ;
 - `wc_api_pred_*` et `p_wc_api_*` : dernière prédiction API-Football disponible avant
   `prediction_time` ;
 - `wc_official_lineup_*`, `wc_home_lineup_surprise_score`,
@@ -262,7 +264,29 @@ Champs principaux :
   et au Poisson ;
 - `p_wc_rating_dynamic_home/draw/away` et `p_wc_poisson_dynamic_home/draw/away` :
   probabilités après ajustement injuries/lineups ;
-- `wc_fifa_*` et `wc_current_elo_*` seulement pour les prédictions CDM 2026 futures.
+- `wc_fifa_*` et `wc_current_elo_*` seulement depuis des snapshots datés
+  `snapshot_date <= prediction_time` ;
+- `wc_group_state_*` : état de groupe dérivé des résultats déjà connus avant le cutoff ;
+- `wc_squad_strength_*` : force d'effectif issue d'un snapshot `snapshot_at <= prediction_time`.
+
+Tables d'enrichissement CDM :
+
+- `national_team_aliases` : aliases nationaux entre API-Football, FIFA, Elo et datasets
+  historiques ;
+- `national_team_matches` : historique international toutes compétitions, avec score final
+  stocké pour construire des historiques strictement antérieurs au match cible ;
+- `national_elo_snapshots` : Elo datés par sélection ;
+- `fifa_ranking_snapshots` : classements FIFA datés ;
+- `worldcup_group_state_snapshots` : états de groupe point-in-time ;
+- `squad_strength_features` : features d'effectif datées.
+
+Convention odds multi-marchés :
+
+- 1X2 / `Match Winner` : `odd_home`, `odd_draw`, `odd_away` ;
+- O/U 2.5 / `Goals Over/Under` : `odd_home = Over 2.5`,
+  `odd_away = Under 2.5`, `odd_draw = NULL` ;
+- BTTS / `Both Teams Score` : `odd_home = Yes`, `odd_away = No`, `odd_draw = NULL`,
+  avec les labels conservés dans `payload_json.labels`.
 
 Règles :
 
@@ -272,6 +296,8 @@ Règles :
 - les rankings FIFA/Elo actuels sont interdits dans les lignes historiques de backtest ;
 - les odds, predictions API, lineups et injuries doivent respecter
   `fetched_at <= prediction_time` ;
+- les snapshots FIFA/Elo, group state et squad strength doivent respecter
+  `snapshot_date <= prediction_time` ou `snapshot_at <= prediction_time` ;
 - le backtest CDM strict n'invente pas de source dynamique manquante et expose sa couverture ;
 - les aliases doivent résoudre les 48 équipes CDM 2026 avant production ;
 - les features CDM ne doivent pas être utilisées par les pipelines championnats.
@@ -846,6 +872,15 @@ Métadonnées ajoutées dans `V3ModelPrediction.payload_json` :
 - `prediction_time` ;
 - `run_key` ;
 - `refresh_warnings`.
+- `draw_safety` : décision post-modèle dédiée au risque de nul, avec `enabled`,
+  `severity`, `warnings`, `original_confidence_label`, `effective_confidence_label`,
+  `public_blocked`, `skip_reason`, `signals` et `config`.
+
+Le même payload `draw_safety` peut être présent dans les prédictions Coupe du Monde
+`ModelPrediction.payload_json` quand `model_family="worldcup_1x2"`. Cette couche ne
+change jamais les probabilités officielles `p_home`, `p_draw`, `p_away`; elle plafonne
+uniquement la confiance et peut router une prédiction vers le staff si le risque de nul
+contredit la probabilité finale.
 
 Quand un message Discord V3 est créé, `DiscordMessage.model_prediction_id` reste `null`
 car la FK pointe vers les prédictions V2. Le lien V3 est porté par
@@ -854,17 +889,34 @@ car la FK pointe vers les prédictions V2. Le lien V3 est porté par
 - `v3_model_prediction_id` pour les prédictions V3 1X2 publiées ;
 - `v3_feature_snapshot_id` pour les prédictions V3 1X2 publiées ;
 - `ou_model_prediction_id` pour les prédictions O/U 2.5 publiées ;
+- `decision_version`, `ou_decision_version` et `ou_publication_policy_version` pour
+  auditer les décisions O/U V2 ;
 - `model_family` (`v3` ou `ou25`) ;
 - `shadow_mode` pour V3 ;
 - `daily_window` / `automation_window` ;
 - `automation_date` ;
 - `run_key`.
+- `draw_safety` pour expliquer un blocage public ou un cap de confiance lié au nul.
 
-Les prédictions V3 et O/U à confiance insuffisante sont persistées mais ne créent pas de
-message Discord réel. Le statut opérationnel est `confidence_skipped` avec la raison
-`confidence_below_publish_threshold`; ces lignes ne sont pas éligibles au score public
-hebdomadaire.
+Les prédictions V3 et O/U non publiables sont persistées mais ne créent pas de message
+public. Pour O/U, `forecast_side` décrit seulement la lecture modèle ; seul `value_side`
+peut devenir un pick. Une sortie O/U legacy ou sans `ou_decision_version="ou_v2"` reste
+staff-only. Les lignes non publiques ne sont pas éligibles au score public hebdomadaire.
 
 Les vrais messages `predictions` sont dédupliqués par `fixture_id + window` pour éviter un
 second envoi réel V2 ou V3 sur la même fenêtre. `dry_run` et `print_only` ne bloquent
 jamais un futur envoi réel. `--force` permet de renvoyer explicitement.
+
+### Métriques DRAW
+
+Les rapports V3 et Coupe du Monde exposent en plus des métriques 1X2 classiques :
+
+- `draw_precision`, `draw_recall`, `draw_f1` ;
+- `observed_draw_rate` ;
+- `mean_predicted_p_draw` ;
+- `draw_calibration_bins` ;
+- `draw_ece` ;
+- `confusion_matrix_labeled`.
+
+Pour compatibilité, le rapport V3 conserve aussi le bloc historique `draw_metrics` avec
+`precision`, `recall`, `f1`, `positive_rate`, `calibration_bins` et `ece`.

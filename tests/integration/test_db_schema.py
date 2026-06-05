@@ -70,6 +70,72 @@ def test_init_db_creates_sprint_3_tables_and_columns(tmp_path: Path) -> None:
             "publication_decision",
         },
     )
+    assert _has_columns(
+        inspector,
+        "combo_tickets",
+        {
+            "ticket_key",
+            "status",
+            "competition_key",
+            "combo_date",
+            "session_key",
+            "legs_count",
+            "combined_decimal_odds",
+            "combined_ev_adjusted",
+            "combined_confidence_score",
+            "post_lock_risk_score",
+            "model_versions_json",
+            "warnings_json",
+            "payload_json",
+        },
+    )
+    assert _has_columns(
+        inspector,
+        "combo_ticket_legs",
+        {
+            "fixture_id",
+            "market_type",
+            "market_scope",
+            "selection",
+            "decimal_odd",
+            "model_probability",
+            "ev",
+            "odds_snapshot_id",
+            "prediction_snapshot_id",
+            "warnings_json",
+        },
+    )
+    assert _has_columns(
+        inspector,
+        "combo_ticket_snapshots",
+        {
+            "ticket_key",
+            "status",
+            "captured_at",
+            "snapshot_json",
+            "model_versions_json",
+            "warnings_json",
+        },
+    )
+    assert _has_columns(inspector, "discord_messages", {"idempotency_key"})
+    assert "ix_combo_tickets_status_combo_date" in _index_names(inspector, "combo_tickets")
+    assert "ix_combo_tickets_ticket_key" in _index_names(inspector, "combo_tickets")
+    assert "ix_combo_ticket_legs_combo_ticket_id" in _index_names(
+        inspector,
+        "combo_ticket_legs",
+    )
+    assert "ix_combo_ticket_snapshots_ticket_status_time" in _index_names(
+        inspector,
+        "combo_ticket_snapshots",
+    )
+    assert "ix_discord_messages_idempotency_key" in _index_names(
+        inspector,
+        "discord_messages",
+    )
+    assert "ix_discord_messages_type_created" in _index_names(
+        inspector,
+        "discord_messages",
+    )
     assert _is_not_nullable(inspector, "fixture_statistics", "fetched_at")
     assert _is_not_nullable(inspector, "injuries", "fetched_at")
     assert _is_not_nullable(inspector, "odds_snapshots", "fetched_at")
@@ -216,6 +282,10 @@ def test_alembic_upgrade_head_creates_initial_schema(tmp_path: Path, repo_root: 
 def _has_columns(inspector, table_name: str, expected_columns: set[str]) -> bool:
     columns = {column["name"] for column in inspector.get_columns(table_name)}
     return expected_columns.issubset(columns)
+
+
+def _index_names(inspector, table_name: str) -> set[str]:
+    return {index["name"] for index in inspector.get_indexes(table_name)}
 
 
 def _is_not_nullable(inspector, table_name: str, column_name: str) -> bool:

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from football_predictor.db import models
 from football_predictor.discord.formatter import format_prediction_markdown
 from football_predictor.discord.service import DiscordDeliveryService
+from football_predictor.prediction.draw_safety import draw_safety_skip_reason
 from football_predictor.prediction.publication_policy import (
     CONFIDENCE_SKIP_REASON,
     is_publishable_confidence,
@@ -27,7 +28,9 @@ from football_predictor.prediction.scheduler import (
 from football_predictor.prediction.service import ApiFootballPayloadClient
 from football_predictor.prediction.staff_publication import send_skipped_prediction_to_staff
 from football_predictor.reference.lookups import ApiFootballReference, PlayersReference
+from football_predictor.security.sanitize import sanitize_text
 from football_predictor.utils.exceptions import PredictionError
+from football_predictor.utils.logging import get_logger
 from football_predictor.worldcup.references import WorldCupReferenceBundle
 from football_predictor.worldcup.service import (
     WORLD_CUP_LEAGUE_ID,
@@ -37,6 +40,7 @@ from football_predictor.worldcup.service import (
 
 JsonDict = dict[str, Any]
 UPCOMING_STATUSES = {"", "NS", "TBD"}
+logger = get_logger(__name__)
 _LIVE_WINDOWS = {
     DailyPredictionWindow.LATE,
     DailyPredictionWindow.NOW,
@@ -56,6 +60,7 @@ class WorldCupDailyResult:
     discord_message_id: int | None = None
     reason: str | None = None
     error: str | None = None
+    source_warnings: list[str] = field(default_factory=list)
 
     def as_dict(self) -> JsonDict:
         return {
@@ -69,6 +74,7 @@ class WorldCupDailyResult:
             "discord_message_id": self.discord_message_id,
             "reason": self.reason,
             "error": self.error,
+            "source_warnings": self.source_warnings,
         }
 
 
@@ -178,7 +184,13 @@ def run_daily_worldcup_predictions(
                 results.append(_result(output, "predicted", fixture=fixture))
                 continue
             markdown = format_prediction_markdown(output, timezone_name=timezone_name)
-            if is_publishable_confidence(output.confidence_label):
+            draw_safety_reason = draw_safety_skip_reason(output.draw_safety_json)
+            data_quality_reason = _worldcup_data_quality_skip_reason(output.data_quality_json)
+            if (
+                draw_safety_reason is None
+                and data_quality_reason is None
+                and is_publishable_confidence(output.confidence_label)
+            ):
                 send_result = delivery.send_markdown(
                     markdown,
                     competition_key="fifa_world_cup_2026",
@@ -191,7 +203,14 @@ def run_daily_worldcup_predictions(
                     dry_run=dry_run,
                     print_only=print_only,
                     force=force,
-                    payload_metadata={"model_family": "worldcup_1x2"},
+                    payload_metadata={
+                        "model_family": "worldcup_1x2",
+                        "draw_safety": output.draw_safety_json,
+                        "source_health": output.data_quality_json.get("source_health"),
+                        "worldcup_fixture_quality": output.data_quality_json.get(
+                            "worldcup_fixture_quality"
+                        ),
+                    },
                 ) if delivery is not None else None
                 status = send_result.status if send_result is not None else "predicted"
                 message_id = send_result.discord_message_id if send_result is not None else None
@@ -204,6 +223,7 @@ def run_daily_worldcup_predictions(
                     )
                 )
             else:
+                skip_reason = draw_safety_reason or data_quality_reason or CONFIDENCE_SKIP_REASON
                 if not dry_run and not print_only:
                     send_skipped_prediction_to_staff(
                         delivery,
@@ -212,10 +232,17 @@ def run_daily_worldcup_predictions(
                         model_family="worldcup_1x2",
                         confidence_label=output.confidence_label,
                         confidence_score=output.confidence_score,
-                        reason=CONFIDENCE_SKIP_REASON,
+                        reason=skip_reason,
                         prediction_time=output.prediction_time,
                         automation_window=resolved_window.value,
                         model_prediction_id=output.model_prediction_id,
+                        payload_metadata={
+                            "draw_safety": output.draw_safety_json,
+                            "source_health": output.data_quality_json.get("source_health"),
+                            "worldcup_fixture_quality": output.data_quality_json.get(
+                                "worldcup_fixture_quality"
+                            ),
+                        },
                         force=force,
                     )
                 results.append(
@@ -223,10 +250,15 @@ def run_daily_worldcup_predictions(
                         output,
                         "confidence_skipped",
                         fixture=fixture,
-                        reason=CONFIDENCE_SKIP_REASON,
+                        reason=skip_reason,
                     )
                 )
         except Exception as exc:
+            logger.exception(
+                "Unexpected World Cup daily prediction failure fixture_id=%s error=%s",
+                fixture.fixture_id,
+                sanitize_text(str(exc)),
+            )
             results.append(
                 WorldCupDailyResult(
                     fixture_id=fixture.fixture_id,
@@ -288,4 +320,34 @@ def _result(
         model_prediction_id=output.model_prediction_id,
         discord_message_id=discord_message_id,
         reason=reason,
+        source_warnings=_source_warnings(output.data_quality_json),
+    )
+
+
+def _worldcup_data_quality_skip_reason(data_quality: JsonDict | None) -> str | None:
+    if not isinstance(data_quality, dict):
+        return None
+    score = data_quality.get("worldcup_fixture_quality_score")
+    try:
+        if score is not None and float(score) < 55.0:
+            return "worldcup_data_quality_low"
+    except (TypeError, ValueError):
+        return None
+    warnings = set(data_quality.get("warnings") or [])
+    if "lineups_expected_missing" in warnings:
+        return "worldcup_lineups_expected_missing"
+    return None
+
+
+def _source_warnings(data_quality: JsonDict | None) -> list[str]:
+    if not isinstance(data_quality, dict):
+        return []
+    warnings = data_quality.get("warnings") or []
+    return sorted(
+        {
+            str(warning)
+            for warning in warnings
+            if str(warning).endswith("_failed")
+            or str(warning).endswith("_failed_close_to_kickoff")
+        }
     )

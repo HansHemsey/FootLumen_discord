@@ -16,11 +16,14 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
+DEFAULT_ALEMBIC_DATABASE_URL = "sqlite:///./data/football_predictor.db"
 
 
 def _database_url() -> str:
     configured_url = config.get_main_option("sqlalchemy.url")
     settings_url = Settings().database_url
+    if not configured_url or configured_url == DEFAULT_ALEMBIC_DATABASE_URL:
+        return settings_url
     return configured_url or settings_url
 
 

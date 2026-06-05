@@ -293,6 +293,17 @@ def run_daily_ou_predictions(
                             "forecast_side": getattr(prediction, "forecast_side", None),
                             "value_side": getattr(prediction, "value_side", None),
                             "publication_decision": publication_decision,
+                            "decision_version": getattr(prediction, "decision_version", None),
+                            "ou_decision_version": getattr(
+                                prediction,
+                                "ou_decision_version",
+                                None,
+                            ),
+                            "ou_publication_policy_version": getattr(
+                                prediction,
+                                "ou_publication_policy_version",
+                                None,
+                            ),
                             "no_bet_reason": getattr(prediction, "no_bet_reason", None),
                             "non_publication_reason": getattr(
                                 prediction, "non_publication_reason", None
@@ -333,6 +344,17 @@ def run_daily_ou_predictions(
                                 "forecast_side": getattr(prediction, "forecast_side", None),
                                 "value_side": getattr(prediction, "value_side", None),
                                 "publication_decision": publication_decision,
+                                "decision_version": getattr(prediction, "decision_version", None),
+                                "ou_decision_version": getattr(
+                                    prediction,
+                                    "ou_decision_version",
+                                    None,
+                                ),
+                                "ou_publication_policy_version": getattr(
+                                    prediction,
+                                    "ou_publication_policy_version",
+                                    None,
+                                ),
                                 "no_bet_reason": getattr(prediction, "no_bet_reason", None),
                                 "non_publication_reason": getattr(
                                     prediction, "non_publication_reason", None
@@ -389,6 +411,17 @@ def run_daily_ou_predictions(
                             "forecast_side": getattr(prediction, "forecast_side", None),
                             "value_side": getattr(prediction, "value_side", None),
                             "publication_decision": publication_decision,
+                            "decision_version": getattr(prediction, "decision_version", None),
+                            "ou_decision_version": getattr(
+                                prediction,
+                                "ou_decision_version",
+                                None,
+                            ),
+                            "ou_publication_policy_version": getattr(
+                                prediction,
+                                "ou_publication_policy_version",
+                                None,
+                            ),
                             "no_bet_reason": getattr(prediction, "no_bet_reason", None),
                             "non_publication_reason": getattr(
                                 prediction, "non_publication_reason", None

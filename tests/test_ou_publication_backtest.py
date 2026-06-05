@@ -7,12 +7,14 @@ import pandas as pd
 from football_predictor.ou_model.backtesting.ou_evaluator import _fold_splits
 from football_predictor.ou_model.backtesting.ou_metrics import expected_calibration_error
 from football_predictor.ou_model.backtesting.ou_publication_backtest import (
+    CONFIDENCE_BUCKETS,
     EDGE_BUCKETS,
     EV_BUCKETS,
     OUPublicationBacktestConfig,
     build_publication_summary,
     calibration_report_frame,
     evaluate_ou_publication_rows,
+    filter_ou_publication_dataset,
     publication_policy_grid_frame,
     recommend_publication_policy,
     roi_by_bucket_frame,
@@ -38,11 +40,14 @@ def test_roi_by_edge_and_ev_bucket() -> None:
 
     by_edge = roi_by_bucket_frame(frame, "edge_bucket", EDGE_BUCKETS)
     by_ev = roi_by_bucket_frame(frame, "ev_bucket", EV_BUCKETS)
+    by_confidence = roi_by_bucket_frame(frame, "confidence_bucket", CONFIDENCE_BUCKETS)
 
     assert set(by_edge["bucket"]) == {"0-2 pts", "2-4 pts", "4-6 pts", "6+ pts"}
     assert set(by_ev["bucket"]) == {"0-2 %", "2-4 %", "4-8 %", "8+ %"}
+    assert set(by_confidence["bucket"]) == {"<55", "55-65", "65-80", "80+"}
     assert by_edge["total_bets"].sum() >= 1
     assert by_ev["profit_units"].notna().all()
+    assert by_confidence["profit_units"].notna().all()
 
 
 def test_policy_grid_produces_expected_combinations_and_excludes_negative_ev() -> None:
@@ -50,12 +55,13 @@ def test_policy_grid_produces_expected_combinations_and_excludes_negative_ev() -
     config = OUPublicationBacktestConfig(min_recommended_bets=1)
     grid = publication_policy_grid_frame(frame, config)
 
-    assert len(grid) == 4 * 3 * 4 * 3
+    assert len(grid) == 4 * 3 * 4 * 3 * 3
     strict = grid[
         (grid["min_edge"] == 0.05)
         & (grid["min_ev"] == 0.05)
         & (grid["min_confidence"] == 70)
         & (grid["min_data_quality"] == 80)
+        & (grid["min_bookmaker_count"] == 3)
     ].iloc[0]
     assert strict["total_bets"] == 2
     assert pd.isna(frame[frame["fixture_id"] == -3].iloc[0]["value_side"])
@@ -85,6 +91,8 @@ def test_missing_market_and_missing_closing_odds_do_not_crash(tmp_path: Path) ->
         calibration,
         grid,
         dataset_path=Path("synthetic.parquet"),
+        filtered_dataset_path=Path("synthetic.parquet"),
+        filters={"start_date": None, "end_date": None, "competition": None},
         n_folds=1,
         aggregate_backtest={},
         config=OUPublicationBacktestConfig(min_recommended_bets=1),
@@ -99,11 +107,134 @@ def test_missing_market_and_missing_closing_odds_do_not_crash(tmp_path: Path) ->
         summary=summary,
         roi_by_edge_bucket=roi_by_bucket_frame(frame, "edge_bucket", EDGE_BUCKETS),
         roi_by_ev_bucket=roi_by_bucket_frame(frame, "ev_bucket", EV_BUCKETS),
+        roi_by_confidence_bucket=roi_by_bucket_frame(
+            frame,
+            "confidence_bucket",
+            CONFIDENCE_BUCKETS,
+        ),
         calibration_bins=calibration,
         publication_policy_grid=grid,
     )
     assert outputs["markdown"].exists()
+    assert outputs["roi_by_confidence_bucket_csv"].exists()
     assert "Recommandation" in outputs["markdown"].read_text(encoding="utf-8")
+
+
+def test_missing_result_is_ignored() -> None:
+    frame = evaluate_ou_publication_rows([
+        {
+            "fixture_id": -20,
+            "target_ou25": None,
+            "p_over": 0.64,
+            "p_under": 0.36,
+            "market_p_over": 0.56,
+            "market_p_under": 0.44,
+            "odd_over": 1.75,
+            "odd_under": 2.10,
+            "data_quality_score": 90,
+            "bookmaker_count": 4,
+        }
+    ])
+
+    assert frame.empty
+
+
+def test_future_odds_after_cutoff_are_ignored() -> None:
+    frame = evaluate_ou_publication_rows([
+        {
+            "fixture_id": -21,
+            "prediction_time": "2026-05-01T12:00:00+00:00",
+            "odds_fetched_at": "2026-05-01T12:05:00+00:00",
+            "target_ou25": 1,
+            "p_over": 0.64,
+            "p_under": 0.36,
+            "market_p_over": 0.56,
+            "market_p_under": 0.44,
+            "odd_over": 1.75,
+            "odd_under": 2.10,
+            "data_quality_score": 90,
+            "bookmaker_count": 4,
+        }
+    ])
+
+    row = frame.iloc[0]
+    assert row["publication_decision"] == "no_bet"
+    assert row["no_bet_reason"] == "market_unavailable"
+    assert pd.isna(row["odd_over"])
+    assert pd.isna(row["market_p_over"])
+
+
+def test_closing_odds_do_not_influence_pick_selection() -> None:
+    frame = evaluate_ou_publication_rows([
+        {
+            "fixture_id": -22,
+            "prediction_time": "2026-05-01T12:00:00+00:00",
+            "target_ou25": 1,
+            "p_over": 0.64,
+            "p_under": 0.36,
+            "market_p_over": None,
+            "market_p_under": None,
+            "odd_over": None,
+            "odd_under": None,
+            "closing_odd_over": 1.75,
+            "closing_odd_under": 2.10,
+            "data_quality_score": 90,
+            "bookmaker_count": 4,
+        }
+    ])
+    grid = publication_policy_grid_frame(frame, OUPublicationBacktestConfig(min_recommended_bets=1))
+
+    assert frame.iloc[0]["publication_decision"] == "no_bet"
+    assert grid["total_bets"].sum() == 0
+
+
+def test_bookmaker_count_missing_fails_minimum_policy() -> None:
+    frame = evaluate_ou_publication_rows([
+        {
+            "fixture_id": -23,
+            "target_ou25": 1,
+            "p_over": 0.64,
+            "p_under": 0.36,
+            "market_p_over": 0.56,
+            "market_p_under": 0.44,
+            "odd_over": 1.75,
+            "odd_under": 2.10,
+            "data_quality_score": 90,
+            "bookmaker_count": None,
+        }
+    ])
+    selected = publication_policy_grid_frame(
+        frame,
+        OUPublicationBacktestConfig(
+            policy_min_edges=(0.02,),
+            policy_min_evs=(0.02,),
+            policy_min_confidences=(55.0,),
+            policy_min_data_qualities=(60.0,),
+            policy_min_bookmaker_counts=(1,),
+            min_recommended_bets=1,
+        ),
+    )
+
+    assert selected.iloc[0]["total_bets"] == 0
+
+
+def test_dataset_filters_by_date_and_competition() -> None:
+    frame = pd.DataFrame([
+        {"fixture_date": "2026-05-01T18:00:00+00:00", "league_id": 39, "target_ou25": 1},
+        {"fixture_date": "2026-05-02T18:00:00+00:00", "league_id": 61, "target_ou25": 0},
+        {"fixture_date": "2026-05-03T18:00:00+00:00", "league_id": 39, "target_ou25": None},
+        {"fixture_date": "2026-05-04T18:00:00+00:00", "league_id": 39, "target_ou25": 1},
+    ])
+
+    filtered = filter_ou_publication_dataset(
+        frame,
+        start_date="2026-05-01",
+        end_date="2026-05-03",
+        competition="39",
+    )
+
+    assert len(filtered) == 1
+    assert filtered.iloc[0]["fixture_date"] == "2026-05-01T18:00:00+00:00"
 
 
 def test_recommendation_selects_positive_roi_policy_with_volume() -> None:

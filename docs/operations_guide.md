@@ -106,9 +106,12 @@ La V3 est activee en production malgre un backtest non valide. Surveiller les pr
 runs reels, la calibration des probabilites et la couverture odds/API/lineups issue du
 refresh live M-30. Pour verifier le rendu Discord V3 sans publier :
 
-Règle de publication publique : V3 1X2 et O/U 2.5 ne publient dans Discord que les
-pronostics `High` ou `Very High`. Les labels `Low`, `Medium`, `Uncertain` et assimilés
-sont persistés en base mais retournent `confidence_skipped`.
+Règle de publication publique : V3 1X2 publie selon ses seuils de confiance dédiés.
+O/U 2.5 utilise une policy séparée : public uniquement avec une décision
+`ou_decision_version="ou_v2"`, un vrai `value_side`, `edge_pick >= 0.03`,
+`ev_pick >= 0.03`, `confidence_score_v2 >= 65`, data quality suffisante et au moins deux
+bookmakers. `bookmaker_count` absent vaut `0`. Les sorties legacy O/U, les forecasts sans
+pick value et les décisions non publiques sont envoyés en staff ou marqués `no_bet`.
 
 Les messages V3 1X2 et O/U 2.5 utilisent un rendu compact oriente parieur : pick,
 probabilites modele/marche, ecart de value, facteurs traduits et qualite data. Ce rendu
@@ -467,6 +470,32 @@ football-predictor worldcup-train-1x2 --dataset data/processed/worldcup_1x2_trai
 football-predictor worldcup-optimize-blend --dataset data/processed/worldcup_1x2_training.parquet --model-dir data/models/worldcup-1x2 --output-dir reports/worldcup_blend --write-best-config
 football-predictor worldcup-run-daily --window late --refresh-data --save-raw --dry-run
 ```
+
+### Enrichissement data CDM point-in-time
+
+Avant d'activer une publication publique CDM plus ambitieuse, initialiser les sources datées
+dans cet ordre. Toutes les commandes sont dry-run sauf si `--write` est présent :
+
+```bash
+alembic upgrade head
+PYTHONPATH=src .venv/bin/python scripts/ingest_national_results.py --write
+PYTHONPATH=src .venv/bin/python scripts/compute_national_elo.py --write
+PYTHONPATH=src .venv/bin/python scripts/ingest_fifa_rankings.py --snapshot-date YYYY-MM-DD --write
+PYTHONPATH=src .venv/bin/python scripts/build_group_incentive_features.py --write
+PYTHONPATH=src .venv/bin/python scripts/build_squad_strength_features.py --write
+PYTHONPATH=src .venv/bin/python scripts/build_worldcup_feature_matrix.py --write
+PYTHONPATH=src .venv/bin/python scripts/worldcup_coverage_report.py --write --league-id 1 --season 2026
+```
+
+Les odds CDM multi-marchés nécessitent une autorisation API explicite :
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/sync_worldcup_odds_snapshots.py --write --refresh-api --markets 1x2,ou25,btts
+```
+
+Ne jamais importer un ranking FIFA/Elo sans date de snapshot. En cas de doute, laisser la
+source manquante : la coverage matrix baissera la qualité plutôt que d'introduire une fuite
+temporelle.
 
 Retour championnats en aout 2026 :
 

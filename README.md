@@ -28,13 +28,16 @@ fichiers `docs/*.json` ou de la base locale initialisée depuis ces fichiers.
 
 ## Installation Et Bootstrap Sprint 1
 
-Le Sprint 1 fournit une base Python installable avec Python 3.11+, `pyproject.toml`,
+Le Sprint 1 fournit une base Python installable avec Python 3.11, `pyproject.toml`,
 un layout `src/`, `typer`, `pydantic-settings`, `pytest`, `ruff` et `mypy`.
+Le détail reproductible pour un clone propre, la CI et le scan anti-secret est documenté
+dans `docs/development.md`.
+Les règles de secrets, sanitization et rotation sont documentées dans `docs/security.md`.
 
 ```bash
 python -m venv .venv
 . .venv/bin/activate
-pip install -e ".[dev]"
+pip install -r requirements-dev.txt
 cp .env.example .env
 ```
 
@@ -77,13 +80,16 @@ make smoke
 make check
 ```
 
-`make check` exécute `ruff check .`, `mypy src` et `pytest`. Les commandes `doctor` et
-`data-quality` ne font aucun appel réseau.
+`make check` exécute la compilation Python, `ruff check .`, `mypy src`, le scan
+anti-secret et `pytest`. Les commandes `doctor` et `data-quality` ne font aucun appel
+réseau.
 
 Le Makefile expose aussi les commandes quotidiennes principales :
 
 ```bash
 make format
+make compile
+make security
 make predict-fixture FIXTURE_ID=<fixture_id>
 make predict-today
 make daily-morning

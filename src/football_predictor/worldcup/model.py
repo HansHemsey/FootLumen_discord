@@ -16,6 +16,7 @@ from sklearn.linear_model import LogisticRegression  # type: ignore[import-untyp
 from sklearn.pipeline import Pipeline  # type: ignore[import-untyped]
 
 from football_predictor.modeling.constants import CLASSES
+from football_predictor.modeling.draw_metrics import evaluate_draw_metrics
 from football_predictor.modeling.evaluation import evaluate_probabilities
 from football_predictor.modeling.preprocessing import (
     is_forbidden_feature,
@@ -362,7 +363,9 @@ def evaluate_worldcup_frame(
         ProbabilityTriple.from_vector(row)
         for row in model.predict_proba(frame, include_dynamic=include_dynamic)
     ]
-    return evaluate_probabilities(y_true, probabilities)
+    metrics = evaluate_probabilities(y_true, probabilities)
+    metrics.update(evaluate_draw_metrics(y_true, probabilities))
+    return metrics
 
 
 def evaluate_worldcup_baselines(frame: pd.DataFrame) -> JsonDict:
@@ -560,6 +563,7 @@ def _evaluate_available(
     targets = [target for target, _probability in pairs]
     available = [probability for _target, probability in pairs]
     metrics = evaluate_probabilities(targets, available)
+    metrics.update(evaluate_draw_metrics(targets, available))
     metrics["coverage"] = len(pairs) / len(y_true) if y_true else 0.0
     return metrics
 

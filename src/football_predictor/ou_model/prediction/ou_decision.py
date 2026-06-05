@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from football_predictor.ou_model.prediction.ou_publication_policy import (
+    OU_PUBLICATION_POLICY_VERSION,
+    REQUIRED_OU_DECISION_VERSION,
     evaluate_ou_publication,
 )
 
@@ -19,6 +21,7 @@ OUNoBetReason = Literal[
 ]
 
 DECISION_VERSION = "ou_decision_v2"
+OU_DECISION_VERSION = REQUIRED_OU_DECISION_VERSION
 MIN_VALUE_EDGE = 0.03
 MIN_VALUE_EV = 0.03
 
@@ -38,6 +41,8 @@ class OUValueCandidate:
 @dataclass(frozen=True)
 class OUDecision:
     decision_version: str
+    ou_decision_version: str
+    ou_publication_policy_version: str
     forecast_side: OUSide
     forecast_probability: float
     value_side: OUSide | None
@@ -67,6 +72,8 @@ class OUDecision:
     def as_payload(self) -> JsonDict:
         return {
             "decision_version": self.decision_version,
+            "ou_decision_version": self.ou_decision_version,
+            "ou_publication_policy_version": self.ou_publication_policy_version,
             "forecast_side": self.forecast_side,
             "forecast_probability": self.forecast_probability,
             "value_side": self.value_side,
@@ -188,9 +195,12 @@ def decide_ou_prediction(
         confidence_score_v2=confidence,
         data_quality_score=data_quality_score,
         bookmaker_count=bookmaker_count,
+        ou_decision_version=OU_DECISION_VERSION,
     )
     return OUDecision(
         decision_version=DECISION_VERSION,
+        ou_decision_version=OU_DECISION_VERSION,
+        ou_publication_policy_version=OU_PUBLICATION_POLICY_VERSION,
         forecast_side=forecast_side,
         forecast_probability=forecast_probability,
         value_side=value.side,
@@ -274,6 +284,8 @@ def _no_bet_decision(
 ) -> OUDecision:
     return OUDecision(
         decision_version=DECISION_VERSION,
+        ou_decision_version=OU_DECISION_VERSION,
+        ou_publication_policy_version=OU_PUBLICATION_POLICY_VERSION,
         forecast_side=forecast_side,
         forecast_probability=forecast_probability,
         value_side=None,
@@ -294,7 +306,7 @@ def _no_bet_decision(
         confidence_label_v2="Uncertain",
         publication_decision="no_bet",
         data_quality_score=None,
-        bookmaker_count=None,
+        bookmaker_count=0.0,
         edge_over=edge_over,
         edge_under=edge_under,
         ev_over=ev_over,
@@ -315,7 +327,7 @@ def _data_quality_score(payload: JsonDict | None) -> float:
     )
 
 
-def _bookmaker_count(payload: JsonDict | None) -> float | None:
+def _bookmaker_count(payload: JsonDict | None) -> float:
     return _number_from_payload(
         payload,
         (
@@ -324,8 +336,8 @@ def _bookmaker_count(payload: JsonDict | None) -> float | None:
             "market_bookmaker_count",
             "bookmaker_count",
         ),
-        default=None,
-    )
+        default=0.0,
+    ) or 0.0
 
 
 def _number_from_payload(

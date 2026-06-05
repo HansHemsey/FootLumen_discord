@@ -19,6 +19,11 @@ MESSAGE_TYPE_CHANNELS = {
     "prediction": "predictions",
     "prediction_skipped": "predictions_staff",
     "ou_prediction_skipped": "predictions_staff",
+    "worldcup_combo_public": "combines",
+    "worldcup_combo_locked": "predictions_staff",
+    "worldcup_combo_staff": "predictions_staff",
+    "worldcup_combo_watchlist": "predictions_staff",
+    "worldcup_combo_no_bet": "predictions_staff",
     "result": "resultats",
     "results": "resultats",
     "weekly_prediction_score": "score_pronos_semaine",
@@ -95,6 +100,10 @@ class DiscordChannelRouter:
         channel_name = None
         webhook_name = None
         competition = None
+        if self.channels_config is None and resolved_channel in GLOBAL_CHANNEL_KEYS:
+            competition_key = None
+            league_id = None
+            season = None
         if self.channels_config is not None:
             channel = self.channels_config.find_global_channel(resolved_channel)
             if channel is not None or resolved_channel in GLOBAL_CHANNEL_KEYS:

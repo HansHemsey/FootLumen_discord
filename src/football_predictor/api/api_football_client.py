@@ -18,6 +18,7 @@ from football_predictor.api.exceptions import (
 )
 from football_predictor.api.rate_limit import RetryPolicy
 from football_predictor.api.raw_snapshots import RawApiSnapshotWriter
+from football_predictor.security.sanitize import sanitize_text
 from football_predictor.utils.logging import get_logger, sanitize_mapping
 from football_predictor.utils.time import utc_now
 
@@ -181,7 +182,7 @@ class ApiFootballClient:
                     )
                     continue
                 raise ApiFootballError(
-                    f"API-Football request failed endpoint={endpoint}: {exc}"
+                    f"API-Football request failed endpoint={endpoint}: {sanitize_text(str(exc))}"
                 ) from exc
 
             self.logger.info(
@@ -195,7 +196,7 @@ class ApiFootballClient:
             return response
 
         raise ApiFootballError(
-            f"API-Football request failed endpoint={endpoint}: {last_error}"
+            f"API-Football request failed endpoint={endpoint}: {sanitize_text(str(last_error))}"
         )
 
     def _handle_response(
@@ -291,7 +292,8 @@ class ApiFootballClient:
             total = int(total_raw)
         except (TypeError, ValueError) as exc:
             raise ApiFootballPaginationError(
-                f"Invalid paging metadata current={current_raw} total={total_raw}"
+                "Invalid paging metadata "
+                f"current={sanitize_text(str(current_raw))} total={sanitize_text(str(total_raw))}"
             ) from exc
         if current < 1 or total < current:
             raise ApiFootballPaginationError(

@@ -46,6 +46,19 @@ def test_v3_formatter_hides_v2_section_when_missing() -> None:
     assert "CONFIRMATION V2" not in message
 
 
+def test_v3_formatter_shows_public_draw_safety_note_without_technical_warning() -> None:
+    prediction = _prediction()
+    prediction.draw_safety_json = {
+        "public_note": "Risque de nul élevé : confiance plafonnée.",
+        "warnings": ["draw_probability_underestimated"],
+    }
+
+    message = format_prediction_v3_markdown(prediction)
+
+    assert "Risque de nul élevé : confiance plafonnée." in message
+    assert "draw_probability_underestimated" not in message
+
+
 def test_v3_formatter_truncates_and_masks_secrets() -> None:
     webhook = "https://discord.com/api/webhooks/123456/synthetic-secret"
     prediction = _prediction(

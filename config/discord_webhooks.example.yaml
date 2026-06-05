@@ -11,6 +11,9 @@ webhooks:
     predictions:
       webhook_url: "REPLACE_WITH_WEBHOOK_URL"
       enabled: true
+    combines:
+      webhook_url: "REPLACE_WITH_WEBHOOK_URL"
+      enabled: false
     analyses:
       webhook_url: "REPLACE_WITH_WEBHOOK_URL"
       enabled: true
@@ -23,5 +26,8 @@ webhooks:
       enabled: true
   cdm_2026:
     calendrier:
+      webhook_url: "REPLACE_WITH_WEBHOOK_URL"
+      enabled: true
+    predictions:
       webhook_url: "REPLACE_WITH_WEBHOOK_URL"
       enabled: true

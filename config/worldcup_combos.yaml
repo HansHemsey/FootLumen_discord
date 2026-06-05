@@ -1,0 +1,31 @@
+# World Cup 2026 combo tickets.
+# Production mode: enabled, but shadow mode keeps every Discord publication staff-only.
+enabled: true
+competition_key: fifa_world_cup_2026
+league_id: 1
+season: 2026
+timezone_display: Europe/Paris
+
+max_public_legs: 2
+max_staff_legs: 3
+lock_buffer_minutes: 20
+max_session_span_hours_public: 4
+
+min_leg_ev: 0.03
+min_leg_edge: 0.03
+min_leg_data_quality: 65
+min_leg_confidence: 55
+min_combined_ev_adjusted: 0.03
+min_combined_confidence_public: 68
+max_post_lock_risk_public: 30
+
+require_positive_ev_each_leg: true
+forbid_same_group_md3_multiple_legs: true
+allow_public_matchday3: false
+allow_public_knockout: false
+staff_only_shadow_mode: true
+staff_channel_key: predictions_staff
+public_channel_key: combines
+mirror_public_to_staff: true
+publish_no_bet_public: false
+snapshot_duplicate_throttle_minutes: 30

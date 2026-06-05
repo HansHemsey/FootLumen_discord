@@ -66,6 +66,7 @@ Il garde uniquement :
 - squads/effectifs CDM deux fois par semaine ;
 - backfill post-match CDM ;
 - predictions CDM M-30 ;
+- combinés CDM actifs, publiés uniquement en staff ;
 - resultats CDM ;
 - score hebdo.
 
@@ -118,6 +119,7 @@ git pull --ff-only origin main
 
 football-predictor doctor --strict
 football-predictor worldcup-audit-reference
+alembic upgrade head
 ```
 
 Verifier ou generer le modele CDM :
@@ -140,6 +142,34 @@ football-predictor worldcup-run-daily \
   --dry-run
 ```
 
+Smoke test combinés CDM, sans publication Discord :
+
+```bash
+football-predictor worldcup-combos-run --dry-run
+football-predictor worldcup-combos-publish --dry-run
+PYTHONPATH=src .venv/bin/python scripts/lock_worldcup_combos.py --config config/worldcup_combos.yaml
+PYTHONPATH=src .venv/bin/python scripts/settle_worldcup_combos.py --config config/worldcup_combos.yaml
+PYTHONPATH=src .venv/bin/python scripts/maintenance_worldcup_combo_snapshots.py --config config/worldcup_combos.yaml
+```
+
+Configuration combinés CDM en production staff-only :
+
+```yaml
+enabled: true
+staff_only_shadow_mode: true
+staff_channel_key: predictions_staff
+public_channel_key: combines
+mirror_public_to_staff: true
+publish_no_bet_public: false
+snapshot_duplicate_throttle_minutes: 30
+allow_public_matchday3: false
+allow_public_knockout: false
+```
+
+Avec `staff_only_shadow_mode: true`, les combinés restent publiés uniquement dans
+`predictions_staff`. Le channel public `combines` peut être préparé à l'avance, mais il
+ne reçoit rien tant que le shadow mode n'est pas désactivé.
+
 Installer le crontab CDM only :
 
 ```bash
@@ -152,6 +182,10 @@ Surveiller les premiers logs :
 ```bash
 tail -n 100 logs/cron/worldcup_daily_morning.log
 tail -n 100 logs/cron/worldcup_late.log
+tail -n 100 logs/cron/worldcup_combos_run.log
+tail -n 100 logs/cron/worldcup_combos_lock.log
+tail -n 100 logs/cron/worldcup_combos_publish.log
+tail -n 100 logs/cron/worldcup_combos_settle.log
 tail -n 100 logs/cron/worldcup_details.log
 tail -n 100 logs/cron/worldcup_weekly_score.log
 ```

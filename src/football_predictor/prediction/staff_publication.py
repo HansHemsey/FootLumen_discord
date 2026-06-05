@@ -58,7 +58,7 @@ def send_skipped_prediction_to_staff(
     }
     try:
         return delivery.send_markdown(
-            _staff_markdown(markdown, reason=reason),
+            _staff_markdown(markdown, reason=reason, metadata=metadata),
             competition_key=None,
             league_id=None,
             season=None,
@@ -81,10 +81,30 @@ def send_skipped_prediction_to_staff(
         return None
 
 
-def _staff_markdown(markdown: str, *, reason: str) -> str:
+def _staff_markdown(
+    markdown: str,
+    *,
+    reason: str,
+    metadata: dict[str, Any] | None = None,
+) -> str:
+    draw_safety = (metadata or {}).get("draw_safety")
     header = (
         "**INTERNE STAFF - NON PUBLIE PUBLIC**\n"
         f"Raison: `{reason}`\n\n"
     )
+    if isinstance(draw_safety, dict) and draw_safety.get("warnings"):
+        signals = draw_safety.get("signals") if isinstance(draw_safety.get("signals"), dict) else {}
+        draw_risk = signals.get("draw_risk_probability") or signals.get(
+            "source_draw_probability"
+        )
+        header = (
+            "**INTERNE STAFF - NON PUBLIE PUBLIC**\n"
+            f"Raison: `{reason}`\n"
+            "Draw safety: "
+            f"severity=`{draw_safety.get('severity')}` "
+            f"warnings=`{','.join(str(item) for item in draw_safety.get('warnings', []))}` "
+            f"p_draw=`{signals.get('p_draw')}` "
+            f"draw_risk=`{draw_risk}`\n\n"
+        )
     remaining = max(100, DISCORD_LIMIT - len(header))
     return header + truncate_discord_message(markdown, max_chars=remaining)

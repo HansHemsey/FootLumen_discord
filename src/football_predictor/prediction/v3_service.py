@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from football_predictor.api.exceptions import ApiFootballClientError, ApiFootballRateLimitError
+from football_predictor.config.settings import Settings
 from football_predictor.db import models
 from football_predictor.db.repositories import upsert_by_fields
 from football_predictor.features.data_quality import DataQuality
@@ -29,6 +30,11 @@ from football_predictor.modeling.v3.fusion import (
     v2_probability_from_row,
 )
 from football_predictor.prediction.confidence import confidence_label, confidence_score
+from football_predictor.prediction.draw_safety import (
+    DrawSafetyConfig,
+    DrawSafetySignals,
+    evaluate_draw_safety,
+)
 from football_predictor.reference.lookups import ApiFootballReference, PlayersReference
 from football_predictor.reference.schemas import FixtureRef
 from football_predictor.utils.exceptions import PredictionError, ReferenceLookupError
@@ -88,6 +94,7 @@ class PredictionV3Output:
     data_quality: DataQuality = field(default_factory=DataQuality)
     data_quality_json: JsonDict = field(default_factory=dict)
     key_absences_json: JsonDict = field(default_factory=dict)
+    draw_safety_json: JsonDict = field(default_factory=dict)
     refresh_summary: JsonDict = field(default_factory=dict)
     feature_snapshot_id: int | None = None
     v3_feature_snapshot_id: int | None = None
@@ -122,6 +129,7 @@ class PredictionV3Output:
             "explanations": self.explanations,
             "data_quality": self.data_quality_json or self.data_quality.as_dict(),
             "key_absences_json": self.key_absences_json,
+            "draw_safety": self.draw_safety_json,
             "refresh_summary": self.refresh_summary,
             "feature_snapshot_id": self.feature_snapshot_id,
             "v3_feature_snapshot_id": self.v3_feature_snapshot_id,
@@ -140,12 +148,14 @@ class PredictionV3Service:
         players_reference: PlayersReference | None = None,
         market_1x2_bet_name: str = "Match Winner",
         market_1x2_bet_id: int | None = None,
+        draw_safety_config: DrawSafetyConfig | None = None,
     ) -> None:
         self.reference = reference
         self.players_reference = players_reference
         self.session = session
         self.market_1x2_bet_name = market_1x2_bet_name
         self.market_1x2_bet_id = market_1x2_bet_id
+        self.draw_safety_config = draw_safety_config or DrawSafetyConfig.from_settings(Settings())
 
     def predict_fixture_v3(
         self,
@@ -189,8 +199,28 @@ class PredictionV3Service:
         component_probabilities = self._component_probabilities(component_row)
         data_quality = _data_quality_from_payload(feature_result.data_quality_json)
         score = confidence_score(final_probability, data_quality)
+        raw_confidence_label = confidence_label(final_probability)
+        draw_safety = evaluate_draw_safety(
+            DrawSafetySignals(
+                model_family="v3",
+                p_home=final_probability.p_home,
+                p_draw=final_probability.p_draw,
+                p_away=final_probability.p_away,
+                confidence_label=raw_confidence_label,
+                confidence_score=score,
+                draw_risk_probability=_optional_float(component_row.get("p_v3_draw_risk")),
+                market_draw_probability=_probability_value(
+                    component_probabilities["market"],
+                    "DRAW",
+                ),
+            ),
+            config=self.draw_safety_config,
+        )
         top_draw = _top_factors(feature_result.features_json, "draw_risk")
         top_no_draw = _top_factors(feature_result.features_json, "ndw")
+        explanations = _explanation_lines(top_draw, top_no_draw)
+        if draw_safety.public_note:
+            explanations.append(draw_safety.public_note)
         output = PredictionV3Output(
             fixture_id=fixture.fixture_id,
             match_label=f"{fixture.home_team} vs {fixture.away_team}",
@@ -199,8 +229,12 @@ class PredictionV3Service:
             prediction_time=cutoff,
             probabilities=final_probability,
             predicted_result=final_probability.predicted_result(),
-            confidence_label=confidence_label(final_probability),
-            confidence_score=score,
+            confidence_label=draw_safety.effective_confidence_label,
+            confidence_score=(
+                draw_safety.effective_confidence_score
+                if draw_safety.effective_confidence_score is not None
+                else score
+            ),
             model_version=str(getattr(model, "model_version", "v3.0-final")),
             fusion_strategy=_fusion_strategy(model),
             draw_risk_probability=_optional_float(component_row.get("p_v3_draw_risk")),
@@ -215,10 +249,11 @@ class PredictionV3Service:
             ),
             top_factors_draw_risk=top_draw,
             top_factors_no_draw_winner=top_no_draw,
-            explanations=_explanation_lines(top_draw, top_no_draw),
+            explanations=explanations,
             data_quality=data_quality,
             data_quality_json=feature_result.data_quality_json,
             key_absences_json=_key_absences_payload(feature_result.features_json),
+            draw_safety_json=draw_safety.as_dict(),
             refresh_summary=refresh_summary,
             feature_snapshot_id=feature_result.snapshot.id,
             v3_feature_snapshot_id=v3_feature_snapshot.id,
@@ -514,6 +549,7 @@ class PredictionV3Service:
                 "top_factors_draw_risk": output.top_factors_draw_risk,
                 "top_factors_no_draw_winner": output.top_factors_no_draw_winner,
                 "summary": output.explanations,
+                "draw_safety": output.draw_safety_json,
             },
             data_quality_json=output.data_quality_json,
             payload_json={
@@ -526,6 +562,7 @@ class PredictionV3Service:
                 "component_versions": component_versions,
                 "refresh_summary": output.refresh_summary,
                 "key_absences_json": output.key_absences_json,
+                "draw_safety": output.draw_safety_json,
             },
         )
         session.add(record)
@@ -726,6 +763,7 @@ def _output_with_prediction_id(
         data_quality=output.data_quality,
         data_quality_json=output.data_quality_json,
         key_absences_json=output.key_absences_json,
+        draw_safety_json=output.draw_safety_json,
         refresh_summary=output.refresh_summary,
         feature_snapshot_id=output.feature_snapshot_id,
         v3_feature_snapshot_id=output.v3_feature_snapshot_id,

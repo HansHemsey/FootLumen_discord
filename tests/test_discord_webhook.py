@@ -98,3 +98,23 @@ def test_webhook_payload_does_not_include_bot_token() -> None:
 
     assert captured["authorization"] == ""
     assert "Bot " not in captured["body"]
+
+
+def test_webhook_client_blocks_secret_payload_before_post() -> None:
+    calls = 0
+    webhook = "https://discord.com/api/" + "webhooks/123456789012345678/" + ("a" * 48)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(204)
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler)) as client,
+        pytest.raises(DiscordWebhookError),
+    ):
+        DiscordWebhookClient("https://example.invalid/webhook", client=client).send_payload(
+            {"content": "secret " + webhook}
+        )
+
+    assert calls == 0

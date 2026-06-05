@@ -18,6 +18,7 @@ def write_ou_v2_backtest_reports(
     summary: JsonDict,
     roi_by_edge_bucket: pd.DataFrame,
     roi_by_ev_bucket: pd.DataFrame,
+    roi_by_confidence_bucket: pd.DataFrame,
     calibration_bins: pd.DataFrame,
     publication_policy_grid: pd.DataFrame,
 ) -> dict[str, Path]:
@@ -28,6 +29,7 @@ def write_ou_v2_backtest_reports(
         "summary_json": output_dir / "backtest_summary.json",
         "roi_by_edge_bucket_csv": output_dir / "roi_by_edge_bucket.csv",
         "roi_by_ev_bucket_csv": output_dir / "roi_by_ev_bucket.csv",
+        "roi_by_confidence_bucket_csv": output_dir / "roi_by_confidence_bucket.csv",
         "calibration_bins_csv": output_dir / "calibration_bins.csv",
         "publication_policy_grid_csv": output_dir / "publication_policy_grid.csv",
         "markdown": output_dir / "backtest_report.md",
@@ -38,6 +40,7 @@ def write_ou_v2_backtest_reports(
     )
     roi_by_edge_bucket.to_csv(paths["roi_by_edge_bucket_csv"], index=False)
     roi_by_ev_bucket.to_csv(paths["roi_by_ev_bucket_csv"], index=False)
+    roi_by_confidence_bucket.to_csv(paths["roi_by_confidence_bucket_csv"], index=False)
     calibration_bins.to_csv(paths["calibration_bins_csv"], index=False)
     publication_policy_grid.to_csv(paths["publication_policy_grid_csv"], index=False)
     paths["markdown"].write_text(_render_markdown(summary), encoding="utf-8")
@@ -114,6 +117,7 @@ def _render_markdown(summary: JsonDict) -> str:
         "- `backtest_summary.json`",
         "- `roi_by_edge_bucket.csv`",
         "- `roi_by_ev_bucket.csv`",
+        "- `roi_by_confidence_bucket.csv`",
         "- `calibration_bins.csv`",
         "- `publication_policy_grid.csv`",
     ]

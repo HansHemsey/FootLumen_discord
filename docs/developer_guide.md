@@ -20,6 +20,7 @@ regeneration.
 Le projet suit un layout `src/football_predictor/` :
 
 - `api/` : client API-Football, erreurs, pagination et snapshots bruts.
+- `commands/` : modules de commandes Typer enregistres par la facade `cli.py`.
 - `config/` : settings, chemins et competitions suivies.
 - `db/` : modeles SQLAlchemy, sessions, init DB et repositories.
 - `reference/` : loaders/lookups locaux pour `docs/*.json`, sans appel API.

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import JSON as SAJSON
 from sqlalchemy import (
     Boolean,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -48,6 +49,222 @@ class RawApiSnapshot(Base, TimestampMixin):
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
     source: Mapped[str] = mapped_column(String(64), default="api-football")
+
+
+class ApiCoverageObservation(Base, TimestampMixin):
+    __tablename__ = "api_coverage_observations"
+    __table_args__ = (
+        Index(
+            "ix_api_coverage_competition_endpoint",
+            "competition_key",
+            "endpoint",
+            "requested_at",
+        ),
+        Index(
+            "ix_api_coverage_fixture_endpoint",
+            "fixture_id",
+            "endpoint",
+            "requested_at",
+        ),
+        Index(
+            "ix_api_coverage_league_season_endpoint",
+            "league_id",
+            "season",
+            "endpoint",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    competition_key: Mapped[str] = mapped_column(String(80), index=True)
+    league_id: Mapped[int] = mapped_column(Integer, index=True)
+    season: Mapped[int] = mapped_column(Integer, index=True)
+    endpoint: Mapped[str] = mapped_column(String(128), index=True)
+    fixture_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    team_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    result_count: Mapped[int] = mapped_column(Integer, default=0)
+    useful_payload_flag: Mapped[bool] = mapped_column(Boolean, default=False)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    warning: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class NationalTeamAlias(Base, TimestampMixin):
+    __tablename__ = "national_team_aliases"
+    __table_args__ = (
+        UniqueConstraint("normalized_alias", "source", name="uq_national_team_alias_source"),
+        Index("ix_national_team_alias_canonical", "canonical_name"),
+        Index("ix_national_team_alias_api_team", "api_team_id"),
+        Index("ix_national_team_alias_elo_code", "elo_code"),
+        Index("ix_national_team_alias_fifa_code", "fifa_code"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    canonical_name: Mapped[str] = mapped_column(String(180), index=True)
+    normalized_alias: Mapped[str] = mapped_column(String(180), index=True)
+    source: Mapped[str] = mapped_column(String(80), default="manual", index=True)
+    api_team_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    elo_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    fifa_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    valid_from: Mapped[date | None] = mapped_column(Date, nullable=True)
+    valid_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    payload_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+
+
+class NationalTeamMatch(Base, TimestampMixin):
+    __tablename__ = "national_team_matches"
+    __table_args__ = (
+        UniqueConstraint("source", "source_match_id", name="uq_national_team_match_source"),
+        Index("ix_national_team_matches_date", "match_date"),
+        Index("ix_national_team_matches_home_date", "home_team_canonical", "match_date"),
+        Index("ix_national_team_matches_away_date", "away_team_canonical", "match_date"),
+        Index("ix_national_team_matches_teams_date", "home_team_id", "away_team_id", "match_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    match_date: Mapped[date] = mapped_column(Date, index=True)
+    home_team_canonical: Mapped[str] = mapped_column(String(180), index=True)
+    away_team_canonical: Mapped[str] = mapped_column(String(180), index=True)
+    home_team_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    away_team_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    home_score: Mapped[int] = mapped_column(Integer)
+    away_score: Mapped[int] = mapped_column(Integer)
+    tournament: Mapped[str | None] = mapped_column(String(180), nullable=True, index=True)
+    competition_type: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    neutral: Mapped[bool] = mapped_column(Boolean, default=True)
+    city: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    country: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    source: Mapped[str] = mapped_column(String(80), default="csv", index=True)
+    source_match_id: Mapped[str] = mapped_column(String(240), index=True)
+    payload_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+
+
+class NationalEloSnapshot(Base, TimestampMixin):
+    __tablename__ = "national_elo_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "canonical_team",
+            "snapshot_date",
+            "source",
+            name="uq_national_elo_snapshot",
+        ),
+        Index("ix_national_elo_team_date", "canonical_team", "snapshot_date"),
+        Index("ix_national_elo_code_date", "elo_code", "snapshot_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    canonical_team: Mapped[str] = mapped_column(String(180), index=True)
+    elo_code: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    snapshot_date: Mapped[date] = mapped_column(Date, index=True)
+    rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    elo: Mapped[float] = mapped_column(Float)
+    source: Mapped[str] = mapped_column(String(80), default="computed", index=True)
+    payload_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+
+
+class FifaRankingSnapshot(Base, TimestampMixin):
+    __tablename__ = "fifa_ranking_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "canonical_team",
+            "snapshot_date",
+            "source",
+            name="uq_fifa_ranking_snapshot",
+        ),
+        Index("ix_fifa_ranking_team_date", "canonical_team", "snapshot_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    canonical_team: Mapped[str] = mapped_column(String(180), index=True)
+    snapshot_date: Mapped[date] = mapped_column(Date, index=True)
+    rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    points: Mapped[float | None] = mapped_column(Float, nullable=True)
+    previous_points: Mapped[float | None] = mapped_column(Float, nullable=True)
+    delta: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source: Mapped[str] = mapped_column(String(80), default="fifa_csv", index=True)
+    payload_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+
+
+class WorldCupGroupStateSnapshot(Base, TimestampMixin):
+    __tablename__ = "worldcup_group_state_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "competition_key",
+            "league_id",
+            "season",
+            "group_name",
+            "team_id",
+            "snapshot_at",
+            name="uq_worldcup_group_state_snapshot",
+        ),
+        Index("ix_worldcup_group_state_team_time", "team_id", "snapshot_at"),
+        Index(
+            "ix_worldcup_group_state_competition_time",
+            "competition_key",
+            "league_id",
+            "season",
+            "snapshot_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    competition_key: Mapped[str] = mapped_column(String(80), index=True)
+    league_id: Mapped[int] = mapped_column(Integer, index=True)
+    season: Mapped[int] = mapped_column(Integer, index=True)
+    group_name: Mapped[str] = mapped_column(String(80), index=True)
+    team_id: Mapped[int] = mapped_column(Integer, index=True)
+    canonical_team: Mapped[str] = mapped_column(String(180), index=True)
+    snapshot_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    matchday: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    played: Mapped[int] = mapped_column(Integer, default=0)
+    points: Mapped[int] = mapped_column(Integer, default=0)
+    goals_for: Mapped[int] = mapped_column(Integer, default=0)
+    goals_against: Mapped[int] = mapped_column(Integer, default=0)
+    goal_diff: Mapped[int] = mapped_column(Integer, default=0)
+    remaining_fixtures_json: Mapped[JsonValue] = mapped_column(SAJSON, default=list)
+    incentives_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+    qualification_risk_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+    payload_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+
+
+class SquadStrengthFeature(Base, TimestampMixin):
+    __tablename__ = "squad_strength_features"
+    __table_args__ = (
+        UniqueConstraint(
+            "competition_key",
+            "league_id",
+            "season",
+            "team_id",
+            "snapshot_at",
+            name="uq_squad_strength_snapshot",
+        ),
+        Index("ix_squad_strength_team_time", "team_id", "snapshot_at"),
+        Index(
+            "ix_squad_strength_competition_time",
+            "competition_key",
+            "league_id",
+            "season",
+            "snapshot_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    competition_key: Mapped[str] = mapped_column(String(80), index=True)
+    league_id: Mapped[int] = mapped_column(Integer, index=True)
+    season: Mapped[int] = mapped_column(Integer, index=True)
+    team_id: Mapped[int] = mapped_column(Integer, index=True)
+    canonical_team: Mapped[str] = mapped_column(String(180), index=True)
+    snapshot_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    squad_status: Mapped[str] = mapped_column(String(40), default="unknown", index=True)
+    player_count: Mapped[int] = mapped_column(Integer, default=0)
+    strength_score: Mapped[float] = mapped_column(Float, default=0.0)
+    club_level_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    minutes_weighted_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    availability_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    key_players_json: Mapped[JsonValue] = mapped_column(SAJSON, default=list)
+    warnings_json: Mapped[JsonValue] = mapped_column(SAJSON, default=list)
+    payload_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
 
 
 class League(Base, TimestampMixin):
@@ -561,8 +778,120 @@ class V3ModelPrediction(Base, TimestampMixin):
     payload_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
 
 
+class ComboTicket(Base, TimestampMixin):
+    __tablename__ = "combo_tickets"
+    __table_args__ = (
+        UniqueConstraint("ticket_key", name="uq_combo_ticket_key"),
+        Index("ix_combo_ticket_date_status", "combo_date", "status"),
+        Index("ix_combo_tickets_status_combo_date", "status", "combo_date"),
+        Index("ix_combo_tickets_ticket_key", "ticket_key"),
+        Index("ix_combo_ticket_session", "session_key"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ticket_key: Mapped[str] = mapped_column(String(300))
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    competition_key: Mapped[str] = mapped_column(String(80), index=True)
+    league_id: Mapped[int] = mapped_column(Integer, index=True)
+    season: Mapped[int] = mapped_column(Integer, index=True)
+    combo_date: Mapped[date] = mapped_column(Date, index=True)
+    session_key: Mapped[str] = mapped_column(String(240), index=True)
+    first_kickoff_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    last_kickoff_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    lock_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    legs_count: Mapped[int] = mapped_column(Integer)
+    combined_decimal_odds: Mapped[float] = mapped_column(Float)
+    combined_probability_raw: Mapped[float] = mapped_column(Float)
+    combined_probability_adjusted: Mapped[float] = mapped_column(Float)
+    combined_fair_odds: Mapped[float] = mapped_column(Float)
+    combined_ev_raw: Mapped[float] = mapped_column(Float)
+    combined_ev_adjusted: Mapped[float] = mapped_column(Float)
+    combined_confidence_score: Mapped[float] = mapped_column(Float)
+    combined_confidence_label: Mapped[str] = mapped_column(String(32))
+    post_lock_risk_score: Mapped[float] = mapped_column(Float)
+    freshness_score: Mapped[float] = mapped_column(Float)
+    lineup_risk_score: Mapped[float] = mapped_column(Float)
+    publication_decision: Mapped[str] = mapped_column(String(32), index=True)
+    no_publish_reason: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    model_versions_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+    warnings_json: Mapped[JsonValue] = mapped_column(SAJSON, default=list)
+    payload_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+
+
+class ComboTicketLeg(Base, TimestampMixin):
+    __tablename__ = "combo_ticket_legs"
+    __table_args__ = (
+        UniqueConstraint("ticket_id", "leg_order", name="uq_combo_ticket_leg_order"),
+        Index("ix_combo_ticket_leg_ticket", "ticket_id"),
+        Index("ix_combo_ticket_legs_combo_ticket_id", "ticket_id"),
+        Index("ix_combo_ticket_leg_fixture", "fixture_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ticket_id: Mapped[int] = mapped_column(ForeignKey("combo_tickets.id"), index=True)
+    fixture_id: Mapped[int] = mapped_column(ForeignKey("fixtures.fixture_id"), index=True)
+    leg_order: Mapped[int] = mapped_column(Integer)
+    kickoff_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    market_type: Mapped[str] = mapped_column(String(32), index=True)
+    market_scope: Mapped[str] = mapped_column(String(32), index=True)
+    selection: Mapped[str] = mapped_column(String(120))
+    decimal_odd: Mapped[float] = mapped_column(Float)
+    model_probability: Mapped[float] = mapped_column(Float)
+    market_probability: Mapped[float] = mapped_column(Float)
+    edge: Mapped[float] = mapped_column(Float)
+    ev: Mapped[float] = mapped_column(Float)
+    confidence_score: Mapped[float] = mapped_column(Float)
+    confidence_label: Mapped[str] = mapped_column(String(32))
+    data_quality_score: Mapped[float] = mapped_column(Float)
+    odds_snapshot_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    prediction_snapshot_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    lineup_status: Mapped[str] = mapped_column(String(32))
+    odds_last_update: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    prediction_generated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    model_versions_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+    warnings_json: Mapped[JsonValue] = mapped_column(SAJSON, default=list)
+    payload_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+
+
+class ComboTicketSnapshot(Base, TimestampMixin):
+    __tablename__ = "combo_ticket_snapshots"
+    __table_args__ = (
+        Index("ix_combo_ticket_snapshot_ticket", "ticket_id"),
+        Index("ix_combo_ticket_snapshot_key", "ticket_key"),
+        Index(
+            "ix_combo_ticket_snapshots_ticket_status_time",
+            "ticket_id",
+            "status",
+            "captured_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ticket_id: Mapped[int | None] = mapped_column(
+        ForeignKey("combo_tickets.id"),
+        nullable=True,
+        index=True,
+    )
+    ticket_key: Mapped[str] = mapped_column(String(300), index=True)
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    snapshot_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+    model_versions_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+    warnings_json: Mapped[JsonValue] = mapped_column(SAJSON, default=list)
+
+
 class DiscordMessage(Base, TimestampMixin):
     __tablename__ = "discord_messages"
+    __table_args__ = (
+        Index("ix_discord_messages_idempotency_key", "idempotency_key"),
+        Index("ix_discord_messages_type_created", "message_type", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     fixture_id: Mapped[int | None] = mapped_column(
@@ -585,6 +914,7 @@ class DiscordMessage(Base, TimestampMixin):
     webhook_url_hash: Mapped[str | None] = mapped_column(String(16), nullable=True)
     message_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     webhook_hash: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     message_markdown: Mapped[str] = mapped_column(Text)
     route_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
     payload_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)

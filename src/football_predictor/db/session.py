@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Generator
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -13,8 +13,27 @@ from football_predictor.db.models import Base
 
 
 def create_db_engine(database_url: str, echo: bool = False) -> Engine:
-    connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
-    return create_engine(database_url, echo=echo, future=True, connect_args=connect_args)
+    connect_args = (
+        {"check_same_thread": False, "timeout": 30.0}
+        if database_url.startswith("sqlite")
+        else {}
+    )
+    engine = create_engine(database_url, echo=echo, future=True, connect_args=connect_args)
+    if database_url.startswith("sqlite"):
+        _configure_sqlite_pragmas(engine, database_url)
+    return engine
+
+
+def _configure_sqlite_pragmas(engine: Engine, database_url: str) -> None:
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragmas(dbapi_connection, _connection_record) -> None:
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA busy_timeout=30000")
+            if ":memory:" not in database_url:
+                cursor.execute("PRAGMA journal_mode=WAL")
+        finally:
+            cursor.close()
 
 
 def create_session_factory(engine: Engine) -> sessionmaker[Session]:
@@ -48,6 +67,7 @@ def _ensure_sqlite_discord_columns(engine: Engine) -> None:
         "webhook_url_hash": "VARCHAR(16)",
         "message_hash": "VARCHAR(64)",
         "webhook_hash": "VARCHAR(16)",
+        "idempotency_key": "VARCHAR(512)",
         "message_markdown": "TEXT",
         "route_json": "JSON",
         "payload_json": "JSON",
@@ -68,6 +88,7 @@ def _ensure_sqlite_discord_columns(engine: Engine) -> None:
             "ix_discord_messages_season": "season",
             "ix_discord_messages_channel_key": "channel_key",
             "ix_discord_messages_message_type": "message_type",
+            "ix_discord_messages_idempotency_key": "idempotency_key",
         }.items():
             connection.execute(
                 text(
@@ -75,6 +96,12 @@ def _ensure_sqlite_discord_columns(engine: Engine) -> None:
                     f"ON discord_messages ({column_name})"
                 )
             )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_discord_messages_type_created "
+                "ON discord_messages (message_type, created_at)"
+            )
+        )
 
 
 @contextmanager

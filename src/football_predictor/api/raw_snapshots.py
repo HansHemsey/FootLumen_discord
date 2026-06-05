@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from football_predictor.api.exceptions import ApiFootballSnapshotError
-from football_predictor.utils.logging import sanitize_mapping
+from football_predictor.security.sanitize import sanitize_mapping
 from football_predictor.utils.time import utc_now
 
 

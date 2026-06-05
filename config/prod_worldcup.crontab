@@ -6,6 +6,7 @@ LOGDIR=/opt/football-predictor/app/logs/cron
 MPLCONFIGDIR=/opt/football-predictor/app/.cache/matplotlib
 LOKY_MAX_CPU_COUNT=2
 CONFIG_WC=config/competitions_worldcup.yaml
+COMBOS_CONFIG=config/worldcup_combos.yaml
 
 # MODE TEMPORAIRE COUPE DU MONDE ONLY.
 # DISABLED UNTIL AUGUST 2026: routines championnats V3, O/U et analyses H-6 domestic.
@@ -28,6 +29,16 @@ CONFIG_WC=config/competitions_worldcup.yaml
 
 # Prédictions CDM 1X2 M-30 : public si High/Very High, staff sinon.
 1,11,21,31,41,51 7-23 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_wc_late.lock football-predictor worldcup-run-daily --window late --model-dir data/models/worldcup-1x2 --refresh-data --save-raw --send-discord --no-dry-run --json-output reports/daily/worldcup_late_summary.json >> "$LOGDIR/worldcup_late.log" 2>&1
+
+# Combinés CDM 2026 : production staff-only.
+# Génération persistée des tickets, sans publication Discord.
+6,16,26,36,46,56 7-23 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_wc_combos_run.lock football-predictor worldcup-combos-run --config "$COMBOS_CONFIG" --execute --json-output reports/daily/worldcup_combos_run_latest.json >> "$LOGDIR/worldcup_combos_run.log" 2>&1
+# Revalidation pre-lock et lock final des tickets persistés.
+7,17,27,37,47,57 7-23 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_wc_combos_lock.lock env PYTHONPATH=src python scripts/lock_worldcup_combos.py --config "$COMBOS_CONFIG" --execute >> "$LOGDIR/worldcup_combos_lock.log" 2>&1
+# Publication contrôlée : staff uniquement, jamais de salon public.
+8,18,28,38,48,58 7-23 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_wc_combos_publish.lock football-predictor worldcup-combos-publish --config "$COMBOS_CONFIG" --execute --json-output reports/daily/worldcup_combos_publish_latest.json >> "$LOGDIR/worldcup_combos_publish.log" 2>&1
+# Settlement post-match des combinés.
+35 12-23 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_wc_combos_settle.lock env PYTHONPATH=src python scripts/settle_worldcup_combos.py --config "$COMBOS_CONFIG" --execute >> "$LOGDIR/worldcup_combos_settle.log" 2>&1
 
 # Résultats post-match CDM : refresh scores + publication.
 20,50 12-23 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_wc_match_results.lock env CONFIG="$CONFIG_WC" REFRESH_DATA=true SEND_DISCORD=true DRY_RUN=false SAVE_RAW=true scripts/publish_match_results.sh >> "$LOGDIR/worldcup_match_results.log" 2>&1

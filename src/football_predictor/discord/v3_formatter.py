@@ -196,9 +196,13 @@ def _bettor_reading(
     draw_label = _clean(_field(prediction, "draw_risk_label", "non disponible"))
     home_no_draw = _numeric(_field(prediction, "home_no_draw_probability", None))
     away_no_draw = _numeric(_field(prediction, "away_no_draw_probability", None))
+    draw_safety = _draw_safety_payload(prediction)
 
     lines = [_value_sentence(edge, pick_target)]
     lines.append(_market_sentence(probabilities, market))
+    public_note = draw_safety.get("public_note") if isinstance(draw_safety, Mapping) else None
+    if public_note:
+        lines.append(f"• {_clean(public_note)}")
     if draw_risk is not None:
         lines.append(f"• Le nul reste un risque {draw_label} : {_percent(draw_risk)}.")
     no_draw = _no_draw_sentence(teams, home_no_draw, away_no_draw)
@@ -276,6 +280,14 @@ def _v2_confirmation_lines(
             f"  ({_delta_cell(delta)})"
         )
     return lines
+
+
+def _draw_safety_payload(prediction: Any) -> Mapping[str, Any]:
+    payload = _field(prediction, "draw_safety_json", None)
+    if isinstance(payload, Mapping):
+        return payload
+    payload = _field(prediction, "draw_safety", None)
+    return payload if isinstance(payload, Mapping) else {}
 
 
 def _translated_factor_lines(prediction: Any, teams: Mapping[str, str]) -> list[str]:

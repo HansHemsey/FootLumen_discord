@@ -145,6 +145,22 @@ class Settings(BaseSettings):
         default=Path("config/worldcup_combos.yaml"),
         validation_alias="WORLD_CUP_COMBOS_CONFIG_PATH",
     )
+    draw_safety_enabled: bool = Field(
+        default=True,
+        validation_alias="DRAW_SAFETY_ENABLED",
+    )
+    draw_risk_high_threshold: float = Field(
+        default=0.32,
+        validation_alias="DRAW_RISK_HIGH_THRESHOLD",
+    )
+    min_p_draw_when_draw_risk_high: float = Field(
+        default=0.22,
+        validation_alias="MIN_P_DRAW_WHEN_DRAW_RISK_HIGH",
+    )
+    confidence_cap_on_draw_conflict: str = Field(
+        default="Medium",
+        validation_alias="CONFIDENCE_CAP_ON_DRAW_CONFLICT",
+    )
 
     @field_validator("market_1x2_bet_id", mode="before")
     @classmethod

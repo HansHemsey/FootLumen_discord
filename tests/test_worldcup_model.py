@@ -144,6 +144,13 @@ def test_worldcup_model_save_load_and_normalized_probabilities(tmp_path: Path) -
 
     assert result.model_path.exists()
     assert (tmp_path / "model" / "metadata.json").exists()
+    assert "draw_precision" in result.metrics["test"]
+    assert "draw_recall" in result.metrics["test"]
+    assert "draw_f1" in result.metrics["test"]
+    assert "observed_draw_rate" in result.metrics["test"]
+    assert "mean_predicted_p_draw" in result.metrics["test"]
+    assert "draw_calibration_bins" in result.metrics["test"]
+    assert "confusion_matrix_labeled" in result.metrics["test"]
     assert probabilities
     for row in probabilities:
         assert sum(row) == pytest.approx(1.0)
@@ -498,6 +505,76 @@ def test_worldcup_daily_low_confidence_goes_to_staff(
     assert len(delivery.calls) == 1
     assert delivery.calls[0]["channel_key"] == "predictions_staff"
     assert delivery.calls[0]["message_type"] == "prediction_skipped"
+
+
+def test_worldcup_daily_draw_safety_blocks_public_high_confidence(
+    monkeypatch,
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'wc_daily_draw_safety.db'}")
+    init_db(engine)
+    session_factory = create_session_factory(engine)
+    kickoff = utc_now() + timedelta(minutes=10)
+
+    class FakeWorldCupPredictionService:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def predict_fixture(self, fixture_id: int, prediction_time=None, **kwargs):
+            return PredictionOutput(
+                fixture_id=fixture_id,
+                match_label="Mexico vs South Africa",
+                competition="FIFA World Cup 2026",
+                match_date=kickoff,
+                prediction_time=prediction_time or utc_now(),
+                probabilities=ProbabilityTriple(0.70, 0.12, 0.18),
+                predicted_result="HOME",
+                confidence_label="High",
+                confidence_score=72.0,
+                explanations=["Synthetic high confidence"],
+                data_quality=DataQuality(),
+                data_quality_json={"overall_data_quality_score": 70},
+                model_version="worldcup-test",
+                model_prediction_id=123,
+                draw_safety_json={
+                    "severity": "severe",
+                    "skip_reason": "draw_safety_severe_conflict",
+                    "warnings": ["draw_risk_probability_contradiction"],
+                    "signals": {"p_draw": 0.12, "source_draw_probability": 0.42},
+                },
+            )
+
+    class FakeDelivery:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def send_markdown(self, markdown: str, **kwargs):
+            self.calls.append({"markdown": markdown, **kwargs})
+            return SimpleNamespace(status="sent", discord_message_id=77)
+
+    monkeypatch.setattr(
+        "football_predictor.worldcup.run_daily.WorldCupPredictionService",
+        FakeWorldCupPredictionService,
+    )
+    with session_scope(session_factory) as session:
+        _seed_worldcup_fixture(session, fixture_id=9007, kickoff=kickoff)
+        delivery = FakeDelivery()
+        summary = run_daily_worldcup_predictions(
+            session,
+            _bundle(repo_root),
+            target_date=kickoff.astimezone().date(),
+            send_discord=True,
+            dry_run=False,
+            delivery=delivery,
+        )
+
+    assert summary.sent == 0
+    assert summary.confidence_skipped == 1
+    assert summary.results[0].reason == "draw_safety_severe_conflict"
+    assert len(delivery.calls) == 1
+    assert delivery.calls[0]["channel_key"] == "predictions_staff"
+    assert delivery.calls[0]["payload_metadata"]["skip_reason"] == "draw_safety_severe_conflict"
 
 
 def _bundle(repo_root: Path):

@@ -846,6 +846,15 @@ Métadonnées ajoutées dans `V3ModelPrediction.payload_json` :
 - `prediction_time` ;
 - `run_key` ;
 - `refresh_warnings`.
+- `draw_safety` : décision post-modèle dédiée au risque de nul, avec `enabled`,
+  `severity`, `warnings`, `original_confidence_label`, `effective_confidence_label`,
+  `public_blocked`, `skip_reason`, `signals` et `config`.
+
+Le même payload `draw_safety` peut être présent dans les prédictions Coupe du Monde
+`ModelPrediction.payload_json` quand `model_family="worldcup_1x2"`. Cette couche ne
+change jamais les probabilités officielles `p_home`, `p_draw`, `p_away`; elle plafonne
+uniquement la confiance et peut router une prédiction vers le staff si le risque de nul
+contredit la probabilité finale.
 
 Quand un message Discord V3 est créé, `DiscordMessage.model_prediction_id` reste `null`
 car la FK pointe vers les prédictions V2. Le lien V3 est porté par
@@ -861,6 +870,7 @@ car la FK pointe vers les prédictions V2. Le lien V3 est porté par
 - `daily_window` / `automation_window` ;
 - `automation_date` ;
 - `run_key`.
+- `draw_safety` pour expliquer un blocage public ou un cap de confiance lié au nul.
 
 Les prédictions V3 et O/U non publiables sont persistées mais ne créent pas de message
 public. Pour O/U, `forecast_side` décrit seulement la lecture modèle ; seul `value_side`
@@ -870,3 +880,17 @@ staff-only. Les lignes non publiques ne sont pas éligibles au score public hebd
 Les vrais messages `predictions` sont dédupliqués par `fixture_id + window` pour éviter un
 second envoi réel V2 ou V3 sur la même fenêtre. `dry_run` et `print_only` ne bloquent
 jamais un futur envoi réel. `--force` permet de renvoyer explicitement.
+
+### Métriques DRAW
+
+Les rapports V3 et Coupe du Monde exposent en plus des métriques 1X2 classiques :
+
+- `draw_precision`, `draw_recall`, `draw_f1` ;
+- `observed_draw_rate` ;
+- `mean_predicted_p_draw` ;
+- `draw_calibration_bins` ;
+- `draw_ece` ;
+- `confusion_matrix_labeled`.
+
+Pour compatibilité, le rapport V3 conserve aussi le bloc historique `draw_metrics` avec
+`precision`, `recall`, `f1`, `positive_rate`, `calibration_bins` et `ece`.

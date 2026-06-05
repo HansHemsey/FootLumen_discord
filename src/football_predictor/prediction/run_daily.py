@@ -26,6 +26,7 @@ from football_predictor.discord.v3_formatter import format_prediction_v3_markdow
 from football_predictor.ingestion.fixtures import FixtureIngestionService
 from football_predictor.ingestion.ingest_match_details import FixtureDetailsIngestionService
 from football_predictor.ingestion.ingest_odds import OddsIngestionService
+from football_predictor.prediction.draw_safety import draw_safety_skip_reason
 from football_predictor.prediction.publication_policy import (
     CONFIDENCE_SKIP_REASON,
     is_publishable_confidence,
@@ -620,19 +621,25 @@ def run_daily_predictions_v3(
             }
             _annotate_v3_model_prediction(session, output.v3_model_prediction_id, metadata)
             if send_discord:
+                draw_safety_reason = draw_safety_skip_reason(output.draw_safety_json)
                 if (
                     not dry_run
                     and not print_only
-                    and not is_publishable_confidence(output.confidence_label)
+                    and (
+                        draw_safety_reason is not None
+                        or not is_publishable_confidence(output.confidence_label)
+                    )
                 ):
+                    skip_reason = draw_safety_reason or CONFIDENCE_SKIP_REASON
                     logger.info(
                         "V3 Discord publication skipped: fixture_id=%s confidence_label=%s "
-                        "confidence_score=%s expected=%s window=%s",
+                        "confidence_score=%s expected=%s window=%s reason=%s",
                         fixture.fixture_id,
                         normalize_confidence_label(output.confidence_label),
                         output.confidence_score,
                         "High|Very High",
                         resolved_window.value,
+                        skip_reason,
                     )
                     results.append(
                         _result(
@@ -641,7 +648,7 @@ def run_daily_predictions_v3(
                             prediction_time,
                             v3_model_prediction_id=output.v3_model_prediction_id,
                             v3_feature_snapshot_id=output.v3_feature_snapshot_id,
-                            reason=CONFIDENCE_SKIP_REASON,
+                            reason=skip_reason,
                         )
                     )
                     send_skipped_prediction_to_staff(
@@ -651,7 +658,7 @@ def run_daily_predictions_v3(
                         model_family="v3",
                         confidence_label=normalize_confidence_label(output.confidence_label),
                         confidence_score=output.confidence_score,
-                        reason=CONFIDENCE_SKIP_REASON,
+                        reason=skip_reason,
                         prediction_time=prediction_time,
                         automation_window=resolved_window.value,
                         message_type=STAFF_PREDICTION_SKIPPED_MESSAGE_TYPE,
@@ -660,6 +667,7 @@ def run_daily_predictions_v3(
                             **metadata,
                             "v3_model_prediction_id": output.v3_model_prediction_id,
                             "v3_feature_snapshot_id": output.v3_feature_snapshot_id,
+                            "draw_safety": output.draw_safety_json,
                         },
                         force=force,
                     )
@@ -890,6 +898,7 @@ def _send_prediction_v3(
         **metadata,
         "v3_model_prediction_id": output.v3_model_prediction_id,
         "v3_feature_snapshot_id": output.v3_feature_snapshot_id,
+        "draw_safety": output.draw_safety_json,
     }
     return delivery.send_markdown(
         format_prediction_v3_markdown(output, timezone_name=timezone_name),

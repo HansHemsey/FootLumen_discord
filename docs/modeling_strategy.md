@@ -633,6 +633,34 @@ avec edge positif, EV positive, confiance O/U V2 suffisante, data quality suffis
 couverture bookmaker minimale. Les prédictions non publiques restent routées staff ou
 marquées `no_bet`, et ne sont pas prises en compte dans le score public hebdomadaire.
 
+#### Safety DRAW V3 / Coupe du Monde
+
+La publication 1X2 applique une couche de sécurité dédiée au nul afin d'éviter les faux
+`High` quand le modèle final sous-estime fortement `P(Draw)`. Cette couche ne modifie pas
+les probabilités `p_home`, `p_draw`, `p_away` persistées : elle agit uniquement sur le
+label/score de confiance, les warnings d'audit et la décision public vs staff.
+
+Profil conservateur par défaut :
+
+- warning si `draw_risk_p >= 0.32` et `p_draw < 0.22` ;
+- conflit sévère si `draw_risk_p >= 0.38` et `p_draw < 0.18` ;
+- confiance plafonnée à `Medium` en conflit standard et `Low` en conflit sévère ;
+- publication publique bloquée quand la confiance est plafonnée par cette safety.
+
+Pour la Coupe du Monde, les signaux de draw proviennent des sources existantes
+rating/Poisson/marché/API quand elles existent. Si aucun signal dédié n'est disponible
+mais que le match est très équilibré et que `p_draw` est très bas, la prédiction est
+plafonnée et routée staff avec le warning `draw_safety_unavailable`.
+
+Variables de configuration :
+
+```env
+DRAW_SAFETY_ENABLED=true
+DRAW_RISK_HIGH_THRESHOLD=0.32
+MIN_P_DRAW_WHEN_DRAW_RISK_HIGH=0.22
+CONFIDENCE_CAP_ON_DRAW_CONFLICT=Medium
+```
+
 La couche de décision O/U V2 sépare explicitement :
 
 - `forecast_side` : côté le plus probable selon le modèle ;

@@ -91,6 +91,7 @@ class PredictionOutput:
     refresh_summary: JsonDict = field(default_factory=dict)
     key_absences_json: JsonDict = field(default_factory=dict)
     expert_probabilities: dict[str, ProbabilityTriple] = field(default_factory=dict)
+    draw_safety_json: JsonDict = field(default_factory=dict)
 
     def to_dict(self) -> JsonDict:
         """Return a JSON-serializable prediction payload."""
@@ -125,6 +126,7 @@ class PredictionOutput:
             "model_prediction_id": self.model_prediction_id,
             "refresh_summary": self.refresh_summary,
             "key_absences_json": self.key_absences_json,
+            "draw_safety": self.draw_safety_json,
         }
 
 
@@ -489,6 +491,7 @@ class PredictionService:
                     name: _probability_payload(probability)
                     for name, probability in output.expert_probabilities.items()
                 },
+                "draw_safety": output.draw_safety_json,
             },
         )
         session.add(record)
@@ -612,6 +615,7 @@ def _output_with_model_prediction_id(
         refresh_summary=output.refresh_summary,
         key_absences_json=output.key_absences_json,
         expert_probabilities=output.expert_probabilities,
+        draw_safety_json=output.draw_safety_json,
     )
 
 

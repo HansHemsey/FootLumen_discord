@@ -51,6 +51,18 @@ def test_run_v3_backtest_retrains_and_writes_comparison_reports(tmp_path: Path) 
     assert metrics["v3_stacker_full"]["log_loss"] >= 0.0
     assert metrics["v3_stacker_full"]["brier_score"] >= 0.0
     assert "draw_metrics" in metrics["v3_stacker_full"]
+    assert "draw_precision" in metrics["v3_stacker_full"]
+    assert "draw_recall" in metrics["v3_stacker_full"]
+    assert "draw_f1" in metrics["v3_stacker_full"]
+    assert "observed_draw_rate" in metrics["v3_stacker_full"]
+    assert "mean_predicted_p_draw" in metrics["v3_stacker_full"]
+    assert "draw_calibration_bins" in metrics["v3_stacker_full"]
+    assert "confusion_matrix_labeled" in metrics["v3_stacker_full"]
+    assert metrics["v3_stacker_full"]["confusion_matrix_labeled"]["labels"] == [
+        "HOME",
+        "DRAW",
+        "AWAY",
+    ]
     assert "no_draw_metrics" in metrics["v3_stacker_full"]
     assert metrics["v2_existing"]["available"] is True
     assert result.success_criteria["status"] in {"passed", "failed"}

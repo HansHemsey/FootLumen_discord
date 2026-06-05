@@ -37,11 +37,13 @@ class FakePredictionV3Service:
         fail_fixture_ids: set[int] | None = None,
         confidence_label: str = "High",
         confidence_score: float = 72.0,
+        draw_safety_json: dict[str, Any] | None = None,
     ) -> None:
         self.session = session
         self.fail_fixture_ids = fail_fixture_ids or set()
         self.confidence_label = confidence_label
         self.confidence_score = confidence_score
+        self.draw_safety_json = draw_safety_json or {}
         self.calls: list[tuple[int, datetime | None]] = []
 
     def predict_fixture_v3(
@@ -123,6 +125,7 @@ class FakePredictionV3Service:
             data_quality=DataQuality(),
             data_quality_json={"overall_data_quality_score": 61},
             key_absences_json={"home": [], "away": []},
+            draw_safety_json=self.draw_safety_json,
             v3_feature_snapshot_id=feature.id,
             v3_model_prediction_id=prediction.id,
         )
@@ -335,6 +338,65 @@ def test_run_daily_v3_low_confidence_goes_to_staff_not_public(
     assert {
         result.reason for result in summary.results
     } == {"confidence_below_publish_threshold"}
+
+
+def test_run_daily_v3_draw_safety_blocks_public_even_with_high_label(
+    tmp_path: Path,
+) -> None:
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        return httpx.Response(204)
+
+    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'daily_v3_draw_safety.db'}")
+    session_factory = create_session_factory(engine)
+    fake_service = FakePredictionV3Service(
+        None,
+        confidence_label="High",
+        confidence_score=72.0,
+        draw_safety_json={
+            "severity": "severe",
+            "skip_reason": "draw_safety_severe_conflict",
+            "warnings": ["draw_risk_probability_contradiction"],
+            "signals": {"p_draw": 0.12, "draw_risk_probability": 0.42},
+        },
+    )  # type: ignore[arg-type]
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler)) as http_client,
+        session_scope(session_factory) as session,
+    ):
+        fake_service.session = session
+        _seed_fixtures(session, league_id=-100, season=2026)
+        summary = run_daily_predictions_v3(
+            TARGET_DATE,
+            league_ids=(-100,),
+            window="now",
+            send_discord=True,
+            refresh_data=False,
+            dry_run=False,
+            shadow_mode=False,
+            session=session,
+            reference=ApiFootballReference({"competitions": [], "references": {}}),
+            discord_delivery=DiscordDeliveryService(
+                session,
+                legacy_webhook_url="https://example.invalid/v3-daily",
+                webhooks_config=_staff_webhooks_config(),
+                http_client=http_client,
+            ),
+            prediction_service_factory=lambda _session: fake_service,
+            now=NOW,
+        )
+        messages = list(session.execute(select(models.DiscordMessage)).scalars())
+
+    assert summary.sent == 0
+    assert summary.confidence_skipped == 2
+    assert calls == ["https://example.invalid/staff", "https://example.invalid/staff"]
+    assert {message.channel_key for message in messages} == {"predictions_staff"}
+    assert {
+        message.payload_json["skip_reason"] for message in messages
+    } == {"draw_safety_severe_conflict"}
 
 
 def test_run_daily_v3_production_skips_existing_sent_window_duplicate(

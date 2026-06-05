@@ -9,6 +9,7 @@ from typing import Any
 import pandas as pd  # type: ignore[import-untyped]
 from sqlalchemy.orm import Session
 
+from football_predictor.config.settings import Settings
 from football_predictor.db import models
 from football_predictor.db.repositories import upsert_by_fields
 from football_predictor.features.data_quality import DataQuality
@@ -17,6 +18,11 @@ from football_predictor.ingestion.ingest_match_details import FixtureDetailsInge
 from football_predictor.ingestion.ingest_odds import OddsIngestionService
 from football_predictor.modeling.probabilities import ProbabilityTriple
 from football_predictor.prediction.confidence import confidence_label
+from football_predictor.prediction.draw_safety import (
+    DrawSafetyConfig,
+    DrawSafetySignals,
+    evaluate_draw_safety,
+)
 from football_predictor.prediction.service import ApiFootballPayloadClient, PredictionOutput
 from football_predictor.reference.lookups import ApiFootballReference, PlayersReference
 from football_predictor.utils.exceptions import PredictionError
@@ -56,6 +62,7 @@ class WorldCupPredictionService:
         players_reference: PlayersReference | None = None,
         market_1x2_bet_name: str = "Match Winner",
         market_1x2_bet_id: int | None = None,
+        draw_safety_config: DrawSafetyConfig | None = None,
     ) -> None:
         self.session = session
         self.bundle = bundle
@@ -64,6 +71,7 @@ class WorldCupPredictionService:
         self.players_reference = players_reference
         self.market_1x2_bet_name = market_1x2_bet_name
         self.market_1x2_bet_id = market_1x2_bet_id
+        self.draw_safety_config = draw_safety_config or DrawSafetyConfig.from_settings(Settings())
 
     def predict_fixture(
         self,
@@ -138,6 +146,29 @@ class WorldCupPredictionService:
             or probability_source_from_features(features, "p_wc_poisson")
         )
         score = _confidence_score(probabilities, data_quality)
+        raw_confidence_label = confidence_label(probabilities)
+        draw_safety = evaluate_draw_safety(
+            DrawSafetySignals(
+                model_family="worldcup_1x2",
+                p_home=probabilities.p_home,
+                p_draw=probabilities.p_draw,
+                p_away=probabilities.p_away,
+                confidence_label=raw_confidence_label,
+                confidence_score=score,
+                source_draw_probability=_max_draw_probability(
+                    rating_probability,
+                    poisson_probability,
+                    market_probability,
+                    api_probability,
+                ),
+                market_draw_probability=_probability_value(market_probability, "DRAW"),
+                is_worldcup=True,
+            ),
+            config=self.draw_safety_config,
+        )
+        explanations = _explanations(features)
+        if draw_safety.public_note:
+            explanations.append(draw_safety.public_note)
         output = PredictionOutput(
             fixture_id=fixture.fixture_id,
             match_label=f"{fixture.home_team} vs {fixture.away_team}",
@@ -146,9 +177,13 @@ class WorldCupPredictionService:
             prediction_time=cutoff,
             probabilities=probabilities,
             predicted_result=probabilities.predicted_result(),
-            confidence_label=confidence_label(probabilities),
-            confidence_score=score,
-            explanations=_explanations(features),
+            confidence_label=draw_safety.effective_confidence_label,
+            confidence_score=(
+                draw_safety.effective_confidence_score
+                if draw_safety.effective_confidence_score is not None
+                else score
+            ),
+            explanations=explanations,
             data_quality=DataQuality(standings_available=True),
             data_quality_json=data_quality,
             market_probabilities=market_probability,
@@ -169,6 +204,7 @@ class WorldCupPredictionService:
                 "home": features.get("wc_home_key_absences_json") or [],
                 "away": features.get("wc_away_key_absences_json") or [],
             },
+            draw_safety_json=draw_safety.as_dict(),
             expert_probabilities={
                 **({"wc_rating_dynamic": rating_probability} if rating_probability else {}),
                 **({"wc_poisson_dynamic": poisson_probability} if poisson_probability else {}),
@@ -294,6 +330,7 @@ class WorldCupPredictionService:
                     "lineups": bool(features.get("wc_dynamic_lineups_available_flag")),
                     "injuries": bool(features.get("wc_dynamic_injuries_available_flag")),
                 },
+                "draw_safety": output.draw_safety_json,
             },
         )
         self.session.add(record)
@@ -368,4 +405,20 @@ def _with_ids(
         refresh_summary=output.refresh_summary,
         key_absences_json=output.key_absences_json,
         expert_probabilities=output.expert_probabilities,
+        draw_safety_json=output.draw_safety_json,
     )
+
+
+def _max_draw_probability(*probabilities: ProbabilityTriple | None) -> float | None:
+    values = [
+        probability.as_dict()["DRAW"]
+        for probability in probabilities
+        if probability is not None
+    ]
+    return max(values) if values else None
+
+
+def _probability_value(probability: ProbabilityTriple | None, label: str) -> float | None:
+    if probability is None:
+        return None
+    return probability.as_dict()[label]

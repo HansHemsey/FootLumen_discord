@@ -252,6 +252,8 @@ Champs principaux :
 - `p_wc_poisson_home`, `p_wc_poisson_draw`, `p_wc_poisson_away` ;
 - `wc_market_*` et `p_wc_market_*` : consensus odds 1X2 pré-match, uniquement si
   `OddsSnapshot.fetched_at <= prediction_time` ;
+- `wc_odds_ou25_available` et `wc_odds_btts_available` : disponibilité auditée des marchés
+  O/U 2.5 et BTTS dans `OddsSnapshot`, toujours filtrée par `fetched_at <= prediction_time` ;
 - `wc_api_pred_*` et `p_wc_api_*` : dernière prédiction API-Football disponible avant
   `prediction_time` ;
 - `wc_official_lineup_*`, `wc_home_lineup_surprise_score`,
@@ -262,7 +264,29 @@ Champs principaux :
   et au Poisson ;
 - `p_wc_rating_dynamic_home/draw/away` et `p_wc_poisson_dynamic_home/draw/away` :
   probabilités après ajustement injuries/lineups ;
-- `wc_fifa_*` et `wc_current_elo_*` seulement pour les prédictions CDM 2026 futures.
+- `wc_fifa_*` et `wc_current_elo_*` seulement depuis des snapshots datés
+  `snapshot_date <= prediction_time` ;
+- `wc_group_state_*` : état de groupe dérivé des résultats déjà connus avant le cutoff ;
+- `wc_squad_strength_*` : force d'effectif issue d'un snapshot `snapshot_at <= prediction_time`.
+
+Tables d'enrichissement CDM :
+
+- `national_team_aliases` : aliases nationaux entre API-Football, FIFA, Elo et datasets
+  historiques ;
+- `national_team_matches` : historique international toutes compétitions, avec score final
+  stocké pour construire des historiques strictement antérieurs au match cible ;
+- `national_elo_snapshots` : Elo datés par sélection ;
+- `fifa_ranking_snapshots` : classements FIFA datés ;
+- `worldcup_group_state_snapshots` : états de groupe point-in-time ;
+- `squad_strength_features` : features d'effectif datées.
+
+Convention odds multi-marchés :
+
+- 1X2 / `Match Winner` : `odd_home`, `odd_draw`, `odd_away` ;
+- O/U 2.5 / `Goals Over/Under` : `odd_home = Over 2.5`,
+  `odd_away = Under 2.5`, `odd_draw = NULL` ;
+- BTTS / `Both Teams Score` : `odd_home = Yes`, `odd_away = No`, `odd_draw = NULL`,
+  avec les labels conservés dans `payload_json.labels`.
 
 Règles :
 
@@ -272,6 +296,8 @@ Règles :
 - les rankings FIFA/Elo actuels sont interdits dans les lignes historiques de backtest ;
 - les odds, predictions API, lineups et injuries doivent respecter
   `fetched_at <= prediction_time` ;
+- les snapshots FIFA/Elo, group state et squad strength doivent respecter
+  `snapshot_date <= prediction_time` ou `snapshot_at <= prediction_time` ;
 - le backtest CDM strict n'invente pas de source dynamique manquante et expose sa couverture ;
 - les aliases doivent résoudre les 48 équipes CDM 2026 avant production ;
 - les features CDM ne doivent pas être utilisées par les pipelines championnats.

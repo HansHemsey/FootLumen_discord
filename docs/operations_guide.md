@@ -471,6 +471,32 @@ football-predictor worldcup-optimize-blend --dataset data/processed/worldcup_1x2
 football-predictor worldcup-run-daily --window late --refresh-data --save-raw --dry-run
 ```
 
+### Enrichissement data CDM point-in-time
+
+Avant d'activer une publication publique CDM plus ambitieuse, initialiser les sources datées
+dans cet ordre. Toutes les commandes sont dry-run sauf si `--write` est présent :
+
+```bash
+alembic upgrade head
+PYTHONPATH=src .venv/bin/python scripts/ingest_national_results.py --write
+PYTHONPATH=src .venv/bin/python scripts/compute_national_elo.py --write
+PYTHONPATH=src .venv/bin/python scripts/ingest_fifa_rankings.py --snapshot-date YYYY-MM-DD --write
+PYTHONPATH=src .venv/bin/python scripts/build_group_incentive_features.py --write
+PYTHONPATH=src .venv/bin/python scripts/build_squad_strength_features.py --write
+PYTHONPATH=src .venv/bin/python scripts/build_worldcup_feature_matrix.py --write
+PYTHONPATH=src .venv/bin/python scripts/worldcup_coverage_report.py --write --league-id 1 --season 2026
+```
+
+Les odds CDM multi-marchés nécessitent une autorisation API explicite :
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/sync_worldcup_odds_snapshots.py --write --refresh-api --markets 1x2,ou25,btts
+```
+
+Ne jamais importer un ranking FIFA/Elo sans date de snapshot. En cas de doute, laisser la
+source manquante : la coverage matrix baissera la qualité plutôt que d'introduire une fuite
+temporelle.
+
 Retour championnats en aout 2026 :
 
 1. creer une vraie config locale depuis `config/competitions_2026.example.yaml` ;

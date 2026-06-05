@@ -312,6 +312,27 @@ source reste strictement filtrée par `fetched_at <= prediction_time`. En backte
 donnée récupérée après coup n'est utilisée pour simuler M-30 : les rapports indiquent la
 couverture dynamique disponible et évaluent seulement les snapshots réellement point-in-time.
 
+### Enrichissement CDM 2026 Point-In-Time
+
+Les sources FIFA/Elo/historique ne doivent plus être considérées comme des constantes
+globales lorsqu'elles servent à une matrice de features reproductible. La couche
+`worldcup.enrichment` persiste :
+
+- l'historique international dans `national_team_matches` ;
+- les aliases nationaux dans `national_team_aliases` ;
+- les Elo et rankings FIFA dans des tables de snapshots datés ;
+- les états de groupe et les scores d'effectif dans des snapshots horodatés.
+
+La règle est unique : `cutoff = prediction_time`. Les historiques utilisent seulement les
+matchs `match_date < cutoff`, les rankings utilisent le dernier snapshot `<= cutoff`, les
+odds utilisent `fetched_at <= cutoff`, et les effectifs utilisent `snapshot_at <= cutoff`.
+Les rankings courants ne sont donc utilisables en production CDM 2026 que s'ils sont importés
+avec une date explicite.
+
+Les marchés complémentaires O/U 2.5 et BTTS restent stockés dans `odds_snapshots` et servent
+d'abord à la couverture, aux combinés et aux audits. Ils ne remplacent pas le marché 1X2 du
+modèle principal sans backtest dédié.
+
 - modèle final chargé depuis `model.joblib` si `--model-dir` est fourni ;
 - `stacking_final` quand le modèle sportif et au moins une source marché/API existent ;
 - `odds_only` ;

@@ -109,6 +109,14 @@ class Settings(BaseSettings):
         default=5,
         validation_alias="MARKET_OU25_BET_ID",
     )
+    market_btts_bet_name: str = Field(
+        default="Both Teams Score",
+        validation_alias="MARKET_BTTS_BET_NAME",
+    )
+    market_btts_bet_id: int = Field(
+        default=8,
+        validation_alias="MARKET_BTTS_BET_ID",
+    )
     ou_model_dir: Path = Field(
         default=Path("data/models/ou-v1"),
         validation_alias="OU_MODEL_DIR",

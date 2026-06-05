@@ -26,6 +26,7 @@ COVERAGE_ENDPOINTS = (
     "standings",
     "odds_1x2",
     "odds_ou",
+    "odds_btts",
     "predictions",
     "lineups",
     "injuries",
@@ -68,6 +69,7 @@ class WorldCupFixtureQuality:
     has_fifa_rank: bool
     has_odds_1x2: bool
     has_odds_ou: bool
+    has_odds_btts: bool
     has_api_prediction: bool
     has_lineups: bool
     lineups_expected: bool
@@ -234,11 +236,12 @@ class WorldCupCoverageMonitor:
         dynamic = {
             "has_odds_1x2": self._has_1x2_odds(fixture.fixture_id, cutoff),
             "has_odds_ou": self._has_ou_odds(fixture.fixture_id, cutoff),
+            "has_odds_btts": self._has_btts_odds(fixture.fixture_id, cutoff),
             "has_api_prediction": self._count_api_predictions(fixture.fixture_id, cutoff) > 0,
             "has_lineups": self._count_lineups(fixture.fixture_id, cutoff) >= 2,
             "has_injuries": self._count_injuries(fixture, cutoff) > 0,
             "has_group_state": self._has_group_state(fixture, cutoff),
-            "has_squad_strength": self._has_squad_strength(fixture),
+            "has_squad_strength": self._has_squad_strength(fixture, cutoff),
         }
         lineups_expected = _lineups_expected(fixture, current_time)
         score, missing_sources, warnings = _fixture_quality_score(
@@ -302,6 +305,7 @@ class WorldCupCoverageMonitor:
             endpoint_counts = {
                 "odds_1x2": int(self._has_1x2_odds(fixture.fixture_id, cutoff)),
                 "odds_ou": int(self._has_ou_odds(fixture.fixture_id, cutoff)),
+                "odds_btts": int(self._has_btts_odds(fixture.fixture_id, cutoff)),
                 "predictions": self._count_api_predictions(fixture.fixture_id, cutoff),
                 "lineups": self._count_lineups(fixture.fixture_id, cutoff),
                 "injuries": self._count_injuries(fixture, cutoff),
@@ -341,6 +345,7 @@ class WorldCupCoverageMonitor:
         flag_by_endpoint = {
             "odds_1x2": "has_odds_1x2",
             "odds_ou": "has_odds_ou",
+            "odds_btts": "has_odds_btts",
             "predictions": "has_api_prediction",
             "lineups": "has_lineups",
             "injuries": "has_injuries",
@@ -432,6 +437,18 @@ class WorldCupCoverageMonitor:
         )
         return int(self.session.execute(statement).scalar() or 0) > 0
 
+    def _has_btts_odds(self, fixture_id: int, cutoff: datetime) -> bool:
+        statement = (
+            select(func.count(models.OddsSnapshot.id))
+            .where(models.OddsSnapshot.fixture_id == fixture_id)
+            .where(models.OddsSnapshot.fetched_at <= cutoff)
+            .where(models.OddsSnapshot.is_live.is_(False))
+            .where(models.OddsSnapshot.bet_id == 8)
+            .where(models.OddsSnapshot.odd_home.is_not(None))
+            .where(models.OddsSnapshot.odd_away.is_not(None))
+        )
+        return int(self.session.execute(statement).scalar() or 0) > 0
+
     def _count_api_predictions(self, fixture_id: int, cutoff: datetime) -> int:
         return self._count_table(
             models.ApiPredictionSnapshot,
@@ -496,6 +513,15 @@ class WorldCupCoverageMonitor:
 
     def _has_group_state(self, fixture: models.Fixture, cutoff: datetime) -> bool:
         teams = [fixture.home_team_id, fixture.away_team_id]
+        enriched_statement = (
+            select(func.count(models.WorldCupGroupStateSnapshot.id))
+            .where(models.WorldCupGroupStateSnapshot.league_id == self.league_id)
+            .where(models.WorldCupGroupStateSnapshot.season == self.season)
+            .where(models.WorldCupGroupStateSnapshot.team_id.in_(teams))
+            .where(models.WorldCupGroupStateSnapshot.snapshot_at <= cutoff)
+        )
+        if int(self.session.execute(enriched_statement).scalar() or 0) >= 2:
+            return True
         statement = (
             select(func.count(models.StandingSnapshot.id))
             .where(models.StandingSnapshot.league_id == self.league_id)
@@ -505,13 +531,23 @@ class WorldCupCoverageMonitor:
         )
         return int(self.session.execute(statement).scalar() or 0) >= 2
 
-    def _has_squad_strength(self, fixture: models.Fixture) -> bool:
+    def _has_squad_strength(self, fixture: models.Fixture, cutoff: datetime) -> bool:
         teams = [fixture.home_team_id, fixture.away_team_id]
+        enriched_statement = (
+            select(func.count(models.SquadStrengthFeature.id))
+            .where(models.SquadStrengthFeature.league_id == self.league_id)
+            .where(models.SquadStrengthFeature.season == self.season)
+            .where(models.SquadStrengthFeature.team_id.in_(teams))
+            .where(models.SquadStrengthFeature.snapshot_at <= cutoff)
+        )
+        if int(self.session.execute(enriched_statement).scalar() or 0) >= 2:
+            return True
         statement = (
             select(func.count(models.PlayerSquad.id))
             .where(models.PlayerSquad.league_id == self.league_id)
             .where(models.PlayerSquad.season == self.season)
             .where(models.PlayerSquad.team_id.in_(teams))
+            .where(models.PlayerSquad.fetched_at <= cutoff)
         )
         return int(self.session.execute(statement).scalar() or 0) >= 2
 
@@ -533,7 +569,8 @@ def _fixture_quality_score(
         "has_elo": 12.0,
         "has_fifa_rank": 12.0,
         "has_odds_1x2": 14.0,
-        "has_odds_ou": 5.0,
+        "has_odds_ou": 4.0,
+        "has_odds_btts": 3.0,
         "has_api_prediction": 8.0,
         "has_lineups": 12.0 if lineups_expected else 6.0,
         "has_injuries": 6.0,

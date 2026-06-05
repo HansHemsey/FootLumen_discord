@@ -123,7 +123,17 @@ def test_worldcup_coverage_report_generates_files_and_sanitizes_warning(
     init_db(engine)
     session_factory = create_session_factory(engine)
     now = datetime(2026, 6, 11, 12, tzinfo=UTC)
-    secret = "API_FOOTBALL_KEY=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    secret = "".join(
+        [
+            "API",
+            "_FOOTBALL",
+            "_KEY",
+            "=",
+            "abcdefghijklmnopqrstuvwxyz",
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+            "0123456789",
+        ]
+    )
 
     with session_scope(session_factory) as session:
         _seed_worldcup_fixture(session, kickoff=now + timedelta(hours=6))

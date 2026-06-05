@@ -89,6 +89,184 @@ class ApiCoverageObservation(Base, TimestampMixin):
     warning: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class NationalTeamAlias(Base, TimestampMixin):
+    __tablename__ = "national_team_aliases"
+    __table_args__ = (
+        UniqueConstraint("normalized_alias", "source", name="uq_national_team_alias_source"),
+        Index("ix_national_team_alias_canonical", "canonical_name"),
+        Index("ix_national_team_alias_api_team", "api_team_id"),
+        Index("ix_national_team_alias_elo_code", "elo_code"),
+        Index("ix_national_team_alias_fifa_code", "fifa_code"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    canonical_name: Mapped[str] = mapped_column(String(180), index=True)
+    normalized_alias: Mapped[str] = mapped_column(String(180), index=True)
+    source: Mapped[str] = mapped_column(String(80), default="manual", index=True)
+    api_team_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    elo_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    fifa_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    valid_from: Mapped[date | None] = mapped_column(Date, nullable=True)
+    valid_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    payload_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+
+
+class NationalTeamMatch(Base, TimestampMixin):
+    __tablename__ = "national_team_matches"
+    __table_args__ = (
+        UniqueConstraint("source", "source_match_id", name="uq_national_team_match_source"),
+        Index("ix_national_team_matches_date", "match_date"),
+        Index("ix_national_team_matches_home_date", "home_team_canonical", "match_date"),
+        Index("ix_national_team_matches_away_date", "away_team_canonical", "match_date"),
+        Index("ix_national_team_matches_teams_date", "home_team_id", "away_team_id", "match_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    match_date: Mapped[date] = mapped_column(Date, index=True)
+    home_team_canonical: Mapped[str] = mapped_column(String(180), index=True)
+    away_team_canonical: Mapped[str] = mapped_column(String(180), index=True)
+    home_team_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    away_team_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    home_score: Mapped[int] = mapped_column(Integer)
+    away_score: Mapped[int] = mapped_column(Integer)
+    tournament: Mapped[str | None] = mapped_column(String(180), nullable=True, index=True)
+    competition_type: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    neutral: Mapped[bool] = mapped_column(Boolean, default=True)
+    city: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    country: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    source: Mapped[str] = mapped_column(String(80), default="csv", index=True)
+    source_match_id: Mapped[str] = mapped_column(String(240), index=True)
+    payload_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+
+
+class NationalEloSnapshot(Base, TimestampMixin):
+    __tablename__ = "national_elo_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "canonical_team",
+            "snapshot_date",
+            "source",
+            name="uq_national_elo_snapshot",
+        ),
+        Index("ix_national_elo_team_date", "canonical_team", "snapshot_date"),
+        Index("ix_national_elo_code_date", "elo_code", "snapshot_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    canonical_team: Mapped[str] = mapped_column(String(180), index=True)
+    elo_code: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    snapshot_date: Mapped[date] = mapped_column(Date, index=True)
+    rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    elo: Mapped[float] = mapped_column(Float)
+    source: Mapped[str] = mapped_column(String(80), default="computed", index=True)
+    payload_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+
+
+class FifaRankingSnapshot(Base, TimestampMixin):
+    __tablename__ = "fifa_ranking_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "canonical_team",
+            "snapshot_date",
+            "source",
+            name="uq_fifa_ranking_snapshot",
+        ),
+        Index("ix_fifa_ranking_team_date", "canonical_team", "snapshot_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    canonical_team: Mapped[str] = mapped_column(String(180), index=True)
+    snapshot_date: Mapped[date] = mapped_column(Date, index=True)
+    rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    points: Mapped[float | None] = mapped_column(Float, nullable=True)
+    previous_points: Mapped[float | None] = mapped_column(Float, nullable=True)
+    delta: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source: Mapped[str] = mapped_column(String(80), default="fifa_csv", index=True)
+    payload_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+
+
+class WorldCupGroupStateSnapshot(Base, TimestampMixin):
+    __tablename__ = "worldcup_group_state_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "competition_key",
+            "league_id",
+            "season",
+            "group_name",
+            "team_id",
+            "snapshot_at",
+            name="uq_worldcup_group_state_snapshot",
+        ),
+        Index("ix_worldcup_group_state_team_time", "team_id", "snapshot_at"),
+        Index(
+            "ix_worldcup_group_state_competition_time",
+            "competition_key",
+            "league_id",
+            "season",
+            "snapshot_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    competition_key: Mapped[str] = mapped_column(String(80), index=True)
+    league_id: Mapped[int] = mapped_column(Integer, index=True)
+    season: Mapped[int] = mapped_column(Integer, index=True)
+    group_name: Mapped[str] = mapped_column(String(80), index=True)
+    team_id: Mapped[int] = mapped_column(Integer, index=True)
+    canonical_team: Mapped[str] = mapped_column(String(180), index=True)
+    snapshot_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    matchday: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    played: Mapped[int] = mapped_column(Integer, default=0)
+    points: Mapped[int] = mapped_column(Integer, default=0)
+    goals_for: Mapped[int] = mapped_column(Integer, default=0)
+    goals_against: Mapped[int] = mapped_column(Integer, default=0)
+    goal_diff: Mapped[int] = mapped_column(Integer, default=0)
+    remaining_fixtures_json: Mapped[JsonValue] = mapped_column(SAJSON, default=list)
+    incentives_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+    qualification_risk_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+    payload_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+
+
+class SquadStrengthFeature(Base, TimestampMixin):
+    __tablename__ = "squad_strength_features"
+    __table_args__ = (
+        UniqueConstraint(
+            "competition_key",
+            "league_id",
+            "season",
+            "team_id",
+            "snapshot_at",
+            name="uq_squad_strength_snapshot",
+        ),
+        Index("ix_squad_strength_team_time", "team_id", "snapshot_at"),
+        Index(
+            "ix_squad_strength_competition_time",
+            "competition_key",
+            "league_id",
+            "season",
+            "snapshot_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    competition_key: Mapped[str] = mapped_column(String(80), index=True)
+    league_id: Mapped[int] = mapped_column(Integer, index=True)
+    season: Mapped[int] = mapped_column(Integer, index=True)
+    team_id: Mapped[int] = mapped_column(Integer, index=True)
+    canonical_team: Mapped[str] = mapped_column(String(180), index=True)
+    snapshot_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    squad_status: Mapped[str] = mapped_column(String(40), default="unknown", index=True)
+    player_count: Mapped[int] = mapped_column(Integer, default=0)
+    strength_score: Mapped[float] = mapped_column(Float, default=0.0)
+    club_level_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    minutes_weighted_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    availability_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    key_players_json: Mapped[JsonValue] = mapped_column(SAJSON, default=list)
+    warnings_json: Mapped[JsonValue] = mapped_column(SAJSON, default=list)
+    payload_json: Mapped[JsonValue] = mapped_column(SAJSON, default=dict)
+
+
 class League(Base, TimestampMixin):
     __tablename__ = "leagues"
     __table_args__ = (UniqueConstraint("league_id", "season", name="uq_league_season"),)

@@ -11,7 +11,7 @@ import json
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 
 from football_predictor.cli import _load_discord_routing
 from football_predictor.config.settings import get_settings
@@ -47,8 +47,26 @@ def main() -> None:
         return
 
     target_date = date.fromisoformat(args.date) if args.date else None
-    _, channels, webhooks = _load_discord_routing(settings)
     engine = create_db_engine(settings.database_url)
+    if not inspect(engine).has_table(db_models.ComboTicket.__tablename__):
+        message = "combo tables missing; run alembic upgrade head before execute"
+        if args.execute:
+            raise SystemExit(message)
+        print(
+            json.dumps(
+                {
+                    "enabled": True,
+                    "execute": args.execute,
+                    "target_date": args.date,
+                    "results": [],
+                    "message": message,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return
+    _, channels, webhooks = _load_discord_routing(settings)
     session_factory = create_session_factory(engine)
     with session_scope(session_factory) as session:
         delivery = DiscordDeliveryService(

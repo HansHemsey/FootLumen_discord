@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, inspect, select
 from sqlalchemy.orm import Session
 
 from football_predictor.db import models
@@ -513,15 +513,16 @@ class WorldCupCoverageMonitor:
 
     def _has_group_state(self, fixture: models.Fixture, cutoff: datetime) -> bool:
         teams = [fixture.home_team_id, fixture.away_team_id]
-        enriched_statement = (
-            select(func.count(models.WorldCupGroupStateSnapshot.id))
-            .where(models.WorldCupGroupStateSnapshot.league_id == self.league_id)
-            .where(models.WorldCupGroupStateSnapshot.season == self.season)
-            .where(models.WorldCupGroupStateSnapshot.team_id.in_(teams))
-            .where(models.WorldCupGroupStateSnapshot.snapshot_at <= cutoff)
-        )
-        if int(self.session.execute(enriched_statement).scalar() or 0) >= 2:
-            return True
+        if self._table_exists(models.WorldCupGroupStateSnapshot):
+            enriched_statement = (
+                select(func.count(models.WorldCupGroupStateSnapshot.id))
+                .where(models.WorldCupGroupStateSnapshot.league_id == self.league_id)
+                .where(models.WorldCupGroupStateSnapshot.season == self.season)
+                .where(models.WorldCupGroupStateSnapshot.team_id.in_(teams))
+                .where(models.WorldCupGroupStateSnapshot.snapshot_at <= cutoff)
+            )
+            if int(self.session.execute(enriched_statement).scalar() or 0) >= 2:
+                return True
         statement = (
             select(func.count(models.StandingSnapshot.id))
             .where(models.StandingSnapshot.league_id == self.league_id)
@@ -533,15 +534,16 @@ class WorldCupCoverageMonitor:
 
     def _has_squad_strength(self, fixture: models.Fixture, cutoff: datetime) -> bool:
         teams = [fixture.home_team_id, fixture.away_team_id]
-        enriched_statement = (
-            select(func.count(models.SquadStrengthFeature.id))
-            .where(models.SquadStrengthFeature.league_id == self.league_id)
-            .where(models.SquadStrengthFeature.season == self.season)
-            .where(models.SquadStrengthFeature.team_id.in_(teams))
-            .where(models.SquadStrengthFeature.snapshot_at <= cutoff)
-        )
-        if int(self.session.execute(enriched_statement).scalar() or 0) >= 2:
-            return True
+        if self._table_exists(models.SquadStrengthFeature):
+            enriched_statement = (
+                select(func.count(models.SquadStrengthFeature.id))
+                .where(models.SquadStrengthFeature.league_id == self.league_id)
+                .where(models.SquadStrengthFeature.season == self.season)
+                .where(models.SquadStrengthFeature.team_id.in_(teams))
+                .where(models.SquadStrengthFeature.snapshot_at <= cutoff)
+            )
+            if int(self.session.execute(enriched_statement).scalar() or 0) >= 2:
+                return True
         statement = (
             select(func.count(models.PlayerSquad.id))
             .where(models.PlayerSquad.league_id == self.league_id)
@@ -550,6 +552,10 @@ class WorldCupCoverageMonitor:
             .where(models.PlayerSquad.fetched_at <= cutoff)
         )
         return int(self.session.execute(statement).scalar() or 0) >= 2
+
+    def _table_exists(self, model: type[Any]) -> bool:
+        bind = self.session.get_bind()
+        return bool(bind is not None and inspect(bind).has_table(model.__tablename__))
 
     def _count_table(self, model: type[Any], *conditions: Any) -> int:
         statement = select(func.count(model.id))

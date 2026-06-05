@@ -125,11 +125,11 @@ football-predictor worldcup-combos-publish \
   --config config/worldcup_combos.yaml \
   --dry-run
 
-python scripts/lock_worldcup_combos.py --config config/worldcup_combos.yaml
-python scripts/settle_worldcup_combos.py --config config/worldcup_combos.yaml
-python scripts/maintenance_worldcup_combo_snapshots.py --config config/worldcup_combos.yaml
-python scripts/worldcup_coverage_report.py
-python scripts/sync_worldcup_odds_snapshots.py --markets 1x2,ou25,btts
+PYTHONPATH=src .venv/bin/python scripts/lock_worldcup_combos.py --config config/worldcup_combos.yaml
+PYTHONPATH=src .venv/bin/python scripts/settle_worldcup_combos.py --config config/worldcup_combos.yaml
+PYTHONPATH=src .venv/bin/python scripts/maintenance_worldcup_combo_snapshots.py --config config/worldcup_combos.yaml
+PYTHONPATH=src .venv/bin/python scripts/worldcup_coverage_report.py
+PYTHONPATH=src .venv/bin/python scripts/sync_worldcup_odds_snapshots.py --markets 1x2,ou25,btts
 ```
 
 ## Commandes Execute
@@ -143,7 +143,7 @@ football-predictor worldcup-combos-run \
   --execute \
   --json-output reports/daily/worldcup_combos_run_latest.json
 
-python scripts/lock_worldcup_combos.py \
+PYTHONPATH=src .venv/bin/python scripts/lock_worldcup_combos.py \
   --config config/worldcup_combos.yaml \
   --execute
 
@@ -152,13 +152,13 @@ football-predictor worldcup-combos-publish \
   --execute \
   --json-output reports/daily/worldcup_combos_publish_latest.json
 
-python scripts/settle_worldcup_combos.py \
+PYTHONPATH=src .venv/bin/python scripts/settle_worldcup_combos.py \
   --config config/worldcup_combos.yaml \
   --execute
 
-python scripts/worldcup_coverage_report.py --execute
+PYTHONPATH=src .venv/bin/python scripts/worldcup_coverage_report.py --execute
 
-python scripts/sync_worldcup_odds_snapshots.py \
+PYTHONPATH=src .venv/bin/python scripts/sync_worldcup_odds_snapshots.py \
   --execute \
   --refresh-api \
   --markets 1x2,ou25,btts

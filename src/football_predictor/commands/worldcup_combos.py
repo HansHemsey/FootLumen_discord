@@ -90,6 +90,27 @@ def register(app: typer.Typer) -> None:
             return
 
         engine, session_factory = _engine_and_session(settings)
+        from sqlalchemy import inspect
+
+        if not inspect(engine).has_table(db_models.ComboTicket.__tablename__):
+            payload = {
+                "enabled": True,
+                "execute": execute,
+                "target_date": run_date,
+                "config_path": str(resolved_config_path),
+                "results": [],
+                "message": "combo tables missing; run alembic upgrade head before execute",
+            }
+            if json_output is not None:
+                json_output.parent.mkdir(parents=True, exist_ok=True)
+                json_output.write_text(
+                    json.dumps(payload, indent=2, sort_keys=True),
+                    encoding="utf-8",
+                )
+            console.print_json(data=payload)
+            if execute:
+                raise typer.Exit(code=2)
+            return
         _, channels, webhooks = _load_discord_routing(settings)
         with session_scope(session_factory) as session:
             delivery = DiscordDeliveryService(

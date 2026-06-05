@@ -712,7 +712,7 @@ football-predictor ou backtest-publication-v2 \
 Wrapper script reproductible :
 
 ```bash
-python scripts/backtest_ou_v2_publication.py \
+PYTHONPATH=src .venv/bin/python scripts/backtest_ou_v2_publication.py \
   --dataset data/processed/training_ou_v1.parquet \
   --output-dir reports/ou_v2 \
   --start-date 2025-08-01 \

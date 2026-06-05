@@ -22,9 +22,9 @@ Commandes :
 
 ```bash
 football-predictor worldcup-combos-run --config config/worldcup_combos.yaml --execute
-python scripts/lock_worldcup_combos.py --config config/worldcup_combos.yaml --execute
+PYTHONPATH=src .venv/bin/python scripts/lock_worldcup_combos.py --config config/worldcup_combos.yaml --execute
 football-predictor worldcup-combos-publish --config config/worldcup_combos.yaml --execute
-python scripts/settle_worldcup_combos.py --config config/worldcup_combos.yaml --execute
+PYTHONPATH=src .venv/bin/python scripts/settle_worldcup_combos.py --config config/worldcup_combos.yaml --execute
 ```
 
 Criteres de sortie :

@@ -11,7 +11,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 
 from football_predictor.config.settings import get_settings
 from football_predictor.db import models as db_models
@@ -34,6 +34,22 @@ def main() -> None:
 
     now = datetime.now(tz=UTC)
     engine = create_db_engine(settings.database_url)
+    if not inspect(engine).has_table(db_models.ComboTicket.__tablename__):
+        message = "combo tables missing; run alembic upgrade head before execute"
+        if args.execute:
+            raise SystemExit(message)
+        print(
+            json.dumps(
+                {
+                    "enabled": True,
+                    "execute": args.execute,
+                    "results": [],
+                    "message": message,
+                },
+                indent=2,
+            )
+        )
+        return
     session_factory = create_session_factory(engine)
     with session_scope(session_factory) as session:
         records = session.execute(

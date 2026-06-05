@@ -87,6 +87,29 @@ def test_worldcup_coverage_summary_counts_all_fixtures_as_fixture_coverage(
     assert summary.endpoint_coverage["fixtures"]["coverage_pct"] == 100.0
 
 
+def test_worldcup_coverage_treats_missing_enrichment_tables_as_missing_sources(
+    tmp_path: Path,
+) -> None:
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'coverage_missing_enriched.db'}")
+    init_db(engine)
+    models.WorldCupGroupStateSnapshot.__table__.drop(engine)
+    models.SquadStrengthFeature.__table__.drop(engine)
+    session_factory = create_session_factory(engine)
+    now = datetime(2026, 6, 11, 12, tzinfo=UTC)
+
+    with session_scope(session_factory) as session:
+        _seed_worldcup_fixture(session, kickoff=now + timedelta(hours=6))
+        quality = WorldCupCoverageMonitor(session).fixture_quality_matrix(
+            session.get(models.Fixture, -901),
+            now=now,
+        )
+
+    assert quality.has_group_state is False
+    assert quality.has_squad_strength is False
+    assert "group_state" in quality.missing_sources
+    assert "squad_strength" in quality.missing_sources
+
+
 def test_worldcup_fixture_quality_drops_when_expected_lineups_are_missing(
     tmp_path: Path,
 ) -> None:

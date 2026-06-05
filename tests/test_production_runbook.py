@@ -96,6 +96,119 @@ def test_worldcup_combos_publish_dry_run_disabled_config_does_not_publish(
     assert "https://" not in result.stdout
 
 
+def test_worldcup_combos_publish_dry_run_missing_tables_is_noop(tmp_path: Path) -> None:
+    get_settings.cache_clear()
+    config = tmp_path / "worldcup_combos.yaml"
+    config.write_text(
+        "\n".join(
+            [
+                "enabled: true",
+                "competition_key: fifa_world_cup_2026",
+                "staff_only_shadow_mode: true",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        app,
+        ["worldcup-combos-publish", "--config", str(config), "--dry-run"],
+        env={
+            "DATABASE_URL": f"sqlite:///{tmp_path / 'missing_combo_tables.db'}",
+            "DISCORD_WEBHOOK_URL": "",
+        },
+    )
+    get_settings.cache_clear()
+
+    assert result.exit_code == 0
+    assert "combo tables missing" in result.stdout
+    assert "https://" not in result.stdout
+
+
+def test_worldcup_combos_publish_execute_missing_tables_fails(tmp_path: Path) -> None:
+    get_settings.cache_clear()
+    config = tmp_path / "worldcup_combos.yaml"
+    config.write_text(
+        "\n".join(
+            [
+                "enabled: true",
+                "competition_key: fifa_world_cup_2026",
+                "staff_only_shadow_mode: true",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        app,
+        ["worldcup-combos-publish", "--config", str(config), "--execute"],
+        env={
+            "DATABASE_URL": f"sqlite:///{tmp_path / 'missing_combo_execute_tables.db'}",
+            "DISCORD_WEBHOOK_URL": "",
+        },
+    )
+    get_settings.cache_clear()
+
+    assert result.exit_code == 2
+    assert "combo tables missing" in result.stdout
+    assert "https://" not in result.stdout
+
+
+def test_combo_lock_and_settle_dry_run_missing_tables_are_noop(
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    config = tmp_path / "worldcup_combos.yaml"
+    config.write_text("enabled: true\ncompetition_key: fifa_world_cup_2026\n", encoding="utf-8")
+    env = {
+        "PYTHONPATH": str(repo_root / "src"),
+        "DATABASE_URL": f"sqlite:///{tmp_path / 'missing_combo_script_tables.db'}",
+        "PATH": "/usr/bin:/bin",
+    }
+
+    for relative_path in ("scripts/lock_worldcup_combos.py", "scripts/settle_worldcup_combos.py"):
+        result = subprocess.run(
+            [sys.executable, str(repo_root / relative_path), "--config", str(config)],
+            cwd=repo_root,
+            capture_output=True,
+            env=env,
+            text=True,
+        )
+        assert result.returncode == 0
+        assert "combo tables missing" in result.stdout
+        assert '"execute": false' in result.stdout
+
+
+def test_combo_lock_and_settle_execute_missing_tables_fail(
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    config = tmp_path / "worldcup_combos.yaml"
+    config.write_text("enabled: true\ncompetition_key: fifa_world_cup_2026\n", encoding="utf-8")
+    env = {
+        "PYTHONPATH": str(repo_root / "src"),
+        "DATABASE_URL": f"sqlite:///{tmp_path / 'missing_combo_execute_script_tables.db'}",
+        "PATH": "/usr/bin:/bin",
+    }
+
+    for relative_path in ("scripts/lock_worldcup_combos.py", "scripts/settle_worldcup_combos.py"):
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(repo_root / relative_path),
+                "--config",
+                str(config),
+                "--execute",
+            ],
+            cwd=repo_root,
+            capture_output=True,
+            env=env,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "combo tables missing" in result.stderr
+
+
 def test_worldcup_odds_sync_execute_requires_refresh_api(repo_root: Path) -> None:
     result = subprocess.run(
         [

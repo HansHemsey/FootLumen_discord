@@ -11,7 +11,10 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+from sqlalchemy import inspect
+
 from football_predictor.config.settings import get_settings
+from football_predictor.db import models as db_models
 from football_predictor.db.session import create_db_engine, create_session_factory, session_scope
 from football_predictor.world_cup_combos.config import load_world_cup_combo_config
 from football_predictor.world_cup_combos.worldcup_combo_settlement import (
@@ -29,6 +32,22 @@ def main() -> None:
         return
 
     engine = create_db_engine(settings.database_url)
+    if not inspect(engine).has_table(db_models.ComboTicket.__tablename__):
+        message = "combo tables missing; run alembic upgrade head before execute"
+        if args.execute:
+            raise SystemExit(message)
+        print(
+            json.dumps(
+                {
+                    "enabled": True,
+                    "execute": args.execute,
+                    "results": [],
+                    "message": message,
+                },
+                indent=2,
+            )
+        )
+        return
     session_factory = create_session_factory(engine)
     with session_scope(session_factory) as session:
         service = WorldCupComboSettlementService(session)

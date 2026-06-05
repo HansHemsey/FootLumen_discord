@@ -45,6 +45,34 @@ class DataQualityError(FootballPredictorError):
     """Feature or prediction data quality is too poor for the requested operation."""
 
 
+class DataSourceUnavailable(FootballPredictorError):
+    """A dynamic source failed or returned unusable data."""
+
+
+class OddsUnavailable(DataSourceUnavailable):
+    """Prematch odds are unavailable or failed to refresh."""
+
+
+class LineupsUnavailable(DataSourceUnavailable):
+    """Lineups are unavailable or failed to refresh."""
+
+
+class ApiPredictionUnavailable(DataSourceUnavailable):
+    """API-Football prediction snapshot is unavailable or failed to refresh."""
+
+
+class StaleSnapshotError(DataSourceUnavailable):
+    """A point-in-time snapshot is too old for the requested use."""
+
+
+class PublicationBlocked(FootballPredictorError):
+    """Publication was blocked by a safety or data-quality policy."""
+
+
+class DataLeakageGuardError(FootballPredictorError):
+    """A point-in-time guard detected future data usage."""
+
+
 class DiagnosticsError(FootballPredictorError):
     """Local diagnostics or observability check failed."""
 

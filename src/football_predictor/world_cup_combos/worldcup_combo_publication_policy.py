@@ -13,6 +13,9 @@ CRITICAL_WARNINGS = {
     "market_scope_unknown",
     "unknown_market_scope",
     "same_fixture_conflict",
+    "odds_failed_close_to_kickoff",
+    "lineups_failed_close_to_kickoff",
+    "source_critical_absent",
 }
 
 

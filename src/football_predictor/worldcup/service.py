@@ -27,6 +27,7 @@ from football_predictor.prediction.service import ApiFootballPayloadClient, Pred
 from football_predictor.reference.lookups import ApiFootballReference, PlayersReference
 from football_predictor.utils.exceptions import PredictionError
 from football_predictor.utils.logging import get_logger
+from football_predictor.utils.source_health import run_observed_source, source_health_warnings
 from football_predictor.utils.time import ensure_aware_utc, utc_now
 from football_predictor.worldcup.coverage_monitor import WorldCupCoverageMonitor
 from football_predictor.worldcup.dynamic import (
@@ -125,6 +126,12 @@ class WorldCupPredictionService:
             bundle=self.bundle,
         ).fixture_quality_matrix(fixture, now=cutoff)
         data_quality = _with_fixture_quality(data_quality, fixture_quality)
+        data_quality = _with_refresh_health(
+            data_quality,
+            refresh_summary,
+            fixture=fixture,
+            prediction_time=cutoff,
+        )
         model = self._load_model()
         blend_config = getattr(model, "blend_config", None) if model is not None else None
         if model is None:
@@ -186,7 +193,7 @@ class WorldCupPredictionService:
         effective_label, effective_score = _apply_fixture_quality_cap(
             effective_label,
             effective_score,
-            fixture_quality.to_json_dict(),
+            data_quality,
         )
         output = PredictionOutput(
             fixture_id=fixture.fixture_id,
@@ -250,40 +257,86 @@ class WorldCupPredictionService:
     ) -> JsonDict:
         if self.reference is None:
             raise PredictionError("World Cup refresh_data=True requires API reference")
-        summary: JsonDict = {"warnings": []}
+        summary: JsonDict = {"warnings": [], "source_health": []}
         try:
             fixtures = FixtureIngestionService(self.session, api_client, save_raw=save_raw)
-            summary["fixtures"] = fixtures.ingest_fixture_by_id(fixture_id).as_dict()
+            result, health = run_observed_source(
+                logger=logger,
+                event="worldcup_dynamic_refresh_source",
+                source_name="fixtures",
+                fixture_id=fixture_id,
+                competition_key="fifa_world_cup_2026",
+                operation=lambda: fixtures.ingest_fixture_by_id(fixture_id).as_dict(),
+                warning_name="fixtures_failed",
+            )
+            summary["source_health"].append(health.as_dict())
+            if result is not None:
+                summary["fixtures"] = result
             self.session.flush()
             fixture = self.session.get(models.Fixture, fixture_id)
             if fixture is None:
                 raise PredictionError(f"fixture_id={fixture_id} was not returned by refresh")
-            details = FixtureDetailsIngestionService(
-                self.session,
-                api_client,
-                reference=self.reference,
-                players_reference=self.players_reference,
-                save_raw=save_raw,
+        except PredictionError:
+            raise
+
+        details = FixtureDetailsIngestionService(
+            self.session,
+            api_client,
+            reference=self.reference,
+            players_reference=self.players_reference,
+            save_raw=save_raw,
+        )
+        for source_name, warning_name, operation in (
+            (
+                "injuries",
+                "injuries_failed",
+                lambda: details.ingest_injuries_for_fixture(fixture_id).as_dict(),
+            ),
+            (
+                "api_prediction",
+                "api_prediction_failed",
+                lambda: details.ingest_api_prediction(fixture_id).as_dict(),
+            ),
+            (
+                "lineups",
+                "lineups_failed",
+                lambda: details.ingest_fixture_lineups(fixture_id).as_dict(),
+            ),
+        ):
+            result, health = run_observed_source(
+                logger=logger,
+                event="worldcup_dynamic_refresh_source",
+                source_name=source_name,
+                fixture_id=fixture_id,
+                competition_key="fifa_world_cup_2026",
+                operation=operation,
+                warning_name=warning_name,
             )
-            summary["injuries"] = details.ingest_injuries_for_fixture(fixture_id).as_dict()
-            summary["api_prediction"] = details.ingest_api_prediction(fixture_id).as_dict()
-            summary["lineups"] = details.ingest_fixture_lineups(fixture_id).as_dict()
-            odds = OddsIngestionService(
-                self.session,
-                api_client,
-                reference=self.reference,
-                market_bet_name=self.market_1x2_bet_name,
-                market_bet_id=self.market_1x2_bet_id,
-                save_raw=save_raw,
-            )
-            summary["odds"] = odds.ingest_odds_for_fixture(fixture_id).as_dict()
-        except Exception as exc:
-            logger.warning(
-                "Optional World Cup dynamic refresh failed fixture_id=%s error=%s",
-                fixture_id,
-                exc,
-            )
-            summary["warnings"].append(str(exc))
+            summary["source_health"].append(health.as_dict())
+            if result is not None:
+                summary[source_name] = result
+
+        odds = OddsIngestionService(
+            self.session,
+            api_client,
+            reference=self.reference,
+            market_bet_name=self.market_1x2_bet_name,
+            market_bet_id=self.market_1x2_bet_id,
+            save_raw=save_raw,
+        )
+        result, health = run_observed_source(
+            logger=logger,
+            event="worldcup_dynamic_refresh_source",
+            source_name="odds",
+            fixture_id=fixture_id,
+            competition_key="fifa_world_cup_2026",
+            operation=lambda: odds.ingest_odds_for_fixture(fixture_id).as_dict(),
+            warning_name="odds_failed",
+        )
+        summary["source_health"].append(health.as_dict())
+        if result is not None:
+            summary["odds"] = result
+        summary["warnings"] = source_health_warnings(summary["source_health"])
         return summary
 
     def _save_feature_snapshot(
@@ -346,6 +399,7 @@ class WorldCupPredictionService:
                     "injuries": bool(features.get("wc_dynamic_injuries_available_flag")),
                 },
                 "draw_safety": output.draw_safety_json,
+                "source_health": output.data_quality_json.get("source_health"),
                 "worldcup_fixture_quality": output.data_quality_json.get(
                     "worldcup_fixture_quality"
                 ),
@@ -387,6 +441,47 @@ def _with_fixture_quality(
     return payload
 
 
+def _with_refresh_health(
+    data_quality: JsonDict,
+    refresh_summary: JsonDict | None,
+    *,
+    fixture: models.Fixture,
+    prediction_time: datetime,
+) -> JsonDict:
+    if not isinstance(refresh_summary, dict):
+        return data_quality
+    source_health = refresh_summary.get("source_health")
+    if not isinstance(source_health, list):
+        return data_quality
+
+    payload = dict(data_quality)
+    warnings = set(str(warning) for warning in payload.get("warnings") or [])
+    warnings.update(source_health_warnings(source_health))
+    close_to_kickoff = _close_to_kickoff(fixture, prediction_time)
+    penalty = 0.0
+    for row in source_health:
+        if not isinstance(row, dict) or row.get("status") == "success":
+            continue
+        source = str(row.get("source_name") or "source")
+        if close_to_kickoff and source in {"lineups", "odds"}:
+            warnings.add(f"{source}_failed_close_to_kickoff")
+        penalty += _source_failure_penalty(source, close_to_kickoff=close_to_kickoff)
+    if penalty:
+        current = float(payload.get("overall_data_quality_score") or 0.0)
+        adjusted = max(0.0, current - penalty)
+        payload["overall_data_quality_score"] = adjusted
+        payload["data_quality_score"] = min(
+            float(payload.get("data_quality_score") or adjusted),
+            adjusted,
+        )
+        payload["label"] = (
+            "High" if adjusted >= 75 else "Medium" if adjusted >= 50 else "Low"
+        )
+    payload["source_health"] = source_health
+    payload["warnings"] = sorted(warnings)
+    return payload
+
+
 def _coverage_explanation(fixture_quality: JsonDict) -> str:
     missing = fixture_quality.get("missing_sources") or []
     if missing:
@@ -401,9 +496,13 @@ def _apply_fixture_quality_cap(
 ) -> tuple[str, float]:
     quality_score = float(fixture_quality.get("data_quality_score") or 0.0)
     warnings = set(fixture_quality.get("warnings") or [])
-    if quality_score < 55.0 or "lineups_expected_missing" in warnings:
+    if (
+        quality_score < 55.0
+        or "lineups_expected_missing" in warnings
+        or "lineups_failed_close_to_kickoff" in warnings
+    ):
         return _lower_confidence_label(confidence, "Low"), min(score, 54.0)
-    if quality_score < 70.0 or "odds_1x2_missing" in warnings:
+    if quality_score < 70.0 or "odds_1x2_missing" in warnings or "odds_failed" in warnings:
         return _lower_confidence_label(confidence, "Medium"), min(score, 67.0)
     return confidence, score
 
@@ -447,6 +546,27 @@ def _features_summary(features: JsonDict) -> JsonDict:
         "wc_away_dynamic_penalty",
     )
     return {key: features.get(key) for key in keys if key in features}
+
+
+def _close_to_kickoff(fixture: models.Fixture, prediction_time: datetime) -> bool:
+    if fixture.date is None:
+        return False
+    seconds = (ensure_aware_utc(fixture.date) - prediction_time).total_seconds()
+    return 0 <= seconds <= 90 * 60
+
+
+def _source_failure_penalty(source: str, *, close_to_kickoff: bool) -> float:
+    if source == "odds":
+        return 12.0
+    if source == "lineups":
+        return 16.0 if close_to_kickoff else 6.0
+    if source == "api_prediction":
+        return 5.0
+    if source == "injuries":
+        return 4.0
+    if source == "fixtures":
+        return 8.0
+    return 3.0
 
 
 def _with_ids(

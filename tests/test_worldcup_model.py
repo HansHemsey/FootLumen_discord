@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import football_predictor.worldcup.service as worldcup_service_module
 from football_predictor.db import models
 from football_predictor.db.session import (
     create_db_engine,
@@ -16,6 +17,7 @@ from football_predictor.db.session import (
 from football_predictor.features.data_quality import DataQuality
 from football_predictor.modeling.probabilities import ProbabilityTriple
 from football_predictor.prediction.service import PredictionOutput
+from football_predictor.utils.exceptions import PredictionError
 from football_predictor.utils.time import utc_now
 from football_predictor.worldcup.blend import (
     WORLD_CUP_BLEND_CONFIG_FILENAME,
@@ -426,6 +428,114 @@ def test_worldcup_predict_refresh_data_calls_dynamic_refresh(
     assert output.refresh_summary["save_raw"] is True
 
 
+def test_worldcup_refresh_records_independent_source_health(
+    monkeypatch,
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'wc_refresh_health.db'}")
+    init_db(engine)
+    session_factory = create_session_factory(engine)
+    cutoff = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    _install_refresh_fakes(
+        monkeypatch,
+        failures={"api_prediction", "lineups"},
+    )
+
+    with session_scope(session_factory) as session:
+        _seed_worldcup_fixture(session, fixture_id=9011)
+        service = WorldCupPredictionService(
+            session,
+            _bundle(repo_root),
+            model_dir=tmp_path,
+            reference=object(),
+        )
+
+        output = service.predict_fixture(
+            9011,
+            cutoff,
+            refresh_data=True,
+            api_client=object(),
+        )
+
+    source_health = {
+        row["source_name"]: row["status"]
+        for row in output.refresh_summary["source_health"]
+    }
+    assert source_health["odds"] == "success"
+    assert source_health["api_prediction"] == "failed"
+    assert source_health["lineups"] == "failed"
+    assert "odds_failed" not in output.refresh_summary["warnings"]
+    assert "api_prediction_failed" in output.refresh_summary["warnings"]
+    assert "lineups_failed" in output.data_quality_json["warnings"]
+    assert output.data_quality_json["source_health"]
+
+
+def test_worldcup_refresh_odds_failure_adds_warning(
+    monkeypatch,
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'wc_refresh_odds_failure.db'}")
+    init_db(engine)
+    session_factory = create_session_factory(engine)
+    cutoff = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    _install_refresh_fakes(monkeypatch, failures={"odds"})
+
+    with session_scope(session_factory) as session:
+        _seed_worldcup_fixture(session, fixture_id=9012)
+        service = WorldCupPredictionService(
+            session,
+            _bundle(repo_root),
+            model_dir=tmp_path,
+            reference=object(),
+        )
+
+        output = service.predict_fixture(
+            9012,
+            cutoff,
+            refresh_data=True,
+            api_client=object(),
+        )
+
+    assert "odds_failed" in output.refresh_summary["warnings"]
+    assert "odds_failed" in output.data_quality_json["warnings"]
+    assert output.data_quality_json["overall_data_quality_score"] < 100
+
+
+def test_worldcup_refresh_lineups_failure_close_to_kickoff_caps_confidence(
+    monkeypatch,
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'wc_refresh_lineups_cap.db'}")
+    init_db(engine)
+    session_factory = create_session_factory(engine)
+    kickoff = datetime(2026, 6, 11, 19, 0, tzinfo=UTC)
+    cutoff = kickoff - timedelta(minutes=30)
+    _install_refresh_fakes(monkeypatch, failures={"lineups"})
+
+    with session_scope(session_factory) as session:
+        _seed_worldcup_fixture(session, fixture_id=9013, kickoff=kickoff)
+        service = WorldCupPredictionService(
+            session,
+            _bundle(repo_root),
+            model_dir=tmp_path,
+            reference=object(),
+        )
+
+        output = service.predict_fixture(
+            9013,
+            cutoff,
+            refresh_data=True,
+            api_client=object(),
+        )
+
+    assert "lineups_failed_close_to_kickoff" in output.data_quality_json["warnings"]
+    assert output.confidence_label in {"Uncertain", "Low"}
+    assert output.confidence_score <= 54.0
+
+
 def test_predict_worldcup_rejects_non_worldcup_fixture(tmp_path: Path, repo_root: Path) -> None:
     engine = create_db_engine(f"sqlite:///{tmp_path / 'wc_reject.db'}")
     init_db(engine)
@@ -746,3 +856,66 @@ def _seed_odds(
         )
     )
     session.flush()
+
+
+class _FakeRefreshSummary:
+    def __init__(self, source: str) -> None:
+        self.source = source
+
+    def as_dict(self) -> dict[str, object]:
+        return {"source": self.source, "ok": True}
+
+
+def _install_refresh_fakes(monkeypatch, *, failures: set[str]) -> None:
+    class FakeFixtureIngestionService:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def ingest_fixture_by_id(self, _fixture_id: int) -> _FakeRefreshSummary:
+            if "fixtures" in failures:
+                raise PredictionError("fixtures refresh failed")
+            return _FakeRefreshSummary("fixtures")
+
+    class FakeFixtureDetailsIngestionService:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def ingest_injuries_for_fixture(self, _fixture_id: int) -> _FakeRefreshSummary:
+            if "injuries" in failures:
+                raise PredictionError("injuries refresh failed")
+            return _FakeRefreshSummary("injuries")
+
+        def ingest_api_prediction(self, _fixture_id: int) -> _FakeRefreshSummary:
+            if "api_prediction" in failures:
+                raise PredictionError("api prediction refresh failed")
+            return _FakeRefreshSummary("api_prediction")
+
+        def ingest_fixture_lineups(self, _fixture_id: int) -> _FakeRefreshSummary:
+            if "lineups" in failures:
+                raise PredictionError("lineups refresh failed")
+            return _FakeRefreshSummary("lineups")
+
+    class FakeOddsIngestionService:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def ingest_odds_for_fixture(self, _fixture_id: int) -> _FakeRefreshSummary:
+            if "odds" in failures:
+                raise PredictionError("odds refresh failed")
+            return _FakeRefreshSummary("odds")
+
+    monkeypatch.setattr(
+        worldcup_service_module,
+        "FixtureIngestionService",
+        FakeFixtureIngestionService,
+    )
+    monkeypatch.setattr(
+        worldcup_service_module,
+        "FixtureDetailsIngestionService",
+        FakeFixtureDetailsIngestionService,
+    )
+    monkeypatch.setattr(
+        worldcup_service_module,
+        "OddsIngestionService",
+        FakeOddsIngestionService,
+    )

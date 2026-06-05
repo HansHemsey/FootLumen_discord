@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 """Compute dated national Elo snapshots from persisted international matches.
 
-Dry-run by default. Use --write to persist snapshots.
+Dry-run by default. Use --execute to persist snapshots. --write is kept as a
+backward-compatible alias.
 """
 
 from __future__ import annotations
@@ -52,7 +53,13 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--snapshot-date", default=None, help="Optional YYYY-MM-DD cutoff.")
     parser.add_argument("--source", default="computed_national_history")
-    parser.add_argument("--write", action="store_true", help="Persist snapshots to DB.")
+    parser.add_argument(
+        "--execute",
+        "--write",
+        dest="write",
+        action="store_true",
+        help="Persist snapshots to DB. Defaults to dry-run.",
+    )
     return parser.parse_args()
 
 

@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 """Synchronize World Cup 2026 odds markets into odds_snapshots.
 
-Dry-run by default and does not call API-Football. Use --write --refresh-api to ingest.
+Dry-run by default and does not call API-Football. Use --execute --refresh-api
+to ingest. --write is kept as a backward-compatible alias.
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ def main() -> None:
             json.dumps(
                 {
                     "dry_run": True,
-                    "message": "dry-run only; pass --write --refresh-api to call API-Football",
+                    "message": "dry-run only; pass --execute --refresh-api to call API-Football",
                     "markets": markets,
                     "params": _mode_payload(args),
                 },
@@ -42,20 +43,23 @@ def main() -> None:
         )
         return
     if not args.refresh_api:
-        raise SystemExit("--write requires --refresh-api for live API-Football calls")
+        raise SystemExit("--execute requires --refresh-api for live API-Football calls")
 
     settings = get_settings()
     reference = load_api_football_reference(settings.api_football_reference_path)
     engine = create_db_engine(settings.database_url)
     init_db(engine)
     session_factory = create_session_factory(engine)
-    with ApiFootballClient(
-        base_url=settings.api_football_base_url,
-        api_key=settings.api_football_key,
-        timeout=settings.api_football_timeout_seconds,
-        raw_snapshot_dir=settings.api_football_raw_snapshot_dir,
-        retries=settings.api_football_max_retries,
-    ) as client, session_scope(session_factory) as session:
+    with (
+        ApiFootballClient(
+            base_url=settings.api_football_base_url,
+            api_key=settings.api_football_key,
+            timeout=settings.api_football_timeout_seconds,
+            raw_snapshot_dir=settings.api_football_raw_snapshot_dir,
+            retries=settings.api_football_max_retries,
+        ) as client,
+        session_scope(session_factory) as session,
+    ):
         output = {}
         if "1x2" in markets:
             service = OddsIngestionService(
@@ -94,7 +98,13 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--league-id", type=int, default=1)
     parser.add_argument("--season", type=int, default=2026)
     parser.add_argument("--markets", default="1x2,ou25,btts")
-    parser.add_argument("--write", action="store_true", help="Persist odds snapshots.")
+    parser.add_argument(
+        "--execute",
+        "--write",
+        dest="write",
+        action="store_true",
+        help="Persist odds snapshots. Defaults to dry-run.",
+    )
     parser.add_argument("--refresh-api", action="store_true", help="Allow live API calls.")
     parser.add_argument("--save-raw", action="store_true", help="Persist raw API snapshots.")
     return parser.parse_args()

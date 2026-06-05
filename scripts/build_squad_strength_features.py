@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 """Build dated squad strength snapshots from local PlayerSquad rows.
 
-Dry-run by default. Use --write to persist snapshots.
+Dry-run by default. Use --execute to persist snapshots. --write is kept as a
+backward-compatible alias.
 """
 
 from __future__ import annotations
@@ -59,7 +60,13 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--season", type=int, default=2026)
     parser.add_argument("--competition-key", default=WORLD_CUP_COMPETITION_KEY)
     parser.add_argument("--snapshot-at", default=None, help="ISO snapshot time. Defaults to now.")
-    parser.add_argument("--write", action="store_true", help="Persist snapshots to DB.")
+    parser.add_argument(
+        "--execute",
+        "--write",
+        dest="write",
+        action="store_true",
+        help="Persist snapshots to DB. Defaults to dry-run.",
+    )
     return parser.parse_args()
 
 

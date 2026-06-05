@@ -51,7 +51,11 @@ def main() -> None:
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=None)
-    parser.add_argument("--execute", action="store_true")
+    parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="Write settlement payloads and snapshots. Defaults to dry-run.",
+    )
     return parser.parse_args()
 
 

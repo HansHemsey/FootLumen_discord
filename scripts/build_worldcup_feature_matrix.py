@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 """Build an enriched point-in-time World Cup feature matrix.
 
-Dry-run by default. Use --write to create the matrix and coverage report files.
+Dry-run by default. Use --execute to create the matrix and coverage report
+files. --write is kept as a backward-compatible alias.
 """
 
 from __future__ import annotations
@@ -62,7 +63,13 @@ def _parse_args() -> argparse.Namespace:
         type=Path,
         default=Path("reports/worldcup_2026/feature_matrix_report.md"),
     )
-    parser.add_argument("--write", action="store_true", help="Write matrix and report files.")
+    parser.add_argument(
+        "--execute",
+        "--write",
+        dest="write",
+        action="store_true",
+        help="Write matrix and report files. Defaults to dry-run.",
+    )
     return parser.parse_args()
 
 

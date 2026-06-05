@@ -2,7 +2,7 @@
 """Generate a World Cup 2026 data coverage report.
 
 Dry-run is the default: no DB observations and no report files are written unless
-``--write`` is provided.
+``--execute`` is provided. ``--write`` is kept as a backward-compatible alias.
 """
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ def main() -> None:
         "message": (
             "coverage report written"
             if args.write
-            else "dry-run only; pass --write to persist observations and reports"
+            else "dry-run only; pass --execute to persist observations and reports"
         ),
     }
     print(json.dumps(payload, indent=2, sort_keys=True))
@@ -80,9 +80,11 @@ def _parse_args() -> argparse.Namespace:
         default=Path("reports/worldcup_2026"),
     )
     parser.add_argument(
+        "--execute",
         "--write",
+        dest="write",
         action="store_true",
-        help="Persist DB observations and write report files.",
+        help="Persist DB observations and write report files. Defaults to dry-run.",
     )
     return parser.parse_args()
 

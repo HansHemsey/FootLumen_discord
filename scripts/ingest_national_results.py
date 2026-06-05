@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 """Ingest national team results into point-in-time World Cup tables.
 
-Dry-run by default. Use --write to persist rows.
+Dry-run by default. Use --execute to persist rows. --write is kept as a
+backward-compatible alias.
 """
 
 from __future__ import annotations
@@ -52,7 +53,7 @@ def main() -> None:
         "dry_run": not args.write,
         "aliases": alias_result.as_dict(),
         "matches": result.as_dict(),
-        "message": "rows persisted" if args.write else "dry-run only; pass --write to persist",
+        "message": "rows persisted" if args.write else "dry-run only; pass --execute to persist",
     }
     print(json.dumps(payload, indent=2, sort_keys=True))
 
@@ -65,7 +66,13 @@ def _parse_args() -> argparse.Namespace:
         default=Path("data/reference/historical_worldcup_result.csv"),
     )
     parser.add_argument("--source", default="historical_worldcup_result_csv")
-    parser.add_argument("--write", action="store_true", help="Persist rows to DB.")
+    parser.add_argument(
+        "--execute",
+        "--write",
+        dest="write",
+        action="store_true",
+        help="Persist rows to DB. Defaults to dry-run.",
+    )
     return parser.parse_args()
 
 

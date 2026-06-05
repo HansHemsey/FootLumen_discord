@@ -135,7 +135,11 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=None)
     parser.add_argument("--date", default=None, help="Optional combo_date in YYYY-MM-DD.")
-    parser.add_argument("--execute", action="store_true")
+    parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="Send Discord messages and mark tickets. Defaults to dry-run.",
+    )
     return parser.parse_args()
 
 

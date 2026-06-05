@@ -28,7 +28,11 @@ def main() -> None:
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=None, help="Reserved for cron symmetry.")
-    parser.add_argument("--execute", action="store_true")
+    parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="Delete probable duplicate non-critical snapshots. Defaults to dry-run.",
+    )
     return parser.parse_args()
 
 

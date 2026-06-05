@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 """Ingest dated FIFA ranking snapshots.
 
-Dry-run by default. --snapshot-date is required to avoid undated current-rank leakage.
+Dry-run by default. Use --execute to persist snapshots. --snapshot-date is
+required to avoid undated current-rank leakage. --write is kept as a
+backward-compatible alias.
 """
 
 from __future__ import annotations
@@ -59,7 +61,13 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--snapshot-date", required=True, help="Ranking date, YYYY-MM-DD.")
     parser.add_argument("--source", default="fifa_csv")
-    parser.add_argument("--write", action="store_true", help="Persist snapshots to DB.")
+    parser.add_argument(
+        "--execute",
+        "--write",
+        dest="write",
+        action="store_true",
+        help="Persist snapshots to DB. Defaults to dry-run.",
+    )
     return parser.parse_args()
 
 

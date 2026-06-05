@@ -180,8 +180,10 @@ def run_daily_worldcup_predictions(
                 continue
             markdown = format_prediction_markdown(output, timezone_name=timezone_name)
             draw_safety_reason = draw_safety_skip_reason(output.draw_safety_json)
+            data_quality_reason = _worldcup_data_quality_skip_reason(output.data_quality_json)
             if (
                 draw_safety_reason is None
+                and data_quality_reason is None
                 and is_publishable_confidence(output.confidence_label)
             ):
                 send_result = delivery.send_markdown(
@@ -199,6 +201,9 @@ def run_daily_worldcup_predictions(
                     payload_metadata={
                         "model_family": "worldcup_1x2",
                         "draw_safety": output.draw_safety_json,
+                        "worldcup_fixture_quality": output.data_quality_json.get(
+                            "worldcup_fixture_quality"
+                        ),
                     },
                 ) if delivery is not None else None
                 status = send_result.status if send_result is not None else "predicted"
@@ -212,7 +217,7 @@ def run_daily_worldcup_predictions(
                     )
                 )
             else:
-                skip_reason = draw_safety_reason or CONFIDENCE_SKIP_REASON
+                skip_reason = draw_safety_reason or data_quality_reason or CONFIDENCE_SKIP_REASON
                 if not dry_run and not print_only:
                     send_skipped_prediction_to_staff(
                         delivery,
@@ -225,7 +230,12 @@ def run_daily_worldcup_predictions(
                         prediction_time=output.prediction_time,
                         automation_window=resolved_window.value,
                         model_prediction_id=output.model_prediction_id,
-                        payload_metadata={"draw_safety": output.draw_safety_json},
+                        payload_metadata={
+                            "draw_safety": output.draw_safety_json,
+                            "worldcup_fixture_quality": output.data_quality_json.get(
+                                "worldcup_fixture_quality"
+                            ),
+                        },
                         force=force,
                     )
                 results.append(
@@ -299,3 +309,18 @@ def _result(
         discord_message_id=discord_message_id,
         reason=reason,
     )
+
+
+def _worldcup_data_quality_skip_reason(data_quality: JsonDict | None) -> str | None:
+    if not isinstance(data_quality, dict):
+        return None
+    score = data_quality.get("worldcup_fixture_quality_score")
+    try:
+        if score is not None and float(score) < 55.0:
+            return "worldcup_data_quality_low"
+    except (TypeError, ValueError):
+        return None
+    warnings = set(data_quality.get("warnings") or [])
+    if "lineups_expected_missing" in warnings:
+        return "worldcup_lineups_expected_missing"
+    return None

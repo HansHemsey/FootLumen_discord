@@ -28,6 +28,7 @@ from football_predictor.reference.lookups import ApiFootballReference, PlayersRe
 from football_predictor.utils.exceptions import PredictionError
 from football_predictor.utils.logging import get_logger
 from football_predictor.utils.time import ensure_aware_utc, utc_now
+from football_predictor.worldcup.coverage_monitor import WorldCupCoverageMonitor
 from football_predictor.worldcup.dynamic import (
     apply_dynamic_probability_features,
     build_worldcup_dynamic_features,
@@ -119,6 +120,11 @@ class WorldCupPredictionService:
         )
         features.update(apply_dynamic_probability_features(features))
         data_quality = data_quality_for_features(features)
+        fixture_quality = WorldCupCoverageMonitor(
+            self.session,
+            bundle=self.bundle,
+        ).fixture_quality_matrix(fixture, now=cutoff)
+        data_quality = _with_fixture_quality(data_quality, fixture_quality)
         model = self._load_model()
         blend_config = getattr(model, "blend_config", None) if model is not None else None
         if model is None:
@@ -167,8 +173,21 @@ class WorldCupPredictionService:
             config=self.draw_safety_config,
         )
         explanations = _explanations(features)
+        if fixture_quality.data_quality_score < 70:
+            explanations.append(_coverage_explanation(fixture_quality.to_json_dict()))
         if draw_safety.public_note:
             explanations.append(draw_safety.public_note)
+        effective_label = draw_safety.effective_confidence_label
+        effective_score = (
+            draw_safety.effective_confidence_score
+            if draw_safety.effective_confidence_score is not None
+            else score
+        )
+        effective_label, effective_score = _apply_fixture_quality_cap(
+            effective_label,
+            effective_score,
+            fixture_quality.to_json_dict(),
+        )
         output = PredictionOutput(
             fixture_id=fixture.fixture_id,
             match_label=f"{fixture.home_team} vs {fixture.away_team}",
@@ -177,12 +196,8 @@ class WorldCupPredictionService:
             prediction_time=cutoff,
             probabilities=probabilities,
             predicted_result=probabilities.predicted_result(),
-            confidence_label=draw_safety.effective_confidence_label,
-            confidence_score=(
-                draw_safety.effective_confidence_score
-                if draw_safety.effective_confidence_score is not None
-                else score
-            ),
+            confidence_label=effective_label,
+            confidence_score=effective_score,
             explanations=explanations,
             data_quality=DataQuality(standings_available=True),
             data_quality_json=data_quality,
@@ -331,6 +346,9 @@ class WorldCupPredictionService:
                     "injuries": bool(features.get("wc_dynamic_injuries_available_flag")),
                 },
                 "draw_safety": output.draw_safety_json,
+                "worldcup_fixture_quality": output.data_quality_json.get(
+                    "worldcup_fixture_quality"
+                ),
             },
         )
         self.session.add(record)
@@ -342,6 +360,63 @@ def _confidence_score(probabilities: ProbabilityTriple, data_quality: JsonDict) 
     edge = probabilities.max_probability() - (1 / 3)
     quality = float(data_quality.get("overall_data_quality_score") or 0.0)
     return round(max(0.0, min(100.0, (edge * 140) + ((quality / 100.0) * 35))), 1)
+
+
+def _with_fixture_quality(
+    data_quality: JsonDict,
+    fixture_quality: Any,
+) -> JsonDict:
+    payload = dict(data_quality)
+    quality_payload = fixture_quality.to_json_dict()
+    score = float(quality_payload.get("data_quality_score") or 0.0)
+    current_score = float(payload.get("overall_data_quality_score") or score)
+    adjusted_score = min(current_score, score)
+    payload["overall_data_quality_score"] = adjusted_score
+    payload["data_quality_score"] = min(
+        float(payload.get("data_quality_score") or adjusted_score),
+        score,
+    )
+    payload["label"] = (
+        "High" if adjusted_score >= 75 else "Medium" if adjusted_score >= 50 else "Low"
+    )
+    payload["worldcup_fixture_quality_score"] = score
+    payload["worldcup_fixture_quality"] = quality_payload
+    warnings = list(payload.get("warnings") or [])
+    warnings.extend(quality_payload.get("warnings") or [])
+    payload["warnings"] = sorted(set(str(warning) for warning in warnings))
+    return payload
+
+
+def _coverage_explanation(fixture_quality: JsonDict) -> str:
+    missing = fixture_quality.get("missing_sources") or []
+    if missing:
+        return "Qualité données CDM: sources manquantes " + ", ".join(missing[:4]) + "."
+    return "Qualité données CDM: couverture partielle."
+
+
+def _apply_fixture_quality_cap(
+    confidence: str,
+    score: float,
+    fixture_quality: JsonDict,
+) -> tuple[str, float]:
+    quality_score = float(fixture_quality.get("data_quality_score") or 0.0)
+    warnings = set(fixture_quality.get("warnings") or [])
+    if quality_score < 55.0 or "lineups_expected_missing" in warnings:
+        return _lower_confidence_label(confidence, "Low"), min(score, 54.0)
+    if quality_score < 70.0 or "odds_1x2_missing" in warnings:
+        return _lower_confidence_label(confidence, "Medium"), min(score, 67.0)
+    return confidence, score
+
+
+def _lower_confidence_label(current: str, cap: str) -> str:
+    rank = {
+        "Uncertain": 0,
+        "Low": 1,
+        "Medium": 2,
+        "High": 3,
+        "Very High": 4,
+    }
+    return current if rank.get(current, 0) <= rank.get(cap, 0) else cap
 
 
 def _explanations(features: JsonDict) -> list[str]:

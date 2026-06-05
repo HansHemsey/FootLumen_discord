@@ -51,6 +51,44 @@ class RawApiSnapshot(Base, TimestampMixin):
     source: Mapped[str] = mapped_column(String(64), default="api-football")
 
 
+class ApiCoverageObservation(Base, TimestampMixin):
+    __tablename__ = "api_coverage_observations"
+    __table_args__ = (
+        Index(
+            "ix_api_coverage_competition_endpoint",
+            "competition_key",
+            "endpoint",
+            "requested_at",
+        ),
+        Index(
+            "ix_api_coverage_fixture_endpoint",
+            "fixture_id",
+            "endpoint",
+            "requested_at",
+        ),
+        Index(
+            "ix_api_coverage_league_season_endpoint",
+            "league_id",
+            "season",
+            "endpoint",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    competition_key: Mapped[str] = mapped_column(String(80), index=True)
+    league_id: Mapped[int] = mapped_column(Integer, index=True)
+    season: Mapped[int] = mapped_column(Integer, index=True)
+    endpoint: Mapped[str] = mapped_column(String(128), index=True)
+    fixture_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    team_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    result_count: Mapped[int] = mapped_column(Integer, default=0)
+    useful_payload_flag: Mapped[bool] = mapped_column(Boolean, default=False)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    warning: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class League(Base, TimestampMixin):
     __tablename__ = "leagues"
     __table_args__ = (UniqueConstraint("league_id", "season", name="uq_league_season"),)

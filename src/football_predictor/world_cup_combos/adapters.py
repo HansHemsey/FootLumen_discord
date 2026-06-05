@@ -32,6 +32,7 @@ class OneXTwoPredictionRecord:
     confidence_label: str
     data_quality_score: float
     payload_json: JsonDict
+    warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,7 @@ class OUPredictionRecord:
     confidence_label: str
     data_quality_score: float
     payload_json: JsonDict
+    warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -111,6 +113,7 @@ class WorldCupComboReadAdapters:
             confidence_label=prediction.confidence_label or _label_from_score(confidence_score),
             data_quality_score=_data_quality_score(prediction.data_quality_json),
             payload_json=prediction.payload_json or {},
+            warnings=_prediction_warnings(prediction.data_quality_json, prediction.payload_json),
         )
 
     def latest_ou_value_prediction(
@@ -169,6 +172,7 @@ class WorldCupComboReadAdapters:
                 ),
                 data_quality_score=_data_quality_score(prediction.data_quality_json),
                 payload_json=payload,
+                warnings=_prediction_warnings(prediction.data_quality_json, payload),
             )
         return None
 
@@ -320,6 +324,7 @@ def _data_quality_score(payload: JsonDict | None) -> float:
             payload,
             (
                 "combo_data_quality_score",
+                "worldcup_fixture_quality_score",
                 "publication_data_quality_score",
                 "overall_data_quality_score",
                 "ou_data_quality_score",
@@ -339,6 +344,23 @@ def _payload_value(payload: JsonDict | None, keys: tuple[str, ...]) -> Any:
         if value is not None:
             return value
     return None
+
+
+def _prediction_warnings(
+    data_quality_json: JsonDict | None,
+    payload_json: JsonDict | None,
+) -> tuple[str, ...]:
+    warnings: list[str] = []
+    if isinstance(data_quality_json, dict):
+        warnings.extend(str(item) for item in data_quality_json.get("warnings") or [])
+        fixture_quality = data_quality_json.get("worldcup_fixture_quality")
+        if isinstance(fixture_quality, dict):
+            warnings.extend(str(item) for item in fixture_quality.get("warnings") or [])
+    if isinstance(payload_json, dict):
+        fixture_quality = payload_json.get("worldcup_fixture_quality")
+        if isinstance(fixture_quality, dict):
+            warnings.extend(str(item) for item in fixture_quality.get("warnings") or [])
+    return tuple(sorted(set(warnings)))
 
 
 def _ou_payload_value(payload: JsonDict | None, keys: tuple[str, ...]) -> Any:

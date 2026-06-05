@@ -540,6 +540,32 @@ def test_worldcup_combo_selector_includes_clean_1x2_leg(tmp_path: Path) -> None:
     assert candidate.edge >= config.min_leg_edge
 
 
+def test_worldcup_combo_selector_carries_worldcup_quality_warnings(tmp_path: Path) -> None:
+    engine = _init_full_db(tmp_path)
+    config = _enabled_config()
+    kickoff = datetime(2026, 6, 11, 18, tzinfo=UTC)
+    prediction_time = kickoff - timedelta(minutes=40)
+    with session_scope(create_session_factory(engine)) as session:
+        _seed_fixture(session, fixture_id=-1502, kickoff=kickoff)
+        _seed_1x2_prediction(
+            session,
+            fixture_id=-1502,
+            prediction_time=prediction_time,
+            payload_json={
+                "model_family": "worldcup_1x2",
+                "worldcup_fixture_quality": {
+                    "warnings": ["lineups_expected_missing"],
+                },
+            },
+        )
+        _seed_1x2_odds(session, fixture_id=-1502, fetched_at=kickoff - timedelta(minutes=30))
+
+    result = _select_for_date(engine, config, date(2026, 6, 11))
+
+    assert len(result.candidates) == 1
+    assert "lineups_expected_missing" in result.candidates[0].warnings
+
+
 def test_worldcup_combo_selector_includes_clean_ou_v2_value_leg(tmp_path: Path) -> None:
     engine = _init_full_db(tmp_path)
     config = _enabled_config()

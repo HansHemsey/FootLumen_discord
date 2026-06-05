@@ -183,6 +183,7 @@ class WorldCupComboLegSelector:
             bookmaker_name=market.bookmaker_name or "consensus",
             executable_decimal_odd=market.executable_decimal_odd or market.decimal_odd,
             market_probability_consensus=market.market_probability,
+            source_warnings=prediction.warnings,
         )
 
     def _ou_candidate(
@@ -238,6 +239,7 @@ class WorldCupComboLegSelector:
             bookmaker_name="consensus",
             executable_decimal_odd=prediction.odd_pick,
             market_probability_consensus=prediction.market_p_pick,
+            source_warnings=prediction.warnings,
         )
 
     def _candidate_or_reason(
@@ -266,6 +268,7 @@ class WorldCupComboLegSelector:
         bookmaker_name: str | None,
         executable_decimal_odd: float | None,
         market_probability_consensus: float | None,
+        source_warnings: tuple[str, ...] = (),
     ) -> tuple[ComboLegCandidate | None, str | None]:
         if decimal_odd <= 1.01:
             return None, "invalid_odds"
@@ -292,6 +295,8 @@ class WorldCupComboLegSelector:
             warnings.append("matchday3_public_risk")
         if combo_session.is_knockout and not self.config.allow_public_knockout:
             warnings.append("knockout_public_risk")
+        warnings.extend(source_warnings)
+        warnings = sorted(set(warnings))
         return (
             ComboLegCandidate(
                 fixture_id=fixture.fixture_id,

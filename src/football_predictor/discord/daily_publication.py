@@ -259,6 +259,7 @@ def _standings_messages(
     competition: CompetitionConfig,
     timezone_name: str,
 ) -> list[str]:
+    is_worldcup = _is_worldcup_2026(competition)
     latest = session.execute(
         select(func.max(models.StandingSnapshot.snapshot_date)).where(
             models.StandingSnapshot.league_id == competition.league_id,
@@ -267,6 +268,7 @@ def _standings_messages(
     ).scalar_one_or_none()
     rows: list[StandingLine] = []
     if latest is not None:
+        standing_groups = _standing_group_lookup(session, competition) if is_worldcup else {}
         records = session.execute(
             select(models.StandingSnapshot, models.Team.name)
             .join(models.Team, models.Team.team_id == models.StandingSnapshot.team_id, isouter=True)
@@ -278,7 +280,7 @@ def _standings_messages(
         ).all()
         for snapshot, team_name in sorted(
             records,
-            key=lambda item: _standing_sort_key(item[0], _is_worldcup_2026(competition)),
+            key=lambda item: _standing_sort_key(item[0], is_worldcup, standing_groups),
         ):
             rows.append(
                 StandingLine(
@@ -288,12 +290,12 @@ def _standings_messages(
                     points=snapshot.points,
                     goals_diff=snapshot.goals_diff,
                     form=snapshot.form,
-                    group_name=_standing_group(snapshot),
+                    group_name=standing_groups.get(snapshot.team_id) or _standing_group(snapshot),
                 )
             )
     formatter = (
         format_worldcup_group_standings_messages
-        if _is_worldcup_2026(competition)
+        if is_worldcup
         else format_standings_messages
     )
     return formatter(
@@ -320,10 +322,11 @@ def _standing_group(snapshot: models.StandingSnapshot) -> str | None:
 def _standing_sort_key(
     snapshot: models.StandingSnapshot,
     is_worldcup: bool,
+    standing_groups: dict[int, str] | None = None,
 ) -> tuple[object, ...]:
     if not is_worldcup:
         return (snapshot.rank if snapshot.rank is not None else 9999,)
-    group = _standing_group(snapshot)
+    group = (standing_groups or {}).get(snapshot.team_id) or _standing_group(snapshot)
     group_order = group or "Group Unknown"
     return (
         group_order,
@@ -455,7 +458,40 @@ def _standing_group_lookup(
         group = _standing_group(snapshot)
         if group:
             groups[snapshot.team_id] = group
+    _infer_worldcup_groups_from_fixtures(session, competition, groups)
     return groups
+
+
+def _infer_worldcup_groups_from_fixtures(
+    session: Session,
+    competition: CompetitionConfig,
+    groups: dict[int, str],
+) -> None:
+    fixtures = list(
+        session.execute(
+            select(models.Fixture)
+            .where(
+                models.Fixture.league_id == competition.league_id,
+                models.Fixture.season == competition.season,
+                models.Fixture.round.ilike("Group Stage%"),
+                models.Fixture.home_team_id.is_not(None),
+                models.Fixture.away_team_id.is_not(None),
+            )
+            .order_by(models.Fixture.date.asc(), models.Fixture.fixture_id.asc())
+        ).scalars()
+    )
+    changed = True
+    while changed:
+        changed = False
+        for fixture in fixtures:
+            home_group = groups.get(fixture.home_team_id)
+            away_group = groups.get(fixture.away_team_id)
+            if home_group and away_group is None:
+                groups[fixture.away_team_id] = home_group
+                changed = True
+            elif away_group and home_group is None:
+                groups[fixture.home_team_id] = away_group
+                changed = True
 
 
 def _fixture_group(

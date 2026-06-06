@@ -100,6 +100,29 @@ def test_worldcup_group_standings_formatter_adds_best_thirds_after_played_matche
     assert "Third B" in best_thirds
 
 
+def test_worldcup_group_standings_formatter_splits_on_group_blocks() -> None:
+    rows = [
+        StandingLine(rank, f"Team {group}{rank}", 0, 0, 0, None, f"Group {group}")
+        for group in "ABCDEFGHIJKL"
+        for rank in range(1, 5)
+    ]
+
+    messages = format_worldcup_group_standings_messages(
+        competition="FIFA World Cup",
+        season=2026,
+        rows=rows,
+        max_chars=1000,
+    )
+
+    assert len(messages) > 1
+    assert all(len(message) <= 1000 for message in messages)
+    assert all(
+        _first_table_body_line(message, "--  ").startswith("Groupe ")
+        for message in messages
+    )
+    assert "Groupe non identifié" not in "\n".join(messages)
+
+
 def test_calendar_formatter_formats_next_round_and_splits() -> None:
     rows = [
         FixtureLine(
@@ -243,3 +266,15 @@ def test_worldcup_daily_matches_formatter_adds_group_column() -> None:
     assert "-    Unknown A vs Unknown B" in message
     assert message.index("Brazil vs Morocco") < message.index("England vs Croatia")
     assert message.startswith("```md") and message.endswith("```")
+
+
+def _first_table_body_line(message: str, separator_prefix: str) -> str:
+    lines = message.splitlines()
+    separator_index = next(
+        index for index, line in enumerate(lines) if line.startswith(separator_prefix)
+    )
+    return next(
+        line
+        for line in lines[separator_index + 1 :]
+        if line and line != "```"
+    )

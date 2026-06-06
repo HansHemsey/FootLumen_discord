@@ -291,6 +291,7 @@ def test_worldcup_daily_standings_use_groups_from_payload(tmp_path: Path) -> Non
             [
                 models.Team(team_id=-2001, name="Mexico", payload_json={"synthetic": True}),
                 models.Team(team_id=-2002, name="South Africa", payload_json={"synthetic": True}),
+                models.Team(team_id=-2004, name="South Korea", payload_json={"synthetic": True}),
                 models.Team(team_id=-2003, name="England", payload_json={"synthetic": True}),
             ]
         )
@@ -323,6 +324,18 @@ def test_worldcup_daily_standings_use_groups_from_payload(tmp_path: Path) -> Non
                 models.StandingSnapshot(
                     league_id=1,
                     season=2026,
+                    team_id=-2004,
+                    snapshot_date=snapshot_date,
+                    fetched_at=snapshot_date,
+                    rank=3,
+                    points=0,
+                    goals_diff=0,
+                    played=0,
+                    payload_json={"raw": {"team": {"name": "South Korea"}}},
+                ),
+                models.StandingSnapshot(
+                    league_id=1,
+                    season=2026,
                     team_id=-2003,
                     snapshot_date=snapshot_date,
                     fetched_at=snapshot_date,
@@ -333,6 +346,22 @@ def test_worldcup_daily_standings_use_groups_from_payload(tmp_path: Path) -> Non
                     payload_json={"group": "Group L"},
                 ),
             ]
+        )
+        session.add(
+            models.Fixture(
+                fixture_id=-9001,
+                league_id=1,
+                season=2026,
+                round="Group Stage - 1",
+                date=datetime(2026, 6, 12, 2, 0, tzinfo=UTC),
+                status="NS",
+                status_short="NS",
+                home_team_id=-2001,
+                away_team_id=-2004,
+                home_team="Mexico",
+                away_team="South Korea",
+                payload_json={"synthetic": True},
+            )
         )
         session.flush()
         messages = _standings_messages(
@@ -350,7 +379,10 @@ def test_worldcup_daily_standings_use_groups_from_payload(tmp_path: Path) -> Non
     assert "CLASSEMENTS DE GROUPES - FIFA World Cup" in messages[0]
     assert "Groupe A" in messages[0]
     assert "Groupe L" in messages[0]
+    assert "South Korea" in messages[0]
+    assert "Groupe non identifié" not in messages[0]
     assert messages[0].index("Mexico") < messages[0].index("South Africa")
+    assert messages[0].index("South Africa") < messages[0].index("South Korea")
 
 
 def test_worldcup_daily_calendar_uses_grouped_formatter_from_standings(
@@ -436,7 +468,7 @@ def test_worldcup_daily_calendar_uses_grouped_formatter_from_standings(
                     away_team_id=-2102,
                     home_team="Mexico",
                     away_team="South Africa",
-                    payload_json={"synthetic": True},
+                    payload_json={"league": {"round": "Group Stage - 1"}},
                 ),
                 models.Fixture(
                     fixture_id=-9102,
@@ -450,7 +482,7 @@ def test_worldcup_daily_calendar_uses_grouped_formatter_from_standings(
                     away_team_id=-2104,
                     home_team="England",
                     away_team="Croatia",
-                    payload_json={"synthetic": True},
+                    payload_json={"raw": {"league": {"round": "Group Stage - 1"}}},
                 ),
             ]
         )
@@ -471,6 +503,7 @@ def test_worldcup_daily_calendar_uses_grouped_formatter_from_standings(
     assert "CALENDRIER DE GROUPES - FIFA World Cup" in messages[0]
     assert "Groupe A" in messages[0]
     assert "Groupe L" in messages[0]
+    assert "Groupe STAGE" not in "\n".join(messages)
     assert "Mexico vs South Africa" in messages[0]
     assert "England vs Croatia" in messages[0]
 

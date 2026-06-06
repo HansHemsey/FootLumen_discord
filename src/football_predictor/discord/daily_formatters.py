@@ -90,6 +90,7 @@ def format_worldcup_group_standings_messages(
         lines,
         empty_line="Classements de groupes non disponibles.",
         max_chars=max_chars,
+        preserve_blocks=True,
     )
 
 
@@ -146,6 +147,7 @@ def format_worldcup_group_calendar_messages(
         lines,
         empty_line="Calendrier de groupes non disponible.",
         max_chars=max_chars,
+        preserve_blocks=True,
     )
 
 
@@ -309,15 +311,17 @@ def _split_code_messages(
     *,
     empty_line: str,
     max_chars: int,
+    preserve_blocks: bool = False,
 ) -> list[str]:
     if max_chars > DISCORD_HARD_LIMIT:
         raise ValueError("max_chars must not exceed Discord's 2000 character limit")
     body_rows = rows or [empty_line]
-    chunks = _chunk_rows(header, table, body_rows, max_chars=max_chars, part_label=None)
+    chunker = _chunk_row_blocks if preserve_blocks else _chunk_rows
+    chunks = chunker(header, table, body_rows, max_chars=max_chars, part_label=None)
     if len(chunks) == 1:
         return [_render_message(header, table, chunks[0], part_label=None)]
     total = len(chunks)
-    chunks = _chunk_rows(
+    chunks = chunker(
         header,
         table,
         body_rows,
@@ -335,6 +339,54 @@ def _split_code_messages(
         for index, chunk in enumerate(chunks, start=1)
     ]
     return [_ensure_limit(message, max_chars) for message in messages]
+
+
+def _chunk_row_blocks(
+    header: list[str],
+    table: list[str],
+    rows: list[str],
+    *,
+    max_chars: int,
+    part_label: str | None,
+) -> list[list[str]]:
+    chunks: list[list[str]] = []
+    current: list[str] = []
+    for block in _row_blocks(rows):
+        candidate = [*current, "", *block] if current else list(block)
+        candidate_message = _render_message(header, table, candidate, part_label=part_label)
+        if current and len(candidate_message) > max_chars:
+            chunks.append(current)
+            current = list(block)
+        else:
+            current = candidate
+        if len(_render_message(header, table, current, part_label=part_label)) > max_chars:
+            split_block = _chunk_rows(
+                header,
+                table,
+                current,
+                max_chars=max_chars,
+                part_label=part_label,
+            )
+            chunks.extend(split_block[:-1])
+            current = split_block[-1] if split_block else []
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _row_blocks(rows: list[str]) -> list[list[str]]:
+    blocks: list[list[str]] = []
+    current: list[str] = []
+    for row in rows:
+        if row == "":
+            if current:
+                blocks.append(current)
+                current = []
+            continue
+        current.append(row)
+    if current:
+        blocks.append(current)
+    return blocks
 
 
 def _chunk_rows(

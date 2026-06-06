@@ -8,6 +8,7 @@ from typing import Any
 
 UNKNOWN_GROUP = "Group Unknown"
 UNKNOWN_GROUP_FR = "Groupe non identifié"
+VALID_WORLD_CUP_GROUPS = set("ABCDEFGHIJKL")
 
 
 def normalize_worldcup_group_label(value: object) -> str | None:
@@ -16,11 +17,11 @@ def normalize_worldcup_group_label(value: object) -> str | None:
     text = str(value or "").strip()
     if not text:
         return None
-    match = re.search(r"\bgroup\s+([a-z0-9]+)\b", text, flags=re.IGNORECASE)
-    if match:
+    match = re.search(r"\bgroup\s+([a-z])\b", text, flags=re.IGNORECASE)
+    if match and match.group(1).upper() in VALID_WORLD_CUP_GROUPS:
         return f"Group {match.group(1).upper()}"
-    match = re.search(r"\bgroupe\s+([a-z0-9]+)\b", text, flags=re.IGNORECASE)
-    if match:
+    match = re.search(r"\bgroupe\s+([a-z])\b", text, flags=re.IGNORECASE)
+    if match and match.group(1).upper() in VALID_WORLD_CUP_GROUPS:
         return f"Group {match.group(1).upper()}"
     return None
 

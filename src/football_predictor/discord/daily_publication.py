@@ -18,6 +18,7 @@ from football_predictor.discord.daily_formatters import (
     format_calendar_messages,
     format_daily_matches_messages,
     format_standings_messages,
+    format_worldcup_group_calendar_messages,
     format_worldcup_group_standings_messages,
 )
 from football_predictor.discord.service import DiscordDeliveryService
@@ -351,6 +352,11 @@ def _calendar_messages(
     round_name = first_fixture.round if first_fixture is not None else None
     rows: list[FixtureLine] = []
     if round_name:
+        standing_groups = (
+            _standing_group_lookup(session, competition)
+            if _is_worldcup_2026(competition)
+            else {}
+        )
         fixtures = session.execute(
             select(models.Fixture)
             .where(
@@ -360,8 +366,19 @@ def _calendar_messages(
             )
             .order_by(models.Fixture.date.asc(), models.Fixture.fixture_id.asc())
         ).scalars()
-        rows = [_fixture_line(fixture) for fixture in fixtures]
-    return format_calendar_messages(
+        rows = [
+            _fixture_line(
+                fixture,
+                group_name=_fixture_group(fixture, standing_groups),
+            )
+            for fixture in fixtures
+        ]
+    formatter = (
+        format_worldcup_group_calendar_messages
+        if _is_worldcup_2026(competition)
+        else format_calendar_messages
+    )
+    return formatter(
         competition=competition.name,
         season=competition.season,
         round_name=round_name,
@@ -396,7 +413,59 @@ def _daily_matches_messages(
     )
 
 
-def _fixture_line(fixture: models.Fixture) -> FixtureLine:
+def _standing_group_lookup(
+    session: Session,
+    competition: CompetitionConfig,
+) -> dict[int, str]:
+    latest = session.execute(
+        select(func.max(models.StandingSnapshot.snapshot_date)).where(
+            models.StandingSnapshot.league_id == competition.league_id,
+            models.StandingSnapshot.season == competition.season,
+        )
+    ).scalar_one_or_none()
+    if latest is None:
+        return {}
+    records = session.execute(
+        select(models.StandingSnapshot)
+        .where(
+            models.StandingSnapshot.league_id == competition.league_id,
+            models.StandingSnapshot.season == competition.season,
+            models.StandingSnapshot.snapshot_date == latest,
+        )
+        .order_by(models.StandingSnapshot.team_id.asc())
+    ).scalars()
+    groups: dict[int, str] = {}
+    for snapshot in records:
+        group = _standing_group(snapshot)
+        if group:
+            groups[snapshot.team_id] = group
+    return groups
+
+
+def _fixture_group(
+    fixture: models.Fixture,
+    standing_groups: dict[int, str],
+) -> str | None:
+    payload = fixture.payload_json if isinstance(fixture.payload_json, dict) else {}
+    group = extract_group_from_payload(payload)
+    if group:
+        return group
+    home_group = standing_groups.get(fixture.home_team_id)
+    away_group = standing_groups.get(fixture.away_team_id)
+    if home_group and home_group == away_group:
+        return home_group
+    if home_group and away_group is None:
+        return home_group
+    if away_group and home_group is None:
+        return away_group
+    return None
+
+
+def _fixture_line(
+    fixture: models.Fixture,
+    *,
+    group_name: str | None = None,
+) -> FixtureLine:
     return FixtureLine(
         kickoff=fixture.date,
         home_team=fixture.home_team,
@@ -405,6 +474,7 @@ def _fixture_line(fixture: models.Fixture) -> FixtureLine:
         home_goals=fixture.home_goals if fixture.home_goals is not None else fixture.goals_home,
         away_goals=fixture.away_goals if fixture.away_goals is not None else fixture.goals_away,
         round_name=fixture.round,
+        group_name=group_name,
     )
 
 

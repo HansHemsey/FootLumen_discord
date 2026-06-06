@@ -8,6 +8,7 @@ from football_predictor.discord.daily_formatters import (
     format_calendar_messages,
     format_daily_matches_messages,
     format_standings_messages,
+    format_worldcup_group_calendar_messages,
     format_worldcup_group_standings_messages,
 )
 
@@ -122,6 +123,73 @@ def test_calendar_formatter_formats_next_round_and_splits() -> None:
     assert all(len(message) <= 900 for message in messages)
     assert "CALENDRIER" in messages[0]
     assert "Regular Season - 12" in messages[0]
+
+
+def test_worldcup_group_calendar_formatter_groups_fixtures_and_handles_unknown() -> None:
+    messages = format_worldcup_group_calendar_messages(
+        competition="FIFA World Cup",
+        season=2026,
+        round_name="Group Stage - 1",
+        rows=[
+            FixtureLine(
+                datetime(2026, 6, 11, 19, 0, tzinfo=UTC),
+                "Mexico",
+                "South Africa",
+                "NS",
+                group_name="Group A",
+            ),
+            FixtureLine(
+                datetime(2026, 6, 17, 20, 0, tzinfo=UTC),
+                "England",
+                "Croatia",
+                "NS",
+                group_name="Group L",
+            ),
+            FixtureLine(
+                datetime(2026, 6, 18, 20, 0, tzinfo=UTC),
+                "Unknown A",
+                "Unknown B",
+                "NS",
+            ),
+        ],
+    )
+
+    message = messages[0]
+
+    assert len(messages) == 1
+    assert "CALENDRIER DE GROUPES - FIFA World Cup" in message
+    assert "Journée : Group Stage - 1" in message
+    assert "Groupe A" in message
+    assert "Groupe L" in message
+    assert "Groupe non identifié" in message
+    assert "Mexico vs South Africa" in message
+    assert message.startswith("```md") and message.endswith("```")
+
+
+def test_worldcup_group_calendar_formatter_splits_under_discord_limit() -> None:
+    rows = [
+        FixtureLine(
+            datetime(2026, 6, 11, 19, index % 60, tzinfo=UTC),
+            f"Synthetic Home {index}",
+            f"Synthetic Away {index}",
+            "NS",
+            group_name=f"Group {chr(ord('A') + index % 12)}",
+        )
+        for index in range(60)
+    ]
+
+    messages = format_worldcup_group_calendar_messages(
+        competition="FIFA World Cup",
+        season=2026,
+        round_name="Group Stage - 1",
+        rows=rows,
+        max_chars=900,
+    )
+
+    assert len(messages) > 1
+    assert all(message.startswith("```md") and message.endswith("```") for message in messages)
+    assert all(len(message) <= 900 for message in messages)
+    assert "Partie 1/" in messages[0]
 
 
 def test_daily_matches_formatter_handles_no_matches() -> None:

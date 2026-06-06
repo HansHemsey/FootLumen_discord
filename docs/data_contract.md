@@ -335,6 +335,8 @@ restent hors base et hors logs ; seuls des hashes courts non réversibles sont c
 Pour `fifa_world_cup_2026`, les standings Discord sont affichés par groupes A-L. Le groupe
 est lu depuis le payload standings API/docs (`group` ou `raw.group`) ; une équipe sans groupe
 est placée dans `Groupe non identifié` plutôt que dans un classement général artificiel.
+Le calendrier Discord CDM utilise le même principe : les fixtures de la prochaine journée
+restent filtrées par round, mais sont regroupées par groupe dans le message `calendrier`.
 
 ## Règle De Snapshot Temporel
 

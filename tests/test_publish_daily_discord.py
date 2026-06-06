@@ -18,6 +18,7 @@ from football_predictor.discord.config import (
     load_discord_webhooks_config,
 )
 from football_predictor.discord.daily_publication import (
+    _calendar_messages,
     _standings_messages,
     publish_daily_discord_messages,
 )
@@ -340,6 +341,128 @@ def test_worldcup_daily_standings_use_groups_from_payload(tmp_path: Path) -> Non
     assert "Groupe A" in messages[0]
     assert "Groupe L" in messages[0]
     assert messages[0].index("Mexico") < messages[0].index("South Africa")
+
+
+def test_worldcup_daily_calendar_uses_grouped_formatter_from_standings(
+    tmp_path: Path,
+) -> None:
+    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'publish_worldcup_calendar.db'}")
+    session_factory = create_session_factory(engine)
+    snapshot_date = datetime(2026, 5, 26, 0, 0, tzinfo=UTC)
+    kickoff = datetime(2026, 6, 11, 19, 0, tzinfo=UTC)
+
+    with session_scope(session_factory) as session:
+        session.add_all(
+            [
+                models.Team(team_id=-2101, name="Mexico", payload_json={"synthetic": True}),
+                models.Team(team_id=-2102, name="South Africa", payload_json={"synthetic": True}),
+                models.Team(team_id=-2103, name="England", payload_json={"synthetic": True}),
+                models.Team(team_id=-2104, name="Croatia", payload_json={"synthetic": True}),
+            ]
+        )
+        session.add_all(
+            [
+                models.StandingSnapshot(
+                    league_id=1,
+                    season=2026,
+                    team_id=-2101,
+                    snapshot_date=snapshot_date,
+                    fetched_at=snapshot_date,
+                    rank=1,
+                    points=0,
+                    goals_diff=0,
+                    played=0,
+                    payload_json={"group": "Group A"},
+                ),
+                models.StandingSnapshot(
+                    league_id=1,
+                    season=2026,
+                    team_id=-2102,
+                    snapshot_date=snapshot_date,
+                    fetched_at=snapshot_date,
+                    rank=2,
+                    points=0,
+                    goals_diff=0,
+                    played=0,
+                    payload_json={"raw": {"group": "Group A"}},
+                ),
+                models.StandingSnapshot(
+                    league_id=1,
+                    season=2026,
+                    team_id=-2103,
+                    snapshot_date=snapshot_date,
+                    fetched_at=snapshot_date,
+                    rank=1,
+                    points=0,
+                    goals_diff=0,
+                    played=0,
+                    payload_json={"group": "Group L"},
+                ),
+                models.StandingSnapshot(
+                    league_id=1,
+                    season=2026,
+                    team_id=-2104,
+                    snapshot_date=snapshot_date,
+                    fetched_at=snapshot_date,
+                    rank=2,
+                    points=0,
+                    goals_diff=0,
+                    played=0,
+                    payload_json={"group": "Group L"},
+                ),
+            ]
+        )
+        session.add_all(
+            [
+                models.Fixture(
+                    fixture_id=-9101,
+                    league_id=1,
+                    season=2026,
+                    round="Group Stage - 1",
+                    date=kickoff,
+                    status="NS",
+                    status_short="NS",
+                    home_team_id=-2101,
+                    away_team_id=-2102,
+                    home_team="Mexico",
+                    away_team="South Africa",
+                    payload_json={"synthetic": True},
+                ),
+                models.Fixture(
+                    fixture_id=-9102,
+                    league_id=1,
+                    season=2026,
+                    round="Group Stage - 1",
+                    date=kickoff.replace(day=17),
+                    status="NS",
+                    status_short="NS",
+                    home_team_id=-2103,
+                    away_team_id=-2104,
+                    home_team="England",
+                    away_team="Croatia",
+                    payload_json={"synthetic": True},
+                ),
+            ]
+        )
+        session.flush()
+        messages = _calendar_messages(
+            session,
+            CompetitionConfig(
+                key="fifa_world_cup_2026",
+                league_id=1,
+                season=2026,
+                name="FIFA World Cup",
+                country="World",
+            ),
+            kickoff.date(),
+            "Europe/Paris",
+        )
+
+    assert "CALENDRIER DE GROUPES - FIFA World Cup" in messages[0]
+    assert "Groupe A" in messages[0]
+    assert "Groupe L" in messages[0]
+    assert "Mexico vs South Africa" in messages[0]
+    assert "England vs Croatia" in messages[0]
 
 
 def _seed_daily_publication_data(session) -> None:

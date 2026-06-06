@@ -33,6 +33,7 @@ class FixtureLine:
     home_goals: int | None = None
     away_goals: int | None = None
     round_name: str | None = None
+    group_name: str | None = None
 
 
 def format_standings_messages(
@@ -120,6 +121,34 @@ def format_calendar_messages(
     )
 
 
+def format_worldcup_group_calendar_messages(
+    *,
+    competition: str,
+    season: int | None,
+    round_name: str | None,
+    rows: list[FixtureLine],
+    timezone_name: str = "Europe/Paris",
+    max_chars: int = DISCORD_SAFE_LIMIT,
+) -> list[str]:
+    header = [
+        f"🗓️ CALENDRIER DE GROUPES - {competition}",
+        f"Journée : {_value(round_name)}",
+        f"Saison : {_value(season)}",
+    ]
+    table = [
+        "Date        Heure  Match                                           Statut",
+        "----------  -----  ----------------------------------------------  ------",
+    ]
+    lines = _worldcup_group_fixture_rows(rows, timezone_name)
+    return _split_code_messages(
+        header,
+        table,
+        lines,
+        empty_line="Calendrier de groupes non disponible.",
+        max_chars=max_chars,
+    )
+
+
 def format_daily_matches_messages(
     *,
     competition: str,
@@ -144,6 +173,27 @@ def format_daily_matches_messages(
         empty_line="Aucun match programmé.",
         max_chars=max_chars,
     )
+
+
+def _worldcup_group_fixture_rows(rows: list[FixtureLine], timezone_name: str) -> list[str]:
+    grouped: dict[str | None, list[FixtureLine]] = {}
+    for row in rows:
+        grouped.setdefault(row.group_name, []).append(row)
+    lines: list[str] = []
+    for group_name in sorted(grouped, key=worldcup_group_sort_key):
+        if lines:
+            lines.append("")
+        lines.append(localized_group_label(group_name))
+        for row in sorted(
+            grouped[group_name],
+            key=lambda item: (
+                item.kickoff or datetime.max,
+                item.home_team,
+                item.away_team,
+            ),
+        ):
+            lines.append(_fixture_row(row, timezone_name, include_date=True))
+    return lines
 
 
 def _worldcup_group_rows(rows: list[StandingLine]) -> list[str]:

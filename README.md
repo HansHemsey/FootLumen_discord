@@ -44,6 +44,14 @@ Les IDs API-Football ne doivent jamais être inventés. Ils viennent des référ
 dans `docs/api_football_reference.json`, `docs/api_football_players_reference.json` ou de
 la base déjà initialisée.
 
+Référentiels locaux attendus :
+
+- `docs/api_football_reference.md`
+- `docs/api_football_reference.json`
+- `docs/api_football_players_reference.md`
+- `docs/api_football_players_reference.json`
+- `docs/api_football_players_cache.json` : cache technique, pas la source metier principale.
+
 ## Installation Rapide
 
 Prérequis :
@@ -79,6 +87,7 @@ Qualité :
 ```bash
 make check
 make security
+make smoke
 ```
 
 Base et référentiels :
@@ -93,6 +102,7 @@ football-predictor seed-reference-from-docs \
 Prédictions et publications en dry-run :
 
 ```bash
+football-predictor predict-today --date 2026-06-11 --window late --no-refresh-data --dry-run
 football-predictor worldcup-run-daily --window late --dry-run
 football-predictor worldcup-combos-run --config config/worldcup_combos.yaml --dry-run
 football-predictor worldcup-combos-publish --config config/worldcup_combos.yaml --dry-run

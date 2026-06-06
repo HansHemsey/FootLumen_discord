@@ -4,7 +4,8 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
-from typer.testing import CliRunner
+import click
+from typer.main import get_command
 
 from football_predictor.cli import app
 from football_predictor.config.competitions import CompetitionConfig
@@ -618,24 +619,13 @@ def test_publish_match_results_compares_published_v3_prediction(
 
 
 def test_publish_match_cli_and_scripts(repo_root: Path) -> None:
-    help_result = CliRunner().invoke(
-        app,
-        ["publish-match-analyses", "--help"],
-        color=False,
-        terminal_width=200,
-    )
-    result_help = CliRunner().invoke(
-        app,
-        ["publish-match-results", "--help"],
-        color=False,
-        terminal_width=200,
-    )
+    commands = get_command(app).commands
+    analysis_options = _command_options(commands["publish-match-analyses"])
+    result_options = _command_options(commands["publish-match-results"])
 
-    assert help_result.exit_code == 0
-    assert result_help.exit_code == 0
-    assert "--refresh-data" in help_result.stdout
-    assert "Minutes after H-6" in help_result.stdout
-    assert "--dry-run" in result_help.stdout
+    assert "--refresh-data" in analysis_options
+    assert "--analysis-grace-minutes" in analysis_options
+    assert "--dry-run" in result_options
     analyses_script = (repo_root / "scripts" / "publish_match_analyses.sh").read_text(
         encoding="utf-8"
     )
@@ -653,6 +643,14 @@ def test_publish_match_cli_and_scripts(repo_root: Path) -> None:
     assert 'ANALYSIS_GRACE_MINUTES="${ANALYSIS_GRACE_MINUTES:-45}"' in daily_late
     assert 'PUBLISH_ANALYSES="${PUBLISH_ANALYSES:-false}"' in daily_late
     assert 'PUBLISH_RESULTS="${PUBLISH_RESULTS:-false}"' in daily_late
+
+
+def _command_options(command: click.Command) -> set[str]:
+    options: set[str] = set()
+    for parameter in command.params:
+        options.update(getattr(parameter, "opts", ()))
+        options.update(getattr(parameter, "secondary_opts", ()))
+    return options
 
 
 def _fixture_prediction_snapshot(

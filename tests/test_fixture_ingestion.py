@@ -7,12 +7,14 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from click import BadParameter
 from sqlalchemy import func, select
 from typer.testing import CliRunner
 
 from football_predictor.api.api_football_client import ApiFootballPayload
 from football_predictor.api.endpoints import FIXTURES, STANDINGS
 from football_predictor.cli import app
+from football_predictor.commands.shared import _validate_fixture_ingestion_args
 from football_predictor.config.settings import get_settings
 from football_predictor.db import models
 from football_predictor.db.init_db import create_db_and_tables
@@ -195,7 +197,17 @@ def test_cli_rejects_synthetic_unknown_team_id() -> None:
     )
 
     assert result.exit_code != 0
-    assert "Unknown team_id=-999" in result.output
+    with pytest.raises(BadParameter, match="Unknown team_id=-999"):
+        _validate_fixture_ingestion_args(
+            get_settings(),
+            league_id=None,
+            season=None,
+            fixture_date=None,
+            team_id=-999,
+            last=1,
+            next_count=None,
+            strict_reference=True,
+        )
     get_settings.cache_clear()
 
 

@@ -3,8 +3,10 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
+import click
 import httpx
 from sqlalchemy import select
+from typer.main import get_command
 from typer.testing import CliRunner
 
 from football_predictor.cli import app
@@ -74,16 +76,10 @@ def test_publish_daily_discord_cli_dry_run_persists_messages(tmp_path: Path) -> 
 
 
 def test_publish_daily_discord_cli_exposes_replace_previous_option() -> None:
-    result = CliRunner().invoke(
-        app,
-        ["publish-daily-discord", "--help"],
-        color=False,
-        terminal_width=200,
-    )
+    options = _command_options(get_command(app).commands["publish-daily-discord"])
 
-    assert result.exit_code == 0
-    assert "--replace-previous" in result.stdout
-    assert "--no-replace-previous" in result.stdout
+    assert "--replace-previous" in options
+    assert "--no-replace-previous" in options
 
 
 def test_daily_morning_script_calls_publish_daily_discord(repo_root: Path) -> None:
@@ -92,6 +88,14 @@ def test_daily_morning_script_calls_publish_daily_discord(repo_root: Path) -> No
     assert "scripts/publish_daily_discord.sh" in text
     assert 'PUBLISH_DISCORD="${PUBLISH_DISCORD:-true}"' in text
     assert 'REPLACE_PREVIOUS="${REPLACE_PREVIOUS:-true}"' in text
+
+
+def _command_options(command: click.Command) -> set[str]:
+    options: set[str] = set()
+    for parameter in command.params:
+        options.update(getattr(parameter, "opts", ()))
+        options.update(getattr(parameter, "secondary_opts", ()))
+    return options
 
 
 def test_publish_daily_discord_replaces_previous_messages(

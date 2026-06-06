@@ -175,6 +175,42 @@ def format_daily_matches_messages(
     )
 
 
+def format_worldcup_daily_matches_messages(
+    *,
+    competition: str,
+    match_date: str,
+    rows: list[FixtureLine],
+    timezone_name: str = "Europe/Paris",
+    max_chars: int = DISCORD_SAFE_LIMIT,
+) -> list[str]:
+    header = [
+        f"📅 MATCHS DU JOUR - {competition}",
+        f"Date : {match_date}",
+    ]
+    table = [
+        "Heure  Grp  Match                                           Statut",
+        "-----  ---  ----------------------------------------------  ------",
+    ]
+    lines = [
+        _worldcup_daily_fixture_row(row, timezone_name)
+        for row in sorted(
+            rows,
+            key=lambda item: (
+                item.kickoff or datetime.max,
+                item.home_team,
+                item.away_team,
+            ),
+        )
+    ]
+    return _split_code_messages(
+        header,
+        table,
+        lines,
+        empty_line="Aucun match programmé.",
+        max_chars=max_chars,
+    )
+
+
 def _worldcup_group_fixture_rows(rows: list[FixtureLine], timezone_name: str) -> list[str]:
     grouped: dict[str | None, list[FixtureLine]] = {}
     for row in rows:
@@ -194,6 +230,26 @@ def _worldcup_group_fixture_rows(rows: list[FixtureLine], timezone_name: str) ->
         ):
             lines.append(_fixture_row(row, timezone_name, include_date=True))
     return lines
+
+
+def _worldcup_daily_fixture_row(row: FixtureLine, timezone_name: str) -> str:
+    time_part = "--:--"
+    if row.kickoff is not None:
+        _date_part, time_part = format_in_timezone(row.kickoff, timezone_name).split(
+            " ",
+            maxsplit=1,
+        )
+    group = _short_group_label(row.group_name)
+    match = f"{row.home_team} vs {row.away_team}"
+    status = _status_or_score(row)
+    return f"{time_part:<5}  {group:<3}  {_clip(match, 46):<46}  {_clip(status, 6):<6}"
+
+
+def _short_group_label(group_name: str | None) -> str:
+    sort_index, _label = worldcup_group_sort_key(group_name)
+    if 0 <= sort_index < 26:
+        return chr(ord("A") + sort_index)
+    return "-"
 
 
 def _worldcup_group_rows(rows: list[StandingLine]) -> list[str]:

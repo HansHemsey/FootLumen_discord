@@ -18,6 +18,7 @@ from football_predictor.discord.daily_formatters import (
     format_calendar_messages,
     format_daily_matches_messages,
     format_standings_messages,
+    format_worldcup_daily_matches_messages,
     format_worldcup_group_calendar_messages,
     format_worldcup_group_standings_messages,
 )
@@ -405,10 +406,25 @@ def _daily_matches_messages(
         )
         .order_by(models.Fixture.date.asc(), models.Fixture.fixture_id.asc())
     ).scalars()
-    return format_daily_matches_messages(
+    standing_groups = (
+        _standing_group_lookup(session, competition) if _is_worldcup_2026(competition) else {}
+    )
+    rows = [
+        _fixture_line(
+            fixture,
+            group_name=_fixture_group(fixture, standing_groups),
+        )
+        for fixture in fixtures
+    ]
+    formatter = (
+        format_worldcup_daily_matches_messages
+        if _is_worldcup_2026(competition)
+        else format_daily_matches_messages
+    )
+    return formatter(
         competition=competition.name,
         match_date=target_date.isoformat(),
-        rows=[_fixture_line(fixture) for fixture in fixtures],
+        rows=rows,
         timezone_name=timezone_name,
     )
 

@@ -8,6 +8,7 @@ from football_predictor.discord.daily_formatters import (
     format_calendar_messages,
     format_daily_matches_messages,
     format_standings_messages,
+    format_worldcup_daily_matches_messages,
     format_worldcup_group_calendar_messages,
     format_worldcup_group_standings_messages,
 )
@@ -202,3 +203,43 @@ def test_daily_matches_formatter_handles_no_matches() -> None:
     assert len(messages) == 1
     assert "Aucun match programmé" in messages[0]
     assert len(messages[0]) <= 1900
+
+
+def test_worldcup_daily_matches_formatter_adds_group_column() -> None:
+    messages = format_worldcup_daily_matches_messages(
+        competition="FIFA World Cup",
+        match_date="2026-06-14",
+        rows=[
+            FixtureLine(
+                datetime(2026, 6, 17, 20, 0, tzinfo=UTC),
+                "England",
+                "Croatia",
+                "NS",
+                group_name="Group L",
+            ),
+            FixtureLine(
+                datetime(2026, 6, 14, 22, 0, tzinfo=UTC),
+                "Brazil",
+                "Morocco",
+                "NS",
+                group_name="Group C",
+            ),
+            FixtureLine(
+                datetime(2026, 6, 18, 20, 0, tzinfo=UTC),
+                "Unknown A",
+                "Unknown B",
+                "NS",
+            ),
+        ],
+    )
+
+    message = messages[0]
+
+    assert len(messages) == 1
+    assert "MATCHS DU JOUR - FIFA World Cup" in message
+    assert "Heure  Grp  Match" in message
+    assert "C    Brazil vs Morocco" in message
+    assert "L    England vs Croatia" in message
+    assert "-    Unknown A vs Unknown B" in message
+    assert message.index("Brazil vs Morocco") < message.index("England vs Croatia")
+    assert message.startswith("```md") and message.endswith("```")

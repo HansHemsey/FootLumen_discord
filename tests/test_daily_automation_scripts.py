@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
@@ -19,6 +20,7 @@ AUTOMATION_SCRIPTS = (
     "scripts/backfill_season.sh",
     "scripts/train_backtest_all.sh",
     "scripts/train_backtest_ou.sh",
+    "scripts/audit_worldcup_fixture_times.py",
 )
 
 
@@ -118,10 +120,46 @@ def test_worldcup_prod_crontab_is_cdm_only(repo_root: Path) -> None:
     assert "REFRESH_FIXTURES=true REFRESH_STANDINGS=true REFRESH_ODDS=false" in text
     assert "ingest-player-squads --config \"$CONFIG_WC\" --refresh-api" in text
     assert "DETAILS_ONLY=\"statistics events lineups players injuries predictions\"" in text
+    assert "7-23" not in text
+    assert "12-23" not in text
+    assert "1,11,21,31,41,51 * * * *" in text
+    assert "6,16,26,36,46,56 * * * *" in text
+    assert "7,17,27,37,47,57 * * * *" in text
+    assert "8,18,28,38,48,58 * * * *" in text
+    assert "35 * * * *" in text
+    assert "20,50 * * * *" in text
+    assert 'DATE="$(TZ=Europe/Paris date -d tomorrow +\\%F)"' in text
+    assert 'DATE="$(TZ=Europe/Paris date -d yesterday +\\%F)"' in text
+    assert "publish_daily_discord.sh" in text
     assert "scripts/daily_late.sh" not in text
     assert "scripts/daily_ou.sh" not in text
     assert "scripts/publish_match_analyses.sh" not in text
     assert "PREDICTION_ENGINE=v3" not in text
+
+
+def test_worldcup_fixture_time_audit_reports_paris_night_kickoffs(repo_root: Path) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/audit_worldcup_fixture_times.py",
+            "--json",
+        ],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        env={
+            "PYTHONPATH": str(repo_root / "src"),
+            "PATH": "/usr/bin:/bin",
+        },
+        text=True,
+    )
+
+    payload = json.loads(result.stdout)
+    assert payload["timezone"] == "Europe/Paris"
+    assert payload["fixture_count"] == 72
+    assert "00:00" in payload["unique_times"]
+    assert "06:00" in payload["unique_times"]
+    assert payload["night_fixture_count"] > 0
 
 
 def test_prod_cron_installer_uses_versioned_crontab(repo_root: Path) -> None:

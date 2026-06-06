@@ -129,6 +129,7 @@ PYTHONPATH=src .venv/bin/python scripts/lock_worldcup_combos.py --config config/
 PYTHONPATH=src .venv/bin/python scripts/settle_worldcup_combos.py --config config/worldcup_combos.yaml
 PYTHONPATH=src .venv/bin/python scripts/maintenance_worldcup_combo_snapshots.py --config config/worldcup_combos.yaml
 PYTHONPATH=src .venv/bin/python scripts/worldcup_coverage_report.py
+PYTHONPATH=src .venv/bin/python scripts/audit_worldcup_fixture_times.py
 PYTHONPATH=src .venv/bin/python scripts/sync_worldcup_odds_snapshots.py --markets 1x2,ou25,btts
 ```
 
@@ -206,10 +207,12 @@ Fichiers a surveiller :
 
 ```bash
 tail -n 100 logs/cron/worldcup_late.log
+tail -n 100 logs/cron/worldcup_daily_tomorrow.log
 tail -n 100 logs/cron/worldcup_combos_run.log
 tail -n 100 logs/cron/worldcup_combos_lock.log
 tail -n 100 logs/cron/worldcup_combos_publish.log
 tail -n 100 logs/cron/worldcup_combos_settle.log
+tail -n 100 logs/cron/worldcup_match_results_yesterday.log
 ```
 
 Checks DB :
@@ -227,6 +230,8 @@ Signals a investiguer :
 - tickets publics sans `LOCKED` ;
 - plusieurs messages Discord pour le meme idempotency key ;
 - data quality sous seuil.
+- crons CDM M-30/combinés/resultats non actifs 24h/24 pendant les matchs de nuit.
+- `worldcup_daily_tomorrow.log` vide avant les coups d'envoi apres minuit.
 
 ## Rollback
 

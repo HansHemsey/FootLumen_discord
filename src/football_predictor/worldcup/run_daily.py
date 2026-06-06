@@ -144,8 +144,12 @@ def run_daily_worldcup_predictions(
     resolved_window = parse_daily_window(window)
     if refresh_data and api_client is None:
         raise PredictionError("refresh_data=True requires an API-Football client")
-    fixtures = _fixtures_for_date(session, target_date, timezone_name=timezone_name)
-    current_time = now
+    current_time = _current_time(now)
+    fixtures = (
+        _fixtures_for_late_window(session, current_time)
+        if resolved_window == DailyPredictionWindow.LATE
+        else _fixtures_for_date(session, target_date, timezone_name=timezone_name)
+    )
     fixtures = [
         fixture
         for fixture in fixtures
@@ -300,6 +304,38 @@ def _fixtures_for_date(
         .order_by(models.Fixture.date.asc(), models.Fixture.fixture_id.asc())
     )
     return list(session.execute(stmt).scalars())
+
+
+def _fixtures_for_late_window(
+    session: Session,
+    now: datetime,
+) -> list[models.Fixture]:
+    current_time = _current_time(now)
+    late_end = current_time + timedelta(minutes=30)
+    stmt = (
+        select(models.Fixture)
+        .where(
+            models.Fixture.league_id == WORLD_CUP_LEAGUE_ID,
+            models.Fixture.season == WORLD_CUP_SEASON,
+            models.Fixture.date.is_not(None),
+            models.Fixture.date >= current_time,
+            models.Fixture.date <= late_end,
+            or_(
+                models.Fixture.status_short.in_(tuple(UPCOMING_STATUSES)),
+                models.Fixture.status.in_(tuple(UPCOMING_STATUSES)),
+            ),
+        )
+        .order_by(models.Fixture.date.asc(), models.Fixture.fixture_id.asc())
+    )
+    return list(session.execute(stmt).scalars())
+
+
+def _current_time(value: datetime | None) -> datetime:
+    if value is None:
+        return datetime.now(tz=UTC)
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def _result(

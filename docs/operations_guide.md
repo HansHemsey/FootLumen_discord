@@ -449,15 +449,27 @@ Ce profil utilise `config/competitions_worldcup.yaml` et des verrous `flock`. Il
 routines championnats V3, O/U et analyses H-6 domestic. Les routines actives sont :
 
 ```cron
-15 5 * * 1       scripts/weekly_ingestion.sh avec CONFIG=config/competitions_worldcup.yaml
-50 5 * * *       scripts/refresh_all_leagues.sh fixtures + standings CDM
-30 6 * * *       scripts/daily_morning.sh avec CONFIG=config/competitions_worldcup.yaml
-40 4 * * 1,4     football-predictor ingest-player-squads --config config/competitions_worldcup.yaml
-45 3 * * *       scripts/refresh_all_leagues.sh details CDM J-3 termines
-*/10 7-23 * * *  football-predictor worldcup-run-daily --window late --refresh-data
-20,50 12-23 * * * scripts/publish_match_results.sh avec CONFIG=config/competitions_worldcup.yaml
-10 8,12,18 * * * scripts/publish_weekly_score.sh
-55 23 * * *      scripts/publish_weekly_score.sh
+15 5 * * 1         scripts/weekly_ingestion.sh avec CONFIG=config/competitions_worldcup.yaml
+50 5 * * *         scripts/refresh_all_leagues.sh fixtures + standings CDM
+30 6 * * *         scripts/daily_morning.sh avec CONFIG=config/competitions_worldcup.yaml
+5 23 * * *         scripts/publish_daily_discord.sh avec DATE=demain Europe/Paris
+40 4 * * 1,4       football-predictor ingest-player-squads --config config/competitions_worldcup.yaml
+45 3 * * *         scripts/refresh_all_leagues.sh details CDM J-3 termines
+*/10 * * * *       football-predictor worldcup-run-daily --window late --refresh-data
+*/10 * * * *       worldcup-combos-run/lock/publish, staff-only via config
+35 * * * *         scripts/settle_worldcup_combos.py --execute
+20,50 * * * *      scripts/publish_match_results.sh avec CONFIG=config/competitions_worldcup.yaml
+25,55 0-3 * * *    scripts/publish_match_results.sh avec DATE=hier Europe/Paris
+10 2,6,8,12,18 * * * scripts/publish_weekly_score.sh
+55 23 * * *        scripts/publish_weekly_score.sh
+```
+
+Les horaires Discord sont affiches en `Europe/Paris`. La prediction CDM `late`
+fonctionne en fenetre glissante `now -> now+30min`, ce qui couvre les coups d'envoi
+apres minuit. Auditer les horaires disponibles avec :
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/audit_worldcup_fixture_times.py
 ```
 
 Validation avant activation :
@@ -465,6 +477,7 @@ Validation avant activation :
 ```bash
 football-predictor doctor --strict
 football-predictor worldcup-audit-reference
+PYTHONPATH=src .venv/bin/python scripts/audit_worldcup_fixture_times.py
 football-predictor worldcup-build-dataset --output data/processed/worldcup_1x2_training.parquet
 football-predictor worldcup-train-1x2 --dataset data/processed/worldcup_1x2_training.parquet --output-dir data/models/worldcup-1x2
 football-predictor worldcup-optimize-blend --dataset data/processed/worldcup_1x2_training.parquet --model-dir data/models/worldcup-1x2 --output-dir reports/worldcup_blend --write-best-config

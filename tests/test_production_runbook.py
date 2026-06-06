@@ -47,6 +47,9 @@ def test_worldcup_prod_example_crontab_documents_explicit_execute(repo_root: Pat
     assert 'scripts/lock_worldcup_combos.py --config "$COMBOS_CONFIG" --execute' in text
     assert 'worldcup-combos-publish --config "$COMBOS_CONFIG" --execute' in text
     assert 'scripts/settle_worldcup_combos.py --config "$COMBOS_CONFIG" --execute' in text
+    assert "1,11,21,31,41,51 * * * *" in text
+    assert 'DATE="$(TZ=Europe/Paris date -d tomorrow +\\%F)"' in text
+    assert 'DATE="$(TZ=Europe/Paris date -d yesterday +\\%F)"' in text
     assert "config/discord_webhooks.local.yaml" not in text
     assert "discord.com/api/webhooks" not in text
 

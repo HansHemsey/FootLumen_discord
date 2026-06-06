@@ -10,6 +10,8 @@ puis la marche arriere pour revenir aux championnats a la reprise de la saison 2
 - Publier les predictions CDM M-30 avec le modele `worldcup-1x2`.
 - Continuer a enrichir la base avec fixtures, standings, odds, squads, details post-match,
   lineups, stats joueurs, injuries et predictions API.
+- Couvrir les coups d'envoi de nuit en heure de Paris avec des crons CDM actifs 24h/24
+  pour les routines M-30, combinés, resultats et settlement.
 - Garder un retour championnat simple en aout 2026.
 
 ## Fichiers ajoutes
@@ -88,6 +90,7 @@ LOGDIR=/opt/football-predictor/app/logs/cron
 MPLCONFIGDIR=/opt/football-predictor/app/.cache/matplotlib
 LOKY_MAX_CPU_COUNT=2
 CONFIG_WC=config/competitions_worldcup.yaml
+COMBOS_CONFIG=config/worldcup_combos.yaml
 
 # MODE TEMPORAIRE COUPE DU MONDE ONLY.
 # DISABLED UNTIL AUGUST 2026: routines championnats V3, O/U et analyses H-6 domestic.
@@ -95,12 +98,27 @@ CONFIG_WC=config/competitions_worldcup.yaml
 15 5 * * 1 cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_wc_weekly_ingestion.lock env CONFIG="$CONFIG_WC" SAVE_RAW=true DRY_RUN=false scripts/weekly_ingestion.sh >> "$LOGDIR/worldcup_weekly_ingestion.log" 2>&1
 50 5 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_wc_fixtures.lock env CONFIG="$CONFIG_WC" REFRESH_FIXTURES=true REFRESH_STANDINGS=true REFRESH_ODDS=false REFRESH_DETAILS=false SAVE_RAW=true scripts/refresh_all_leagues.sh >> "$LOGDIR/worldcup_fixtures.log" 2>&1
 30 6 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_wc_daily_morning.lock env CONFIG="$CONFIG_WC" REFRESH_DATA=true SEND_DISCORD=true DRY_RUN=false PUBLISH_DISCORD=true SAVE_RAW=true scripts/daily_morning.sh >> "$LOGDIR/worldcup_daily_morning.log" 2>&1
+5 23 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_wc_daily_tomorrow.lock env DATE="$(TZ=Europe/Paris date -d tomorrow +\%F)" CONFIG="$CONFIG_WC" DRY_RUN=false PRINT_ONLY=false FORCE=false REPLACE_PREVIOUS=true scripts/publish_daily_discord.sh >> "$LOGDIR/worldcup_daily_tomorrow.log" 2>&1
 40 4 * * 1,4 cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_wc_player_squads.lock football-predictor ingest-player-squads --config "$CONFIG_WC" --refresh-api >> "$LOGDIR/worldcup_player_squads.log" 2>&1
 45 3 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_wc_details.lock env CONFIG="$CONFIG_WC" REFRESH_FIXTURES=false REFRESH_STANDINGS=false REFRESH_ODDS=false REFRESH_DETAILS=true DETAILS_ONLY="statistics events lineups players injuries predictions" DETAILS_DAYS_BACK=3 DETAILS_STATUSES="FT AET PEN" DETAILS_LIMIT=80 DETAILS_DELAY_SECONDS=2 DETAILS_SKIP_IF_COMPLETE=true SAVE_RAW=true scripts/refresh_all_leagues.sh >> "$LOGDIR/worldcup_details.log" 2>&1
-1,11,21,31,41,51 7-23 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_wc_late.lock football-predictor worldcup-run-daily --window late --model-dir data/models/worldcup-1x2 --refresh-data --save-raw --send-discord --no-dry-run --json-output reports/daily/worldcup_late_summary.json >> "$LOGDIR/worldcup_late.log" 2>&1
-20,50 12-23 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_wc_match_results.lock env CONFIG="$CONFIG_WC" REFRESH_DATA=true SEND_DISCORD=true DRY_RUN=false SAVE_RAW=true scripts/publish_match_results.sh >> "$LOGDIR/worldcup_match_results.log" 2>&1
-10 8,12,18 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_wc_weekly_score.lock env DRY_RUN=false scripts/publish_weekly_score.sh >> "$LOGDIR/worldcup_weekly_score.log" 2>&1
+1,11,21,31,41,51 * * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_wc_late.lock football-predictor worldcup-run-daily --window late --model-dir data/models/worldcup-1x2 --refresh-data --save-raw --send-discord --no-dry-run --json-output reports/daily/worldcup_late_summary.json >> "$LOGDIR/worldcup_late.log" 2>&1
+6,16,26,36,46,56 * * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_wc_combos_run.lock football-predictor worldcup-combos-run --config "$COMBOS_CONFIG" --execute --json-output reports/daily/worldcup_combos_run_latest.json >> "$LOGDIR/worldcup_combos_run.log" 2>&1
+7,17,27,37,47,57 * * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_wc_combos_lock.lock env PYTHONPATH=src python scripts/lock_worldcup_combos.py --config "$COMBOS_CONFIG" --execute >> "$LOGDIR/worldcup_combos_lock.log" 2>&1
+8,18,28,38,48,58 * * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_wc_combos_publish.lock football-predictor worldcup-combos-publish --config "$COMBOS_CONFIG" --execute --json-output reports/daily/worldcup_combos_publish_latest.json >> "$LOGDIR/worldcup_combos_publish.log" 2>&1
+35 * * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_wc_combos_settle.lock env PYTHONPATH=src python scripts/settle_worldcup_combos.py --config "$COMBOS_CONFIG" --execute >> "$LOGDIR/worldcup_combos_settle.log" 2>&1
+20,50 * * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_wc_match_results.lock env CONFIG="$CONFIG_WC" REFRESH_DATA=true SEND_DISCORD=true DRY_RUN=false SAVE_RAW=true scripts/publish_match_results.sh >> "$LOGDIR/worldcup_match_results.log" 2>&1
+25,55 0-3 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_wc_match_results_yesterday.lock env DATE="$(TZ=Europe/Paris date -d yesterday +\%F)" CONFIG="$CONFIG_WC" REFRESH_DATA=true SEND_DISCORD=true DRY_RUN=false SAVE_RAW=true scripts/publish_match_results.sh >> "$LOGDIR/worldcup_match_results_yesterday.log" 2>&1
+10 2,6,8,12,18 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_wc_weekly_score.lock env DRY_RUN=false scripts/publish_weekly_score.sh >> "$LOGDIR/worldcup_weekly_score.log" 2>&1
 55 23 * * * cd "$PROJECT" && mkdir -p "$LOGDIR" "$MPLCONFIGDIR" && flock -n /tmp/probet_wc_weekly_score.lock env DRY_RUN=false scripts/publish_weekly_score.sh >> "$LOGDIR/worldcup_weekly_score.log" 2>&1
+```
+
+Les horaires des messages Discord sont convertis en `Europe/Paris`. La routine CDM M-30
+selectionne les fixtures via une fenetre glissante `now -> now+30min`, pas via la seule
+date locale, afin de couvrir un coup d'envoi a `00:00` dont le lock M-30 tombe la veille.
+Auditer l'amplitude horaire avec :
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/audit_worldcup_fixture_times.py
 ```
 
 ## Mise en place sur le VPS
@@ -119,6 +137,7 @@ git pull --ff-only origin main
 
 football-predictor doctor --strict
 football-predictor worldcup-audit-reference
+PYTHONPATH=src .venv/bin/python scripts/audit_worldcup_fixture_times.py
 alembic upgrade head
 ```
 
@@ -181,12 +200,14 @@ Surveiller les premiers logs :
 
 ```bash
 tail -n 100 logs/cron/worldcup_daily_morning.log
+tail -n 100 logs/cron/worldcup_daily_tomorrow.log
 tail -n 100 logs/cron/worldcup_late.log
 tail -n 100 logs/cron/worldcup_combos_run.log
 tail -n 100 logs/cron/worldcup_combos_lock.log
 tail -n 100 logs/cron/worldcup_combos_publish.log
 tail -n 100 logs/cron/worldcup_combos_settle.log
 tail -n 100 logs/cron/worldcup_details.log
+tail -n 100 logs/cron/worldcup_match_results_yesterday.log
 tail -n 100 logs/cron/worldcup_weekly_score.log
 ```
 

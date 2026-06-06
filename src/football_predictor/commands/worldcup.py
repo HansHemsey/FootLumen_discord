@@ -342,7 +342,11 @@ def register(app: typer.Typer) -> None:
                 summary = run_daily_worldcup_predictions(
                     session,
                     bundle,
-                    target_date=date_type.fromisoformat(run_date) if run_date else utc_now().date(),
+                    target_date=(
+                        date_type.fromisoformat(run_date)
+                        if run_date
+                        else datetime.now(ZoneInfo(settings.app_timezone)).date()
+                    ),
                     window=window,
                     model_dir=model_dir or settings.world_cup_1x2_model_dir,
                     delivery=delivery,

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -687,6 +688,166 @@ def test_worldcup_daily_draw_safety_blocks_public_high_confidence(
     assert delivery.calls[0]["payload_metadata"]["skip_reason"] == "draw_safety_severe_conflict"
 
 
+def test_worldcup_late_window_selects_midnight_paris_fixture_from_previous_date(
+    monkeypatch,
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'wc_daily_midnight.db'}")
+    init_db(engine)
+    session_factory = create_session_factory(engine)
+    paris = ZoneInfo("Europe/Paris")
+    kickoff = datetime(2026, 6, 14, 0, 0, tzinfo=paris).astimezone(UTC)
+    now = datetime(2026, 6, 13, 23, 31, tzinfo=paris)
+    service_calls: list[dict[str, object]] = []
+
+    class FakeWorldCupPredictionService:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def predict_fixture(self, fixture_id: int, prediction_time=None, **kwargs):
+            service_calls.append({"fixture_id": fixture_id, "prediction_time": prediction_time})
+            return PredictionOutput(
+                fixture_id=fixture_id,
+                match_label="Mexico vs South Africa",
+                competition="FIFA World Cup 2026",
+                match_date=kickoff,
+                prediction_time=prediction_time,
+                probabilities=ProbabilityTriple(0.44, 0.31, 0.25),
+                predicted_result="HOME",
+                confidence_label="Low",
+                confidence_score=35.0,
+                explanations=["Synthetic low confidence"],
+                data_quality=DataQuality(),
+                data_quality_json={"overall_data_quality_score": 70},
+                model_version="worldcup-test",
+                model_prediction_id=123,
+            )
+
+    monkeypatch.setattr(
+        "football_predictor.worldcup.run_daily.WorldCupPredictionService",
+        FakeWorldCupPredictionService,
+    )
+    with session_scope(session_factory) as session:
+        _seed_worldcup_fixture(session, fixture_id=9014, kickoff=kickoff)
+        summary = run_daily_worldcup_predictions(
+            session,
+            _bundle(repo_root),
+            target_date=date(2026, 6, 13),
+            window="late",
+            now=now,
+        )
+
+    assert summary.total == 1
+    assert summary.results[0].fixture_id == 9014
+    assert service_calls == [
+        {
+            "fixture_id": 9014,
+            "prediction_time": now.astimezone(UTC),
+        }
+    ]
+
+
+def test_worldcup_late_window_excludes_past_and_plus_40_fixtures(
+    monkeypatch,
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'wc_daily_late_window.db'}")
+    init_db(engine)
+    session_factory = create_session_factory(engine)
+    now = datetime(2026, 6, 13, 23, 31, tzinfo=ZoneInfo("Europe/Paris"))
+    now_utc = now.astimezone(UTC)
+    service_calls: list[int] = []
+
+    class FakeWorldCupPredictionService:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def predict_fixture(self, fixture_id: int, prediction_time=None, **kwargs):
+            service_calls.append(fixture_id)
+            return PredictionOutput(
+                fixture_id=fixture_id,
+                match_label="Mexico vs South Africa",
+                competition="FIFA World Cup 2026",
+                match_date=now_utc + timedelta(minutes=15),
+                prediction_time=prediction_time,
+                probabilities=ProbabilityTriple(0.44, 0.31, 0.25),
+                predicted_result="HOME",
+                confidence_label="Low",
+                confidence_score=35.0,
+                explanations=["Synthetic low confidence"],
+                data_quality=DataQuality(),
+                data_quality_json={"overall_data_quality_score": 70},
+                model_version="worldcup-test",
+                model_prediction_id=123,
+            )
+
+    monkeypatch.setattr(
+        "football_predictor.worldcup.run_daily.WorldCupPredictionService",
+        FakeWorldCupPredictionService,
+    )
+    with session_scope(session_factory) as session:
+        _seed_worldcup_fixtures(
+            session,
+            [
+                (9015, now_utc - timedelta(minutes=1)),
+                (9016, now_utc + timedelta(minutes=15)),
+                (9017, now_utc + timedelta(minutes=40)),
+            ],
+        )
+        summary = run_daily_worldcup_predictions(
+            session,
+            _bundle(repo_root),
+            target_date=date(2026, 6, 13),
+            window="late",
+            now=now,
+        )
+
+    assert summary.total == 1
+    assert summary.results[0].fixture_id == 9016
+    assert service_calls == [9016]
+
+
+def test_worldcup_mid_window_remains_target_date_bound(
+    monkeypatch,
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'wc_daily_mid_bound.db'}")
+    init_db(engine)
+    session_factory = create_session_factory(engine)
+    paris = ZoneInfo("Europe/Paris")
+    kickoff = datetime(2026, 6, 14, 0, 0, tzinfo=paris).astimezone(UTC)
+    now = datetime(2026, 6, 13, 18, 30, tzinfo=paris)
+    service_calls: list[int] = []
+
+    class FakeWorldCupPredictionService:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def predict_fixture(self, fixture_id: int, prediction_time=None, **kwargs):
+            service_calls.append(fixture_id)
+            raise AssertionError("mid should remain target-date bound")
+
+    monkeypatch.setattr(
+        "football_predictor.worldcup.run_daily.WorldCupPredictionService",
+        FakeWorldCupPredictionService,
+    )
+    with session_scope(session_factory) as session:
+        _seed_worldcup_fixture(session, fixture_id=9018, kickoff=kickoff)
+        summary = run_daily_worldcup_predictions(
+            session,
+            _bundle(repo_root),
+            target_date=date(2026, 6, 13),
+            window="mid",
+            now=now,
+        )
+
+    assert summary.total == 0
+    assert service_calls == []
+
+
 def _bundle(repo_root: Path):
     return load_worldcup_reference_bundle(
         fifa_ranking_path=repo_root / "data/reference/classement_fifa_officiel.csv",
@@ -802,6 +963,38 @@ def _seed_worldcup_fixture(
             away_team="South Africa",
             payload_json={},
         )
+    )
+    session.flush()
+
+
+def _seed_worldcup_fixtures(
+    session,
+    fixtures: list[tuple[int, datetime]],
+) -> None:
+    session.add_all(
+        [
+            models.Team(team_id=1, name="Mexico", payload_json={}),
+            models.Team(team_id=2, name="South Africa", payload_json={}),
+        ]
+    )
+    session.flush()
+    session.add_all(
+        [
+            models.Fixture(
+                fixture_id=fixture_id,
+                date=kickoff,
+                league_id=1,
+                season=2026,
+                status="NS",
+                status_short="NS",
+                home_team_id=1,
+                away_team_id=2,
+                home_team="Mexico",
+                away_team="South Africa",
+                payload_json={},
+            )
+            for fixture_id, kickoff in fixtures
+        ]
     )
     session.flush()
 

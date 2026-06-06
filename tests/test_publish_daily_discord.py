@@ -8,6 +8,7 @@ from sqlalchemy import select
 from typer.testing import CliRunner
 
 from football_predictor.cli import app
+from football_predictor.config.competitions import CompetitionConfig
 from football_predictor.config.settings import get_settings
 from football_predictor.db import models
 from football_predictor.db.init_db import create_db_and_tables
@@ -16,7 +17,10 @@ from football_predictor.discord.config import (
     load_discord_channels_config,
     load_discord_webhooks_config,
 )
-from football_predictor.discord.daily_publication import publish_daily_discord_messages
+from football_predictor.discord.daily_publication import (
+    _standings_messages,
+    publish_daily_discord_messages,
+)
 from football_predictor.discord.service import DiscordDeliveryService
 from football_predictor.reference.loaders import load_api_football_reference
 
@@ -264,6 +268,78 @@ def test_publish_daily_discord_delete_error_warns_and_still_sends(
         result for result in summary.results if result.channel_key == "classement"
     )
     assert standings_result.replace_warnings
+
+
+def test_worldcup_daily_standings_use_groups_from_payload(tmp_path: Path) -> None:
+    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'publish_worldcup_groups.db'}")
+    session_factory = create_session_factory(engine)
+    snapshot_date = datetime(2026, 5, 26, 0, 0, tzinfo=UTC)
+
+    with session_scope(session_factory) as session:
+        session.add_all(
+            [
+                models.Team(team_id=-2001, name="Mexico", payload_json={"synthetic": True}),
+                models.Team(team_id=-2002, name="South Africa", payload_json={"synthetic": True}),
+                models.Team(team_id=-2003, name="England", payload_json={"synthetic": True}),
+            ]
+        )
+        session.add_all(
+            [
+                models.StandingSnapshot(
+                    league_id=1,
+                    season=2026,
+                    team_id=-2001,
+                    snapshot_date=snapshot_date,
+                    fetched_at=snapshot_date,
+                    rank=1,
+                    points=0,
+                    goals_diff=0,
+                    played=0,
+                    payload_json={"group": "Group A"},
+                ),
+                models.StandingSnapshot(
+                    league_id=1,
+                    season=2026,
+                    team_id=-2002,
+                    snapshot_date=snapshot_date,
+                    fetched_at=snapshot_date,
+                    rank=2,
+                    points=0,
+                    goals_diff=0,
+                    played=0,
+                    payload_json={"raw": {"group": "Group A"}},
+                ),
+                models.StandingSnapshot(
+                    league_id=1,
+                    season=2026,
+                    team_id=-2003,
+                    snapshot_date=snapshot_date,
+                    fetched_at=snapshot_date,
+                    rank=1,
+                    points=0,
+                    goals_diff=0,
+                    played=0,
+                    payload_json={"group": "Group L"},
+                ),
+            ]
+        )
+        session.flush()
+        messages = _standings_messages(
+            session,
+            CompetitionConfig(
+                key="fifa_world_cup_2026",
+                league_id=1,
+                season=2026,
+                name="FIFA World Cup",
+                country="World",
+            ),
+            "Europe/Paris",
+        )
+
+    assert "CLASSEMENTS DE GROUPES - FIFA World Cup" in messages[0]
+    assert "Groupe A" in messages[0]
+    assert "Groupe L" in messages[0]
+    assert messages[0].index("Mexico") < messages[0].index("South Africa")
 
 
 def _seed_daily_publication_data(session) -> None:

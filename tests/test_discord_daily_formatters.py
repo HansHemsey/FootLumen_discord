@@ -8,6 +8,7 @@ from football_predictor.discord.daily_formatters import (
     format_calendar_messages,
     format_daily_matches_messages,
     format_standings_messages,
+    format_worldcup_group_standings_messages,
 )
 
 
@@ -54,6 +55,47 @@ def test_standings_formatter_splits_long_table_under_discord_limit() -> None:
     assert all(message.startswith("```md") and message.endswith("```") for message in messages)
     assert all(len(message) <= 800 for message in messages)
     assert "Partie 1/" in messages[0]
+
+
+def test_worldcup_group_standings_formatter_groups_rows_and_handles_unknown() -> None:
+    messages = format_worldcup_group_standings_messages(
+        competition="FIFA World Cup",
+        season=2026,
+        rows=[
+            StandingLine(2, "South Africa", 0, 0, 0, None, "Group A"),
+            StandingLine(1, "Mexico", 0, 0, 0, None, "Group A"),
+            StandingLine(1, "England", 0, 0, 0, None, "Group L"),
+            StandingLine(1, "Synthetic Unknown", 0, 0, 0, None, None),
+        ],
+        updated_at=datetime(2026, 5, 26, 0, 0, tzinfo=UTC),
+    )
+
+    message = messages[0]
+
+    assert len(messages) == 1
+    assert "CLASSEMENTS DE GROUPES - FIFA World Cup" in message
+    assert "Format : 2 premiers + 8 meilleurs 3es qualifiés." in message
+    assert "Groupe A" in message
+    assert "Groupe L" in message
+    assert "Groupe non identifié" in message
+    assert message.index("Mexico") < message.index("South Africa")
+    assert message.startswith("```md") and message.endswith("```")
+
+
+def test_worldcup_group_standings_formatter_adds_best_thirds_after_played_matches() -> None:
+    messages = format_worldcup_group_standings_messages(
+        competition="FIFA World Cup",
+        season=2026,
+        rows=[
+            StandingLine(3, "Third A", 2, 3, 1, "WL", "Group A"),
+            StandingLine(3, "Third B", 2, 4, 0, "DW", "Group B"),
+            StandingLine(1, "Leader A", 2, 6, 3, "WW", "Group A"),
+        ],
+    )
+
+    assert "Meilleurs 3es provisoires" in messages[0]
+    best_thirds = messages[0].split("Meilleurs 3es provisoires", maxsplit=1)[1]
+    assert "Third B" in best_thirds
 
 
 def test_calendar_formatter_formats_next_round_and_splits() -> None:

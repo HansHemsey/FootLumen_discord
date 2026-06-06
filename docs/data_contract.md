@@ -266,7 +266,10 @@ Champs principaux :
   probabilités après ajustement injuries/lineups ;
 - `wc_fifa_*` et `wc_current_elo_*` seulement depuis des snapshots datés
   `snapshot_date <= prediction_time` ;
-- `wc_group_state_*` : état de groupe dérivé des résultats déjà connus avant le cutoff ;
+- `wc_group_state_*` : état de groupe dérivé des résultats déjà connus avant le cutoff,
+  incluant rang, points, écart top 2, pression meilleur troisième, flags besoin de résultat /
+  rotation et scénarios post-match directs `home_win` / `draw` / `away_win` qui mettent à jour
+  les deux équipes de la fixture en même temps ;
 - `wc_squad_strength_*` : force d'effectif issue d'un snapshot `snapshot_at <= prediction_time`.
 
 Tables d'enrichissement CDM :
@@ -328,6 +331,10 @@ Le routage Discord cible les channels `classement`, `calendrier`, `matchs_du_jou
 `analyses`, `predictions`, `resultats` et `discussions`. Les messages automatiques vers
 `discussions` sont refusés par défaut. Les vraies URLs webhook et `DISCORD_BOT_TOKEN`
 restent hors base et hors logs ; seuls des hashes courts non réversibles sont conservés.
+
+Pour `fifa_world_cup_2026`, les standings Discord sont affichés par groupes A-L. Le groupe
+est lu depuis le payload standings API/docs (`group` ou `raw.group`) ; une équipe sans groupe
+est placée dans `Groupe non identifié` plutôt que dans un classement général artificiel.
 
 ## Règle De Snapshot Temporel
 

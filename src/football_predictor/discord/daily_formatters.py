@@ -7,6 +7,7 @@ from datetime import datetime
 
 from football_predictor.discord.formatter import CODE_CLOSE, CODE_OPEN
 from football_predictor.utils.time import format_in_timezone
+from football_predictor.worldcup.groups import localized_group_label, worldcup_group_sort_key
 
 DISCORD_HARD_LIMIT = 2000
 DISCORD_SAFE_LIMIT = 1900
@@ -20,6 +21,7 @@ class StandingLine:
     points: int | None
     goals_diff: int | None
     form: str | None = None
+    group_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -51,22 +53,41 @@ def format_standings_messages(
         " #  Équipe                    MJ  Pts  Diff  Forme",
         "--  ------------------------  --  ---  ----  ------",
     ]
-    lines = [
-        (
-            f"{_int(row.rank, 2)}  "
-            f"{_clip(row.team_name, 24):<24}  "
-            f"{_int(row.played, 2)}  "
-            f"{_int(row.points, 3)}  "
-            f"{_signed(row.goals_diff, 4)}  "
-            f"{_clip(row.form or '-', 6):<6}"
-        )
-        for row in rows
-    ]
+    lines = [_standing_row(row) for row in rows]
     return _split_code_messages(
         header,
         table,
         lines,
         empty_line="Classement non disponible.",
+        max_chars=max_chars,
+    )
+
+
+def format_worldcup_group_standings_messages(
+    *,
+    competition: str,
+    season: int | None,
+    rows: list[StandingLine],
+    updated_at: datetime | None = None,
+    timezone_name: str = "Europe/Paris",
+    max_chars: int = DISCORD_SAFE_LIMIT,
+) -> list[str]:
+    header = [
+        f"📊 CLASSEMENTS DE GROUPES - {competition}",
+        f"Saison : {_value(season)}",
+        f"Mise à jour : {_datetime_label(updated_at, timezone_name)}",
+        "Format : 2 premiers + 8 meilleurs 3es qualifiés.",
+    ]
+    table = [
+        " #  Équipe                    MJ  Pts  Diff  Forme",
+        "--  ------------------------  --  ---  ----  ------",
+    ]
+    lines = _worldcup_group_rows(rows)
+    return _split_code_messages(
+        header,
+        table,
+        lines,
+        empty_line="Classements de groupes non disponibles.",
         max_chars=max_chars,
     )
 
@@ -122,6 +143,56 @@ def format_daily_matches_messages(
         lines,
         empty_line="Aucun match programmé.",
         max_chars=max_chars,
+    )
+
+
+def _worldcup_group_rows(rows: list[StandingLine]) -> list[str]:
+    grouped: dict[str | None, list[StandingLine]] = {}
+    for row in rows:
+        grouped.setdefault(row.group_name, []).append(row)
+    lines: list[str] = []
+    for group_name in sorted(grouped, key=worldcup_group_sort_key):
+        if lines:
+            lines.append("")
+        lines.append(localized_group_label(group_name))
+        for row in sorted(
+            grouped[group_name],
+            key=lambda item: (
+                item.rank if item.rank is not None else 9999,
+                item.team_name,
+            ),
+        ):
+            lines.append(_standing_row(row))
+    third_place_rows = _provisional_third_place_rows(rows)
+    if third_place_rows:
+        lines.extend(["", "Meilleurs 3es provisoires"])
+        lines.extend(_standing_row(row) for row in third_place_rows)
+    return lines
+
+
+def _provisional_third_place_rows(rows: list[StandingLine]) -> list[StandingLine]:
+    if not any((row.played or 0) > 0 for row in rows):
+        return []
+    third_place_rows = [row for row in rows if row.rank == 3]
+    return sorted(
+        third_place_rows,
+        key=lambda item: (
+            item.points if item.points is not None else -9999,
+            item.goals_diff if item.goals_diff is not None else -9999,
+            item.team_name,
+        ),
+        reverse=True,
+    )[:8]
+
+
+def _standing_row(row: StandingLine) -> str:
+    return (
+        f"{_int(row.rank, 2)}  "
+        f"{_clip(row.team_name, 24):<24}  "
+        f"{_int(row.played, 2)}  "
+        f"{_int(row.points, 3)}  "
+        f"{_signed(row.goals_diff, 4)}  "
+        f"{_clip(row.form or '-', 6):<6}"
     )
 
 

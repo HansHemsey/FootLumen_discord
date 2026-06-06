@@ -18,8 +18,10 @@ from football_predictor.discord.daily_formatters import (
     format_calendar_messages,
     format_daily_matches_messages,
     format_standings_messages,
+    format_worldcup_group_standings_messages,
 )
 from football_predictor.discord.service import DiscordDeliveryService
+from football_predictor.worldcup.groups import extract_group_from_payload
 
 
 @dataclass(frozen=True)
@@ -274,7 +276,7 @@ def _standings_messages(
         ).all()
         for snapshot, team_name in sorted(
             records,
-            key=lambda item: item[0].rank if item[0].rank is not None else 9999,
+            key=lambda item: _standing_sort_key(item[0], _is_worldcup_2026(competition)),
         ):
             rows.append(
                 StandingLine(
@@ -284,14 +286,47 @@ def _standings_messages(
                     points=snapshot.points,
                     goals_diff=snapshot.goals_diff,
                     form=snapshot.form,
+                    group_name=_standing_group(snapshot),
                 )
             )
-    return format_standings_messages(
+    formatter = (
+        format_worldcup_group_standings_messages
+        if _is_worldcup_2026(competition)
+        else format_standings_messages
+    )
+    return formatter(
         competition=competition.name,
         season=competition.season,
         rows=rows,
         updated_at=latest,
         timezone_name=timezone_name,
+    )
+
+
+def _is_worldcup_2026(competition: CompetitionConfig) -> bool:
+    return (
+        competition.key == "fifa_world_cup_2026"
+        or (competition.league_id == 1 and competition.season == 2026)
+    )
+
+
+def _standing_group(snapshot: models.StandingSnapshot) -> str | None:
+    payload = snapshot.payload_json if isinstance(snapshot.payload_json, dict) else {}
+    return extract_group_from_payload(payload)
+
+
+def _standing_sort_key(
+    snapshot: models.StandingSnapshot,
+    is_worldcup: bool,
+) -> tuple[object, ...]:
+    if not is_worldcup:
+        return (snapshot.rank if snapshot.rank is not None else 9999,)
+    group = _standing_group(snapshot)
+    group_order = group or "Group Unknown"
+    return (
+        group_order,
+        snapshot.rank if snapshot.rank is not None else 9999,
+        snapshot.team_id,
     )
 
 

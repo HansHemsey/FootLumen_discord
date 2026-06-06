@@ -37,6 +37,11 @@ from football_predictor.worldcup.features import (
     RatingState,
     build_features_for_fixture,
 )
+from football_predictor.worldcup.groups import (
+    UNKNOWN_GROUP,
+    extract_group_from_payload,
+    normalize_worldcup_group_label,
+)
 from football_predictor.worldcup.references import (
     InternationalMatch,
     WorldCupReferenceBundle,
@@ -48,6 +53,7 @@ JsonDict = dict[str, Any]
 BTTS_BET_NAME = "Both Teams Score"
 BTTS_BET_ID = 8
 FINISHED_STATUSES = {"FT", "AET", "PEN"}
+GROUP_RANK_ESTIMATE_METHOD = "points_goal_diff_goals_for_minimal_score_1_0_0_0_0_1"
 
 
 class ApiFootballPayloadClient(Protocol):
@@ -562,8 +568,9 @@ def build_group_state_snapshots(
         ).scalars()
     )
     grouped: dict[str, list[models.Fixture]] = defaultdict(list)
+    standing_groups = _standing_group_lookup(session, league_id, season, cutoff_utc)
     for fixture in fixtures:
-        grouped[_group_name(fixture)].append(fixture)
+        grouped[_group_name(fixture, standing_groups)].append(fixture)
 
     rows_written = 0
     for group_name, group_fixtures in grouped.items():
@@ -944,14 +951,193 @@ def _group_state_features(
         by_team.setdefault(row.team_id, row)
     home = by_team.get(fixture.home_team_id)
     away = by_team.get(fixture.away_team_id)
+    home_incentives = _dict(home.incentives_json if home else None)
+    away_incentives = _dict(away.incentives_json if away else None)
+    direct_scenario = _fixture_direct_scenario(
+        home_incentives,
+        away_incentives,
+        fixture.fixture_id,
+    )
+    scenario_features = _fixture_scenario_features(
+        direct_scenario,
+        home_incentives,
+        away_incentives,
+    )
     return {
         "wc_group_state_available": int(home is not None and away is not None),
+        "wc_group_name": home.group_name if home else away.group_name if away else None,
+        "wc_home_group_rank": home_incentives.get("rank") if home else None,
+        "wc_away_group_rank": away_incentives.get("rank") if away else None,
         "wc_home_group_points": home.points if home else None,
         "wc_away_group_points": away.points if away else None,
         "wc_group_points_diff": _diff(home.points if home else None, away.points if away else None),
+        "wc_home_top2_points_gap": home_incentives.get("top2_points_gap") if home else None,
+        "wc_away_top2_points_gap": away_incentives.get("top2_points_gap") if away else None,
+        "wc_home_needs_result_flag": int(bool(home_incentives.get("needs_result_flag")))
+        if home
+        else None,
+        "wc_away_needs_result_flag": int(bool(away_incentives.get("needs_result_flag")))
+        if away
+        else None,
+        "wc_home_rotation_risk_flag": int(bool(home_incentives.get("rotation_risk_flag")))
+        if home
+        else None,
+        "wc_away_rotation_risk_flag": int(bool(away_incentives.get("rotation_risk_flag")))
+        if away
+        else None,
+        "wc_home_third_place_pressure_flag": int(
+            bool(home_incentives.get("third_place_pressure_flag"))
+        )
+        if home
+        else None,
+        "wc_away_third_place_pressure_flag": int(
+            bool(away_incentives.get("third_place_pressure_flag"))
+        )
+        if away
+        else None,
+        "wc_home_projected_points_win": _first_not_none(
+            _scenario_points_feature(direct_scenario, "home_win", "home"),
+            _projected_points_feature(home_incentives, "win") if home else None,
+        ),
+        "wc_home_projected_points_draw": _first_not_none(
+            _scenario_points_feature(direct_scenario, "draw", "home"),
+            _projected_points_feature(home_incentives, "draw") if home else None,
+        ),
+        "wc_home_projected_points_loss": _first_not_none(
+            _scenario_points_feature(direct_scenario, "away_win", "home"),
+            _projected_points_feature(home_incentives, "loss") if home else None,
+        ),
+        "wc_away_projected_points_win": _first_not_none(
+            _scenario_points_feature(direct_scenario, "away_win", "away"),
+            _projected_points_feature(away_incentives, "win") if away else None,
+        ),
+        "wc_away_projected_points_draw": _first_not_none(
+            _scenario_points_feature(direct_scenario, "draw", "away"),
+            _projected_points_feature(away_incentives, "draw") if away else None,
+        ),
+        "wc_away_projected_points_loss": _first_not_none(
+            _scenario_points_feature(direct_scenario, "home_win", "away"),
+            _projected_points_feature(away_incentives, "loss") if away else None,
+        ),
+        **scenario_features,
         "wc_home_group_state_snapshot_id": home.id if home else None,
         "wc_away_group_state_snapshot_id": away.id if away else None,
     }
+
+
+def _fixture_direct_scenario(
+    home_incentives: JsonDict,
+    away_incentives: JsonDict,
+    fixture_id: int,
+) -> JsonDict:
+    key = str(fixture_id)
+    for incentives in (home_incentives, away_incentives):
+        scenario = _dict(_dict(incentives.get("remaining_fixture_scenarios")).get(key))
+        if scenario:
+            return scenario
+    return {}
+
+
+def _fixture_scenario_features(
+    scenario: JsonDict,
+    home_incentives: JsonDict,
+    away_incentives: JsonDict,
+) -> JsonDict:
+    outcomes = _dict(scenario.get("outcomes"))
+    features: JsonDict = {
+        "wc_group_scenario_available": int(bool(outcomes)),
+        "wc_group_rank_estimate_method": "minimal_score" if outcomes else None,
+    }
+    for outcome_key in ("home_win", "draw", "away_win"):
+        outcome = _dict(outcomes.get(outcome_key))
+        for side in ("home", "away"):
+            prefix = f"wc_{outcome_key}_{side}"
+            features[f"{prefix}_points_after"] = outcome.get(f"{side}_points_after")
+            features[f"{prefix}_rank_after"] = outcome.get(f"{side}_rank_after")
+            features[f"{prefix}_zone_after"] = outcome.get(f"{side}_zone_after")
+            features[f"{prefix}_top2_after"] = _optional_bool_int(
+                outcome.get(f"{side}_top2_after")
+            )
+            features[f"{prefix}_third_place_after"] = _optional_bool_int(
+                outcome.get(f"{side}_third_place_after")
+            )
+            features[f"{prefix}_outside_after"] = _optional_bool_int(
+                outcome.get(f"{side}_outside_after")
+            )
+            features[f"{prefix}_points_delta"] = outcome.get(f"{side}_points_delta")
+            features[f"{prefix}_rank_delta"] = outcome.get(f"{side}_rank_delta")
+    home_zone = _current_incentive_zone(home_incentives)
+    away_zone = _current_incentive_zone(away_incentives)
+    home_win = _dict(outcomes.get("home_win"))
+    draw = _dict(outcomes.get("draw"))
+    away_win = _dict(outcomes.get("away_win"))
+    features.update(
+        {
+            "wc_home_win_changes_top2": int(
+                home_zone != "top2" and bool(home_win.get("home_top2_after"))
+            )
+            if home_win
+            else None,
+            "wc_home_win_changes_away_top2": int(
+                away_zone != "top2" and bool(home_win.get("away_top2_after"))
+            )
+            if home_win
+            else None,
+            "wc_draw_keeps_third_pressure": int(
+                (
+                    home_zone == "third_place"
+                    and bool(draw.get("home_third_place_after"))
+                )
+                or (
+                    away_zone == "third_place"
+                    and bool(draw.get("away_third_place_after"))
+                )
+            )
+            if draw
+            else None,
+            "wc_away_win_changes_top2": int(
+                away_zone != "top2" and bool(away_win.get("away_top2_after"))
+            )
+            if away_win
+            else None,
+            "wc_away_win_pushes_home_outside": int(
+                home_zone != "outside" and bool(away_win.get("home_outside_after"))
+            )
+            if away_win
+            else None,
+        }
+    )
+    return features
+
+
+def _scenario_points_feature(
+    scenario: JsonDict,
+    outcome_key: str,
+    side: str,
+) -> int | None:
+    outcome = _dict(_dict(scenario.get("outcomes")).get(outcome_key))
+    value = outcome.get(f"{side}_points_after")
+    return int(value) if isinstance(value, (int, float)) else None
+
+
+def _projected_points_feature(incentives: JsonDict, outcome: str) -> int | None:
+    projected = _dict(incentives.get("projected_after_next_match"))
+    row = _dict(projected.get(outcome))
+    value = row.get("points")
+    return int(value) if isinstance(value, (int, float)) else None
+
+
+def _current_incentive_zone(incentives: JsonDict) -> str | None:
+    rank = _optional_int(incentives.get("rank"))
+    return _qualification_zone(rank) if rank is not None else None
+
+
+def _optional_bool_int(value: object) -> int | None:
+    return int(value) if isinstance(value, bool) else None
+
+
+def _first_not_none(*values: int | None) -> int | None:
+    return next((value for value in values if value is not None), None)
 
 
 def _squad_strength_feature_pair(
@@ -1027,6 +1213,7 @@ def _ensure_team_row(table: dict[int, JsonDict], team_id: int, team_name: str) -
     table.setdefault(
         team_id,
         {
+            "team_id": team_id,
             "team_name": team_name,
             "played": 0,
             "points": 0,
@@ -1052,6 +1239,8 @@ def _remaining_group_fixtures(
             {
                 "fixture_id": fixture.fixture_id,
                 "kickoff": ensure_aware_utc(fixture.date).isoformat(),
+                "home_team_id": fixture.home_team_id,
+                "away_team_id": fixture.away_team_id,
                 "home_team": fixture.home_team,
                 "away_team": fixture.away_team,
                 "matchday": _matchday(fixture),
@@ -1066,30 +1255,209 @@ def _group_incentives(
     remaining: list[JsonDict],
     table: dict[int, JsonDict],
 ) -> JsonDict:
-    sorted_rows = sorted(
-        table.values(),
-        key=lambda item: (item["points"], item["goal_diff"], item["goals_for"]),
-        reverse=True,
-    )
-    rank = next(
-        (index for index, item in enumerate(sorted_rows, start=1) if item is row),
-        len(sorted_rows),
-    )
+    sorted_rows = _ranked_group_rows(table)
+    rank = _rank_for_team(table, int(row["team_id"]))
     leader_points = int(sorted_rows[0]["points"]) if sorted_rows else 0
+    second_points = int(sorted_rows[1]["points"]) if len(sorted_rows) > 1 else leader_points
+    row_points = int(row["points"])
     points_to_leader = max(leader_points - int(row["points"]), 0)
+    top2_points_gap = max(second_points - row_points, 0) if rank > 2 else 0
+    remaining_fixture_scenarios = _remaining_fixture_scenarios(row, remaining, table)
+    projected = _legacy_next_match_projection(row, remaining, remaining_fixture_scenarios)
     return {
         "rank": rank,
         "matchday": max_matchday or None,
         "is_matchday3_context": bool(max_matchday >= 3),
         "remaining_count": len(remaining),
         "points_to_group_leader": points_to_leader,
+        "top2_points_gap": top2_points_gap,
+        "qualification_zone": _qualification_zone(rank),
+        "third_place_pressure_flag": bool(rank == 3 or (rank > 2 and max_matchday >= 2)),
         "needs_result_flag": bool(max_matchday >= 2 and rank > 2),
         "rotation_risk_flag": bool(max_matchday >= 3 and rank <= 2 and points_to_leader == 0),
+        "projected_after_next_match": projected,
+        "rank_estimate_method": GROUP_RANK_ESTIMATE_METHOD,
+        "remaining_fixture_scenarios": remaining_fixture_scenarios,
         "qualification_risk": {
             "rank": rank,
             "high_risk_flag": bool(rank > 2 and max_matchday >= 2),
+            "top2_points_gap": top2_points_gap,
+            "third_place_pressure_flag": bool(rank == 3 or (rank > 2 and max_matchday >= 2)),
         },
     }
+
+
+def _remaining_fixture_scenarios(
+    row: JsonDict,
+    remaining: list[JsonDict],
+    table: dict[int, JsonDict],
+) -> JsonDict:
+    team_id = int(row["team_id"])
+    scenarios: JsonDict = {}
+    for fixture in remaining:
+        fixture_id = fixture.get("fixture_id")
+        home_team_id = _optional_int(fixture.get("home_team_id"))
+        away_team_id = _optional_int(fixture.get("away_team_id"))
+        if fixture_id is None or home_team_id is None or away_team_id is None:
+            continue
+        if home_team_id not in table or away_team_id not in table:
+            continue
+        if team_id not in {home_team_id, away_team_id}:
+            continue
+        scenarios[str(fixture_id)] = {
+            "fixture_id": fixture_id,
+            "home_team_id": home_team_id,
+            "away_team_id": away_team_id,
+            "home_team": fixture.get("home_team"),
+            "away_team": fixture.get("away_team"),
+            "kickoff": fixture.get("kickoff"),
+            "matchday": fixture.get("matchday"),
+            "rank_estimate_method": GROUP_RANK_ESTIMATE_METHOD,
+            "outcomes": {
+                "home_win": _simulate_group_fixture_outcome(
+                    table,
+                    home_team_id,
+                    away_team_id,
+                    home_score=1,
+                    away_score=0,
+                ),
+                "draw": _simulate_group_fixture_outcome(
+                    table,
+                    home_team_id,
+                    away_team_id,
+                    home_score=0,
+                    away_score=0,
+                ),
+                "away_win": _simulate_group_fixture_outcome(
+                    table,
+                    home_team_id,
+                    away_team_id,
+                    home_score=0,
+                    away_score=1,
+                ),
+            },
+        }
+    return scenarios
+
+
+def _simulate_group_fixture_outcome(
+    table: dict[int, JsonDict],
+    home_team_id: int,
+    away_team_id: int,
+    *,
+    home_score: int,
+    away_score: int,
+) -> JsonDict:
+    before_home_rank = _rank_for_team(table, home_team_id)
+    before_away_rank = _rank_for_team(table, away_team_id)
+    before_home = table[home_team_id]
+    before_away = table[away_team_id]
+    projected_table = _copy_group_table(table)
+    home = projected_table[home_team_id]
+    away = projected_table[away_team_id]
+    home["played"] += 1
+    away["played"] += 1
+    home["goals_for"] += home_score
+    home["goals_against"] += away_score
+    away["goals_for"] += away_score
+    away["goals_against"] += home_score
+    home["goal_diff"] = home["goals_for"] - home["goals_against"]
+    away["goal_diff"] = away["goals_for"] - away["goals_against"]
+    if home_score > away_score:
+        home["points"] += 3
+    elif away_score > home_score:
+        away["points"] += 3
+    else:
+        home["points"] += 1
+        away["points"] += 1
+    home_rank_after = _rank_for_team(projected_table, home_team_id)
+    away_rank_after = _rank_for_team(projected_table, away_team_id)
+    return {
+        "home_points_after": int(home["points"]),
+        "away_points_after": int(away["points"]),
+        "home_rank_after": home_rank_after,
+        "away_rank_after": away_rank_after,
+        "home_zone_after": _qualification_zone(home_rank_after),
+        "away_zone_after": _qualification_zone(away_rank_after),
+        "home_top2_after": bool(home_rank_after <= 2),
+        "away_top2_after": bool(away_rank_after <= 2),
+        "home_third_place_after": bool(home_rank_after == 3),
+        "away_third_place_after": bool(away_rank_after == 3),
+        "home_outside_after": bool(home_rank_after > 3),
+        "away_outside_after": bool(away_rank_after > 3),
+        "home_points_delta": int(home["points"]) - int(before_home["points"]),
+        "away_points_delta": int(away["points"]) - int(before_away["points"]),
+        "home_rank_delta": home_rank_after - before_home_rank,
+        "away_rank_delta": away_rank_after - before_away_rank,
+        "rank_estimate_method": GROUP_RANK_ESTIMATE_METHOD,
+    }
+
+
+def _copy_group_table(table: dict[int, JsonDict]) -> dict[int, JsonDict]:
+    return {team_id: dict(row) for team_id, row in table.items()}
+
+
+def _ranked_group_rows(table: dict[int, JsonDict]) -> list[JsonDict]:
+    return sorted(
+        table.values(),
+        key=lambda item: (int(item["points"]), int(item["goal_diff"]), int(item["goals_for"])),
+        reverse=True,
+    )
+
+
+def _rank_for_team(table: dict[int, JsonDict], team_id: int) -> int:
+    return next(
+        (
+            index
+            for index, item in enumerate(_ranked_group_rows(table), start=1)
+            if int(item["team_id"]) == team_id
+        ),
+        len(table),
+    )
+
+
+def _legacy_next_match_projection(
+    row: JsonDict,
+    remaining: list[JsonDict],
+    remaining_fixture_scenarios: JsonDict,
+) -> JsonDict:
+    team_id = int(row["team_id"])
+    if not remaining:
+        return {}
+    first_fixture = remaining[0]
+    fixture_id = first_fixture.get("fixture_id")
+    scenario = _dict(remaining_fixture_scenarios.get(str(fixture_id)))
+    outcomes = _dict(scenario.get("outcomes"))
+    home_team_id = _optional_int(first_fixture.get("home_team_id"))
+    away_team_id = _optional_int(first_fixture.get("away_team_id"))
+    side = "home" if team_id == home_team_id else "away" if team_id == away_team_id else None
+    if side is None:
+        return {}
+    outcome_map = {
+        "win": "home_win" if side == "home" else "away_win",
+        "draw": "draw",
+        "loss": "away_win" if side == "home" else "home_win",
+    }
+    return {
+        legacy_key: _legacy_projection_row(_dict(outcomes.get(outcome_key)), side)
+        for legacy_key, outcome_key in outcome_map.items()
+    }
+
+
+def _legacy_projection_row(outcome: JsonDict, side: str) -> JsonDict:
+    return {
+        "points": outcome.get(f"{side}_points_after"),
+        "rank": outcome.get(f"{side}_rank_after"),
+        "zone": outcome.get(f"{side}_zone_after"),
+    }
+
+
+def _qualification_zone(rank: int) -> str:
+    if rank <= 2:
+        return "top2"
+    if rank == 3:
+        return "third_place"
+    return "outside"
 
 
 def _squad_strength_payload(
@@ -1257,7 +1625,43 @@ def _extract_yes_no_pair(values: list[JsonDict]) -> tuple[float, float] | None:
     return None
 
 
-def _group_name(fixture: models.Fixture) -> str:
+def _standing_group_lookup(
+    session: Session,
+    league_id: int,
+    season: int,
+    cutoff: datetime,
+) -> dict[int, str]:
+    records = session.execute(
+        select(models.StandingSnapshot)
+        .where(models.StandingSnapshot.league_id == league_id)
+        .where(models.StandingSnapshot.season == season)
+        .where(models.StandingSnapshot.snapshot_date <= cutoff)
+        .order_by(models.StandingSnapshot.snapshot_date.desc(), models.StandingSnapshot.id.desc())
+    ).scalars()
+    groups: dict[int, str] = {}
+    for snapshot in records:
+        if snapshot.team_id in groups:
+            continue
+        payload = snapshot.payload_json if isinstance(snapshot.payload_json, dict) else {}
+        group = extract_group_from_payload(payload)
+        if group:
+            groups[snapshot.team_id] = group
+    return groups
+
+
+def _group_name(
+    fixture: models.Fixture,
+    standing_groups: dict[int, str] | None = None,
+) -> str:
+    standing_groups = standing_groups or {}
+    home_group = standing_groups.get(fixture.home_team_id)
+    away_group = standing_groups.get(fixture.away_team_id)
+    if home_group and home_group == away_group:
+        return home_group
+    if home_group and away_group is None:
+        return home_group
+    if away_group and home_group is None:
+        return away_group
     payload = fixture.payload_json if isinstance(fixture.payload_json, dict) else {}
     candidates = [
         payload.get("group"),
@@ -1265,11 +1669,10 @@ def _group_name(fixture: models.Fixture) -> str:
         fixture.round,
     ]
     for candidate in candidates:
-        text = str(candidate or "")
-        match = re.search(r"group\s+([a-z0-9]+)", text, flags=re.IGNORECASE)
-        if match:
-            return f"Group {match.group(1).upper()}"
-    return "Group Unknown"
+        group = normalize_worldcup_group_label(candidate)
+        if group:
+            return group
+    return UNKNOWN_GROUP
 
 
 def _matchday(fixture: models.Fixture) -> int | None:

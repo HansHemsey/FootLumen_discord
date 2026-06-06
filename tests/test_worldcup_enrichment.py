@@ -13,7 +13,9 @@ from football_predictor.db.session import (
     init_db,
     session_scope,
 )
+from football_predictor.worldcup import enrichment as worldcup_enrichment
 from football_predictor.worldcup.enrichment import (
+    GROUP_RANK_ESTIMATE_METHOD,
     build_enriched_worldcup_features_for_fixture,
     build_group_state_snapshots,
     build_squad_strength_features,
@@ -272,6 +274,322 @@ def test_group_incentives_ignore_results_after_cutoff(tmp_path: Path) -> None:
     assert alpha.goals_against == 0
 
 
+def test_group_state_uses_standings_group_when_fixture_round_is_generic(
+    tmp_path: Path,
+) -> None:
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'group_state_standings.db'}")
+    init_db(engine)
+    session_factory = create_session_factory(engine)
+    cutoff = datetime(2026, 6, 12, 12, tzinfo=UTC)
+    snapshot_date = cutoff - timedelta(days=10)
+
+    with session_scope(session_factory) as session:
+        _seed_group_teams(session)
+        session.add_all(
+            [
+                _standing(-1101, "Group A", snapshot_date, rank=1),
+                _standing(-1102, "Group A", snapshot_date, rank=2),
+            ]
+        )
+        session.add(
+            _fixture(
+                -2101,
+                "Alpha",
+                "Beta",
+                -1101,
+                -1102,
+                cutoff - timedelta(days=1),
+                1,
+                0,
+                round_name="Group Stage - 1",
+            )
+        )
+        result = build_group_state_snapshots(session, cutoff=cutoff, write=True)
+        rows = session.execute(select(models.WorldCupGroupStateSnapshot)).scalars().all()
+
+    assert result.rows_written == 2
+    assert {row.group_name for row in rows} == {"Group A"}
+
+
+def test_group_state_stores_direct_remaining_fixture_scenarios(tmp_path: Path) -> None:
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'group_state_scenarios.db'}")
+    init_db(engine)
+    session_factory = create_session_factory(engine)
+    cutoff = datetime(2026, 6, 12, 12, tzinfo=UTC)
+
+    with session_scope(session_factory) as session:
+        _seed_group_teams(session)
+        session.add(
+            _fixture(
+                -2301,
+                "Alpha",
+                "Beta",
+                -1101,
+                -1102,
+                cutoff + timedelta(days=1),
+                0,
+                0,
+                round_name="Group A - 3",
+                status="NS",
+            )
+        )
+        build_group_state_snapshots(session, cutoff=cutoff, write=True)
+        alpha = session.execute(
+            select(models.WorldCupGroupStateSnapshot).where(
+                models.WorldCupGroupStateSnapshot.team_id == -1101
+            )
+        ).scalar_one()
+
+    scenario = alpha.incentives_json["remaining_fixture_scenarios"]["-2301"]
+    assert scenario["rank_estimate_method"] == GROUP_RANK_ESTIMATE_METHOD
+    assert scenario["outcomes"]["home_win"]["home_points_after"] == 3
+    assert scenario["outcomes"]["home_win"]["away_points_after"] == 0
+    assert scenario["outcomes"]["draw"]["home_points_after"] == 1
+    assert scenario["outcomes"]["draw"]["away_points_after"] == 1
+    assert scenario["outcomes"]["away_win"]["home_points_after"] == 0
+    assert scenario["outcomes"]["away_win"]["away_points_after"] == 3
+    assert alpha.incentives_json["projected_after_next_match"]["win"]["points"] == 3
+    assert alpha.incentives_json["projected_after_next_match"]["loss"]["points"] == 0
+
+
+def test_group_outcome_simulation_estimates_rank_zones_for_both_teams() -> None:
+    table = {
+        -1101: {
+            "team_id": -1101,
+            "team_name": "Alpha",
+            "played": 2,
+            "points": 3,
+            "goals_for": 1,
+            "goals_against": 1,
+            "goal_diff": 0,
+        },
+        -1102: {
+            "team_id": -1102,
+            "team_name": "Beta",
+            "played": 2,
+            "points": 4,
+            "goals_for": 2,
+            "goals_against": 1,
+            "goal_diff": 1,
+        },
+        -1103: {
+            "team_id": -1103,
+            "team_name": "Gamma",
+            "played": 2,
+            "points": 4,
+            "goals_for": 1,
+            "goals_against": 1,
+            "goal_diff": 0,
+        },
+        -1104: {
+            "team_id": -1104,
+            "team_name": "Delta",
+            "played": 2,
+            "points": 3,
+            "goals_for": 2,
+            "goals_against": 1,
+            "goal_diff": 1,
+        },
+    }
+
+    home_win = worldcup_enrichment._simulate_group_fixture_outcome(
+        table,
+        -1101,
+        -1102,
+        home_score=1,
+        away_score=0,
+    )
+    away_win = worldcup_enrichment._simulate_group_fixture_outcome(
+        table,
+        -1101,
+        -1102,
+        home_score=0,
+        away_score=1,
+    )
+
+    assert home_win["home_points_after"] == 6
+    assert home_win["away_points_after"] == 4
+    assert home_win["home_top2_after"] is True
+    assert home_win["home_zone_after"] == "top2"
+    assert away_win["home_points_after"] == 3
+    assert away_win["away_points_after"] == 7
+    assert away_win["home_outside_after"] is True
+    assert away_win["home_zone_after"] == "outside"
+
+
+def test_group_state_features_expose_qualification_context(tmp_path: Path) -> None:
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'group_state_features.db'}")
+    init_db(engine)
+    session_factory = create_session_factory(engine)
+    cutoff = datetime(2026, 6, 12, 12, tzinfo=UTC)
+
+    with session_scope(session_factory) as session:
+        _seed_group_teams(session)
+        session.add_all(
+            [
+                models.WorldCupGroupStateSnapshot(
+                    competition_key="fifa_world_cup_2026",
+                    league_id=1,
+                    season=2026,
+                    group_name="Group A",
+                    team_id=-1101,
+                    canonical_team="Alpha",
+                    snapshot_at=cutoff,
+                    matchday=2,
+                    played=2,
+                    points=3,
+                    goals_for=2,
+                    goals_against=2,
+                    goal_diff=0,
+                    remaining_fixtures_json=[],
+                    incentives_json={
+                        "rank": 3,
+                        "top2_points_gap": 1,
+                        "needs_result_flag": True,
+                        "rotation_risk_flag": False,
+                        "third_place_pressure_flag": True,
+                        "projected_after_next_match": {
+                            "win": {"points": 6, "rank": 2},
+                            "draw": {"points": 4, "rank": 3},
+                            "loss": {"points": 3, "rank": 4},
+                        },
+                        "remaining_fixture_scenarios": {
+                            "-2201": {
+                                "fixture_id": -2201,
+                                "rank_estimate_method": GROUP_RANK_ESTIMATE_METHOD,
+                                "outcomes": {
+                                    "home_win": {
+                                        "home_points_after": 6,
+                                        "away_points_after": 4,
+                                        "home_rank_after": 2,
+                                        "away_rank_after": 3,
+                                        "home_zone_after": "top2",
+                                        "away_zone_after": "third_place",
+                                        "home_top2_after": True,
+                                        "away_top2_after": False,
+                                        "home_third_place_after": False,
+                                        "away_third_place_after": True,
+                                        "home_outside_after": False,
+                                        "away_outside_after": False,
+                                        "home_points_delta": 3,
+                                        "away_points_delta": 0,
+                                        "home_rank_delta": -1,
+                                        "away_rank_delta": 1,
+                                    },
+                                    "draw": {
+                                        "home_points_after": 4,
+                                        "away_points_after": 5,
+                                        "home_rank_after": 3,
+                                        "away_rank_after": 2,
+                                        "home_zone_after": "third_place",
+                                        "away_zone_after": "top2",
+                                        "home_top2_after": False,
+                                        "away_top2_after": True,
+                                        "home_third_place_after": True,
+                                        "away_third_place_after": False,
+                                        "home_outside_after": False,
+                                        "away_outside_after": False,
+                                        "home_points_delta": 1,
+                                        "away_points_delta": 1,
+                                        "home_rank_delta": 0,
+                                        "away_rank_delta": 0,
+                                    },
+                                    "away_win": {
+                                        "home_points_after": 3,
+                                        "away_points_after": 7,
+                                        "home_rank_after": 4,
+                                        "away_rank_after": 1,
+                                        "home_zone_after": "outside",
+                                        "away_zone_after": "top2",
+                                        "home_top2_after": False,
+                                        "away_top2_after": True,
+                                        "home_third_place_after": False,
+                                        "away_third_place_after": False,
+                                        "home_outside_after": True,
+                                        "away_outside_after": False,
+                                        "home_points_delta": 0,
+                                        "away_points_delta": 3,
+                                        "home_rank_delta": 1,
+                                        "away_rank_delta": -1,
+                                    },
+                                },
+                            }
+                        },
+                    },
+                    qualification_risk_json={"high_risk_flag": True},
+                    payload_json={"synthetic": True},
+                ),
+                models.WorldCupGroupStateSnapshot(
+                    competition_key="fifa_world_cup_2026",
+                    league_id=1,
+                    season=2026,
+                    group_name="Group A",
+                    team_id=-1102,
+                    canonical_team="Beta",
+                    snapshot_at=cutoff,
+                    matchday=2,
+                    played=2,
+                    points=4,
+                    goals_for=3,
+                    goals_against=2,
+                    goal_diff=1,
+                    remaining_fixtures_json=[],
+                    incentives_json={
+                        "rank": 2,
+                        "top2_points_gap": 0,
+                        "needs_result_flag": False,
+                        "rotation_risk_flag": False,
+                        "third_place_pressure_flag": False,
+                        "projected_after_next_match": {
+                            "win": {"points": 7, "rank": 1},
+                            "draw": {"points": 5, "rank": 2},
+                            "loss": {"points": 4, "rank": 3},
+                        },
+                    },
+                    qualification_risk_json={"high_risk_flag": False},
+                    payload_json={"synthetic": True},
+                ),
+                _fixture(
+                    -2201,
+                    "Alpha",
+                    "Beta",
+                    -1101,
+                    -1102,
+                    cutoff + timedelta(days=1),
+                    0,
+                    0,
+                    round_name="Group Stage - 3",
+                    status="NS",
+                ),
+            ]
+        )
+        session.flush()
+        fixture = session.get(models.Fixture, -2201)
+        features = build_enriched_worldcup_features_for_fixture(
+            session,
+            fixture,
+            prediction_time=cutoff,
+        )
+
+    assert features["wc_group_state_available"] == 1
+    assert features["wc_group_name"] == "Group A"
+    assert features["wc_home_group_rank"] == 3
+    assert features["wc_home_needs_result_flag"] == 1
+    assert features["wc_home_third_place_pressure_flag"] == 1
+    assert features["wc_home_projected_points_win"] == 6
+    assert features["wc_group_scenario_available"] == 1
+    assert features["wc_group_rank_estimate_method"] == "minimal_score"
+    assert features["wc_home_win_home_points_after"] == 6
+    assert features["wc_home_win_away_points_after"] == 4
+    assert features["wc_draw_home_points_after"] == 4
+    assert features["wc_draw_away_points_after"] == 5
+    assert features["wc_away_win_home_points_after"] == 3
+    assert features["wc_away_win_away_points_after"] == 7
+    assert features["wc_home_win_changes_top2"] == 1
+    assert features["wc_draw_keeps_third_pressure"] == 1
+    assert features["wc_away_win_pushes_home_outside"] == 1
+
+
 def test_squad_strength_uses_only_squads_before_snapshot(tmp_path: Path) -> None:
     engine = create_db_engine(f"sqlite:///{tmp_path / 'squad_strength.db'}")
     init_db(engine)
@@ -395,17 +713,20 @@ def _fixture(
     kickoff: datetime,
     home_goals: int,
     away_goals: int,
+    *,
+    round_name: str = "Group A - 2",
+    status: str = "FT",
 ) -> models.Fixture:
     return models.Fixture(
         fixture_id=fixture_id,
         date=kickoff,
         timestamp=int(kickoff.timestamp()),
         timezone="UTC",
-        round="Group A - 2",
+        round=round_name,
         league_id=1,
         season=2026,
-        status="FT",
-        status_short="FT",
+        status=status,
+        status_short=status,
         home_team_id=home_id,
         away_team_id=away_id,
         home_team=home,
@@ -413,4 +734,25 @@ def _fixture(
         home_goals=home_goals,
         away_goals=away_goals,
         payload_json={"synthetic": True},
+    )
+
+
+def _standing(
+    team_id: int,
+    group_name: str,
+    snapshot_date: datetime,
+    *,
+    rank: int,
+) -> models.StandingSnapshot:
+    return models.StandingSnapshot(
+        league_id=1,
+        season=2026,
+        team_id=team_id,
+        snapshot_date=snapshot_date,
+        fetched_at=snapshot_date,
+        rank=rank,
+        points=0,
+        goals_diff=0,
+        played=0,
+        payload_json={"group": group_name},
     )

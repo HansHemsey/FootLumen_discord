@@ -39,6 +39,12 @@ Chaque fixture CDM peut produire une matrice de qualité :
 - force d'effectif ;
 - `data_quality_score`.
 
+L'état de groupe CDM est construit par groupe A-L, à partir des standings et fixtures connus
+avant le cutoff. Il expose aussi le contexte de qualification : top 2, pression meilleur
+troisième, besoin de résultat, risque rotation et scénarios post-match directs. Les scénarios
+`home_win`, `draw` et `away_win` mettent à jour les deux équipes de la fixture en même temps ;
+les rangs restent estimés avec des scores minimaux `1-0`, `0-0`, `0-1`.
+
 Les lineups ne sont pénalisantes fortement que lorsqu'elles sont attendues, typiquement à moins
 de 90 minutes du kickoff ou si le match n'est plus en statut pre-match.
 

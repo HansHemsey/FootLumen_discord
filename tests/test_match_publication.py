@@ -618,8 +618,18 @@ def test_publish_match_results_compares_published_v3_prediction(
 
 
 def test_publish_match_cli_and_scripts(repo_root: Path) -> None:
-    help_result = CliRunner().invoke(app, ["publish-match-analyses", "--help"])
-    result_help = CliRunner().invoke(app, ["publish-match-results", "--help"])
+    help_result = CliRunner().invoke(
+        app,
+        ["publish-match-analyses", "--help"],
+        color=False,
+        terminal_width=200,
+    )
+    result_help = CliRunner().invoke(
+        app,
+        ["publish-match-results", "--help"],
+        color=False,
+        terminal_width=200,
+    )
 
     assert help_result.exit_code == 0
     assert result_help.exit_code == 0

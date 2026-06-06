@@ -74,7 +74,12 @@ def test_publish_daily_discord_cli_dry_run_persists_messages(tmp_path: Path) -> 
 
 
 def test_publish_daily_discord_cli_exposes_replace_previous_option() -> None:
-    result = CliRunner().invoke(app, ["publish-daily-discord", "--help"])
+    result = CliRunner().invoke(
+        app,
+        ["publish-daily-discord", "--help"],
+        color=False,
+        terminal_width=200,
+    )
 
     assert result.exit_code == 0
     assert "--replace-previous" in result.stdout

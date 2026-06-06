@@ -191,7 +191,7 @@ def test_cli_rejects_synthetic_unknown_team_id() -> None:
 
     result = runner.invoke(
         app,
-        ["ingest-fixtures", "--team-id", "-999", "--last", "1", "--prefer-docs"],
+        ["ingest-fixtures", "--team-id=-999", "--last", "1", "--prefer-docs"],
     )
 
     assert result.exit_code != 0

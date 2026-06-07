@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime
 from typing import Any
 
 from football_predictor.web_api.schemas.common import (
+    PaginationMeta,
     PublicModel,
     public_warnings_from_json,
     safe_datetime,
@@ -15,7 +17,7 @@ from football_predictor.web_api.schemas.common import (
 class ComboLegDTO(PublicModel):
     fixture_id: int
     match_label: str | None = None
-    kickoff_at_utc: object
+    kickoff_at_utc: datetime | None
     market_type: str
     market_scope: str
     selection: str
@@ -33,14 +35,23 @@ class ComboLegDTO(PublicModel):
     warnings_public: list[object] = []
 
 
+class ComboSettlementDTO(PublicModel):
+    status: str | None = None
+    profit_unit: float | None = None
+    settled_at: datetime | None = None
+    leg_results: list[str] = []
+    settlement_warning: str | None = None
+    manual_review_required: bool = False
+
+
 class ComboTicketDTO(PublicModel):
     ticket_key: str
     status: str
-    combo_date: object
+    combo_date: date | None
     session_key: str
-    first_kickoff_at: object
-    last_kickoff_at: object
-    lock_time: object
+    first_kickoff_at: datetime | None
+    last_kickoff_at: datetime | None
+    lock_time: datetime | None
     legs_count: int
     combined_decimal_odds: float | None
     combined_probability_adjusted: float | None
@@ -55,6 +66,12 @@ class ComboTicketDTO(PublicModel):
     no_publish_reason: str | None
     warnings_public: list[object] = []
     legs: list[ComboLegDTO]
+    settlement: ComboSettlementDTO | None = None
+
+
+class ComboTicketListResponse(PublicModel):
+    items: list[ComboTicketDTO]
+    meta: PaginationMeta
 
 
 def combo_leg_from_model(leg: Any) -> ComboLegDTO:
@@ -108,7 +125,45 @@ def combo_ticket_from_model(ticket: Any, legs: list[Any] | tuple[Any, ...]) -> C
         no_publish_reason=getattr(ticket, "no_publish_reason", None),
         warnings_public=public_warnings_from_json(getattr(ticket, "warnings_json", None)),
         legs=[combo_leg_from_model(leg) for leg in legs],
+        settlement=_settlement_from_ticket(ticket),
     )
+
+
+def _settlement_from_ticket(ticket: Any) -> ComboSettlementDTO | None:
+    payload = getattr(ticket, "payload_json", None)
+    if not isinstance(payload, dict):
+        return None
+    settlement = payload.get("settlement")
+    if not isinstance(settlement, dict):
+        return None
+    raw_leg_results = settlement.get("leg_results")
+    leg_results = (
+        [str(item) for item in raw_leg_results]
+        if isinstance(raw_leg_results, list)
+        else []
+    )
+    return ComboSettlementDTO(
+        status=_safe_optional_string(
+            settlement.get("settlement_status") or settlement.get("status")
+        ),
+        profit_unit=safe_float(settlement.get("profit_unit")),
+        settled_at=safe_datetime(settlement.get("settled_at")),
+        leg_results=leg_results,
+        settlement_warning=_public_settlement_warning(settlement.get("settlement_warning")),
+        manual_review_required=bool(settlement.get("manual_review_required")),
+    )
+
+
+def _public_settlement_warning(value: Any) -> str | None:
+    warning = _safe_optional_string(value)
+    if warning in {
+        "manual_review_required",
+        "fixture_void_status",
+        "void_leg",
+        "fixture_postponed",
+    }:
+        return warning
+    return None
 
 
 def _safe_optional_string(value: Any) -> str | None:

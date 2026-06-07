@@ -10,11 +10,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from football_predictor import __version__
 from football_predictor.config.settings import get_settings
 from football_predictor.web_api.errors import install_error_handlers
+from football_predictor.web_api.routes.combos import router as combos_router
 from football_predictor.web_api.routes.competitions import router as competitions_router
 from football_predictor.web_api.routes.fixtures import router as fixtures_router
 from football_predictor.web_api.routes.health import router as health_router
 from football_predictor.web_api.routes.ou import router as ou_router
+from football_predictor.web_api.routes.performance import router as performance_router
 from football_predictor.web_api.routes.predictions import router as predictions_router
+from football_predictor.web_api.routes.results import router as results_router
 
 
 def create_app() -> FastAPI:
@@ -34,6 +37,9 @@ def create_app() -> FastAPI:
     app.include_router(fixtures_router, prefix="/api/v1")
     app.include_router(predictions_router, prefix="/api/v1")
     app.include_router(ou_router, prefix="/api/v1")
+    app.include_router(combos_router, prefix="/api/v1")
+    app.include_router(results_router, prefix="/api/v1")
+    app.include_router(performance_router, prefix="/api/v1")
     return app
 
 

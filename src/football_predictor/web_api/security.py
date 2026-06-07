@@ -39,14 +39,18 @@ def require_api_access(
         return
 
     configured_token = settings.footlumen_api_token
-    provided_token = api_key or _extract_bearer_token(authorization)
-    if not configured_token or not provided_token:
+    provided_tokens = [
+        token
+        for token in (api_key, _extract_bearer_token(authorization))
+        if token is not None and token.strip()
+    ]
+    if not configured_token or not provided_tokens:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"code": "api_token_required", "message": "API token required."},
             headers={"WWW-Authenticate": "Bearer"},
         )
-    if not hmac.compare_digest(configured_token, provided_token):
+    if not any(hmac.compare_digest(configured_token, token) for token in provided_tokens):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"code": "invalid_api_token", "message": "Invalid API token."},

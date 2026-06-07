@@ -17,10 +17,18 @@ from football_predictor.web_api.schemas.predictions import (
 from football_predictor.web_api.security import require_api_access
 from football_predictor.web_api.services.prediction_read_service import PredictionReadService
 
-router = APIRouter(prefix="/predictions", dependencies=[Depends(require_api_access)])
+router = APIRouter(
+    prefix="/predictions",
+    tags=["predictions"],
+    dependencies=[Depends(require_api_access)],
+)
 
 
-@router.get("/latest", response_model=Prediction1X2ListResponse)
+@router.get(
+    "/latest",
+    response_model=Prediction1X2ListResponse,
+    summary="List latest 1X2 predictions",
+)
 def latest_predictions(
     competition_key: str | None = None,
     date_: date | None = Query(default=None, alias="date"),
@@ -44,7 +52,11 @@ def latest_predictions(
     )
 
 
-@router.get("/{fixture_id}", response_model=Prediction1X2DTO)
+@router.get(
+    "/{fixture_id}",
+    response_model=Prediction1X2DTO,
+    summary="Get latest 1X2 prediction for fixture",
+)
 def prediction_detail(
     fixture_id: int,
     session: Session = Depends(get_read_only_session),

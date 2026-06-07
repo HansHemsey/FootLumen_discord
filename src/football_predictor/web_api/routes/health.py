@@ -13,10 +13,10 @@ from football_predictor.web_api.dependencies import get_api_settings, get_read_o
 from football_predictor.web_api.schemas.common import HealthResponse, VersionResponse
 from football_predictor.web_api.security import require_api_access
 
-router = APIRouter(dependencies=[Depends(require_api_access)])
+router = APIRouter(tags=["health"], dependencies=[Depends(require_api_access)])
 
 
-@router.get("/health", response_model=HealthResponse)
+@router.get("/health", response_model=HealthResponse, summary="API health")
 def health(
     settings: Settings = Depends(get_api_settings),
     session: Session = Depends(get_read_only_session),
@@ -34,7 +34,7 @@ def health(
     )
 
 
-@router.get("/version", response_model=VersionResponse)
+@router.get("/version", response_model=VersionResponse, summary="API version")
 def version(settings: Settings = Depends(get_api_settings)) -> VersionResponse:
     return VersionResponse(
         name="FootLumen API",

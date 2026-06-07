@@ -13,10 +13,14 @@ from football_predictor.web_api.schemas.fixtures import FixtureSummaryDTO
 from football_predictor.web_api.security import require_api_access
 from football_predictor.web_api.services.fixture_read_service import FixtureReadService
 
-router = APIRouter(prefix="/fixtures", dependencies=[Depends(require_api_access)])
+router = APIRouter(
+    prefix="/fixtures",
+    tags=["fixtures"],
+    dependencies=[Depends(require_api_access)],
+)
 
 
-@router.get("/today", response_model=list[FixtureSummaryDTO])
+@router.get("/today", response_model=list[FixtureSummaryDTO], summary="List today fixtures")
 def fixtures_today(
     date_: date | None = Query(default=None, alias="date"),
     competition_key: str | None = None,
@@ -30,7 +34,11 @@ def fixtures_today(
     )
 
 
-@router.get("/upcoming", response_model=list[FixtureSummaryDTO])
+@router.get(
+    "/upcoming",
+    response_model=list[FixtureSummaryDTO],
+    summary="List upcoming fixtures",
+)
 def fixtures_upcoming(
     days: int = Query(default=7, ge=1, le=30),
     competition_key: str | None = None,
@@ -48,7 +56,7 @@ def fixtures_upcoming(
     )
 
 
-@router.get("/{fixture_id}", response_model=FixtureSummaryDTO)
+@router.get("/{fixture_id}", response_model=FixtureSummaryDTO, summary="Get a fixture")
 def get_fixture(
     fixture_id: int,
     session: Session = Depends(get_read_only_session),

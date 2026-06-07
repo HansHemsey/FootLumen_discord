@@ -1,0 +1,26 @@
+# Example systemd unit for the read-only FootLumen API.
+# Copy to /etc/systemd/system/footlumen-api.service and adjust paths/user.
+# This service does not run crons and must not publish Discord.
+
+[Unit]
+Description=FootLumen read-only API V1
+After=network.target
+
+[Service]
+Type=simple
+User=football
+Group=football
+WorkingDirectory=/opt/football-predictor/app
+EnvironmentFile=/opt/football-predictor/app/.env
+Environment=PYTHONPATH=/opt/football-predictor/app/src
+ExecStart=/opt/football-predictor/app/.venv/bin/uvicorn football_predictor.web_api.app:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/football-predictor/app /tmp
+
+[Install]
+WantedBy=multi-user.target

@@ -15,10 +15,14 @@ from football_predictor.web_api.schemas.common import PaginationMeta
 from football_predictor.web_api.security import require_api_access
 from football_predictor.web_api.services.combo_read_service import ComboReadService
 
-router = APIRouter(prefix="/combos", dependencies=[Depends(require_api_access)])
+router = APIRouter(
+    prefix="/combos",
+    tags=["combos"],
+    dependencies=[Depends(require_api_access)],
+)
 
 
-@router.get("/today", response_model=ComboTicketListResponse)
+@router.get("/today", response_model=ComboTicketListResponse, summary="List today combos")
 def combos_today(
     date_: date | None = Query(default=None, alias="date"),
     competition_key: str | None = "fifa_world_cup_2026",
@@ -44,7 +48,7 @@ def combos_today(
     )
 
 
-@router.get("/latest", response_model=ComboTicketListResponse)
+@router.get("/latest", response_model=ComboTicketListResponse, summary="List latest combos")
 def latest_combos(
     competition_key: str | None = None,
     include_staff: bool = False,
@@ -62,7 +66,7 @@ def latest_combos(
     )
 
 
-@router.get("/{ticket_key}", response_model=ComboTicketDTO)
+@router.get("/{ticket_key}", response_model=ComboTicketDTO, summary="Get combo ticket")
 def combo_detail(
     ticket_key: str,
     include_staff: bool = True,

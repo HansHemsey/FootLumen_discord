@@ -10,10 +10,18 @@ from football_predictor.web_api.schemas.performance import PerformanceSummaryDTO
 from football_predictor.web_api.security import require_api_access
 from football_predictor.web_api.services.performance_read_service import PerformanceReadService
 
-router = APIRouter(prefix="/performance", dependencies=[Depends(require_api_access)])
+router = APIRouter(
+    prefix="/performance",
+    tags=["performance"],
+    dependencies=[Depends(require_api_access)],
+)
 
 
-@router.get("/summary", response_model=PerformanceSummaryDTO)
+@router.get(
+    "/summary",
+    response_model=PerformanceSummaryDTO,
+    summary="Get performance summary",
+)
 def performance_summary(
     competition_key: str | None = None,
     days: int = Query(default=30, ge=1, le=365),

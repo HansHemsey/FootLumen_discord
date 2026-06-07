@@ -11,10 +11,14 @@ from football_predictor.web_api.schemas.results import RecentResultsResponse
 from football_predictor.web_api.security import require_api_access
 from football_predictor.web_api.services.result_read_service import ResultReadService
 
-router = APIRouter(prefix="/results", dependencies=[Depends(require_api_access)])
+router = APIRouter(
+    prefix="/results",
+    tags=["results"],
+    dependencies=[Depends(require_api_access)],
+)
 
 
-@router.get("/recent", response_model=RecentResultsResponse)
+@router.get("/recent", response_model=RecentResultsResponse, summary="List recent results")
 def recent_results(
     competition_key: str | None = None,
     days: int = Query(default=7, ge=1, le=30),

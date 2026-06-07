@@ -118,6 +118,32 @@ football-predictor worldcup-combos-publish --config config/worldcup_combos.yaml 
 PYTHONPATH=src .venv/bin/python scripts/audit_worldcup_fixture_times.py
 ```
 
+## API V1 Read-Only
+
+FootLumen expose aussi une API HTTP V1 read-only destinée au futur dashboard
+`app.footlumen.com`. Elle lit uniquement les données déjà produites par les crons et
+services existants : fixtures, prédictions, O/U, combinés, résultats et compteurs de
+performance. Elle ne remplace pas Discord et ne déclenche aucune prédiction, ingestion,
+publication ou écriture DB.
+
+Elle est désactivée et protégée par token par défaut :
+
+```env
+FOOTLUMEN_API_ENABLED=false
+FOOTLUMEN_API_REQUIRE_TOKEN=true
+FOOTLUMEN_API_DOCS_ENABLED=false
+```
+
+Lancement local contrôlé :
+
+```bash
+FOOTLUMEN_API_ENABLED=true FOOTLUMEN_API_TOKEN=dev-token \
+uvicorn football_predictor.web_api.app:app --reload --port 8000
+```
+
+Contrat et déploiement : `docs/web_api_contract.md`, `docs/web_api_security.md`,
+`docs/web_api_deployment.md`.
+
 ## Coupe Du Monde 2026
 
 Le mode CDM utilise `config/competitions_worldcup.yaml` et le modèle

@@ -4,7 +4,7 @@ FootLumen API V1 is a read-only HTTP surface for data already produced by the ex
 
 ## Initial Endpoints
 
-All routes are under `/api/v1` and require API access while the API is in shadow mode.
+All routes are under `/api/v1` and require API access while the API is in shadow mode. OpenAPI/Swagger are disabled by default with `FOOTLUMEN_API_DOCS_ENABLED=false`.
 
 | Method | Route | Purpose |
 | --- | --- | --- |

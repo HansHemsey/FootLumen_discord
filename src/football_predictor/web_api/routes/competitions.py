@@ -10,17 +10,25 @@ from football_predictor.web_api.schemas.common import CompetitionSummary
 from football_predictor.web_api.security import require_api_access
 from football_predictor.web_api.services.fixture_read_service import FixtureReadService
 
-router = APIRouter(prefix="/competitions", dependencies=[Depends(require_api_access)])
+router = APIRouter(
+    prefix="/competitions",
+    tags=["competitions"],
+    dependencies=[Depends(require_api_access)],
+)
 
 
-@router.get("", response_model=list[CompetitionSummary])
+@router.get("", response_model=list[CompetitionSummary], summary="List competitions")
 def list_competitions(
     session: Session = Depends(get_read_only_session),
 ) -> list[CompetitionSummary]:
     return FixtureReadService(session).list_competitions()
 
 
-@router.get("/{competition_key}", response_model=CompetitionSummary)
+@router.get(
+    "/{competition_key}",
+    response_model=CompetitionSummary,
+    summary="Get a competition",
+)
 def get_competition(
     competition_key: str,
     session: Session = Depends(get_read_only_session),

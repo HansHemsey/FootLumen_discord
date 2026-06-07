@@ -6,7 +6,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import event
+from sqlalchemy import event, func, select
+from sqlalchemy.orm import Session as SQLAlchemySession
 
 from football_predictor.config.settings import get_settings
 from football_predictor.db import models
@@ -416,3 +417,81 @@ def test_endpoints_do_not_write_or_launch_settlement(api_client: TestClient, mon
         event.remove(engine, "before_cursor_execute", before_cursor_execute)
 
     assert writes == []
+
+
+def test_all_v1_data_endpoints_are_no_write_and_preserve_counts(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("API V1 must stay read-only")
+
+    monkeypatch.setattr(SQLAlchemySession, "add", fail_if_called)
+    monkeypatch.setattr(SQLAlchemySession, "delete", fail_if_called)
+    monkeypatch.setattr(SQLAlchemySession, "commit", fail_if_called)
+    engine = api_client.app.state.test_engine
+    before = _table_counts(engine)
+
+    for path in _all_successful_v1_paths():
+        response = api_client.get(path, headers=_auth())
+        assert response.status_code == 200, path
+
+    after = _table_counts(engine)
+    assert after == before
+
+
+def test_all_v1_data_endpoints_do_not_expose_forbidden_strings(api_client: TestClient) -> None:
+    forbidden = (
+        "payload_json",
+        "raw_snapshot",
+        "raw_api",
+        "webhook",
+        "token",
+        "secret",
+        "must_not_leak",
+    )
+    for path in _all_successful_v1_paths():
+        response = api_client.get(path, headers=_auth())
+        assert response.status_code == 200, path
+        text = response.text.lower()
+        for value in forbidden:
+            assert value not in text, f"{value} leaked in {path}"
+
+
+def _all_successful_v1_paths() -> tuple[str, ...]:
+    return (
+        "/api/v1/health",
+        "/api/v1/version",
+        "/api/v1/competitions",
+        "/api/v1/competitions/fifa_world_cup_2026",
+        "/api/v1/fixtures/today",
+        "/api/v1/fixtures/upcoming?days=30",
+        "/api/v1/fixtures/3001",
+        "/api/v1/predictions/latest?competition_key=fifa_world_cup_2026",
+        "/api/v1/predictions/3002",
+        "/api/v1/ou/latest?competition_key=fifa_world_cup_2026",
+        "/api/v1/ou/3002",
+        "/api/v1/combos/today?include_staff=true",
+        "/api/v1/combos/latest?include_staff=true",
+        "/api/v1/combos/public-ticket",
+        "/api/v1/results/recent?days=7",
+        "/api/v1/performance/summary?days=7",
+    )
+
+
+def _table_counts(engine) -> dict[str, int]:
+    tables = {
+        "fixtures": models.Fixture,
+        "model_predictions": models.ModelPrediction,
+        "ou_model_predictions": models.OUModelPrediction,
+        "combo_tickets": models.ComboTicket,
+        "combo_ticket_legs": models.ComboTicketLeg,
+        "discord_messages": models.DiscordMessage,
+    }
+    session_factory = create_session_factory(engine)
+    with session_factory() as session:
+        counts: dict[str, int] = {}
+        for name, model in tables.items():
+            count_column = model.fixture_id if name == "fixtures" else model.id
+            counts[name] = int(session.scalar(select(func.count(count_column))) or 0)
+        return counts

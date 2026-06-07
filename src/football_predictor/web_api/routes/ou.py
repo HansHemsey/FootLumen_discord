@@ -14,10 +14,18 @@ from football_predictor.web_api.schemas.ou import OUPredictionDTO, OUPredictionL
 from football_predictor.web_api.security import require_api_access
 from football_predictor.web_api.services.ou_read_service import OUReadService
 
-router = APIRouter(prefix="/ou", dependencies=[Depends(require_api_access)])
+router = APIRouter(
+    prefix="/ou",
+    tags=["over-under"],
+    dependencies=[Depends(require_api_access)],
+)
 
 
-@router.get("/latest", response_model=OUPredictionListResponse)
+@router.get(
+    "/latest",
+    response_model=OUPredictionListResponse,
+    summary="List latest O/U predictions",
+)
 def latest_ou_predictions(
     competition_key: str | None = None,
     date_: date | None = Query(default=None, alias="date"),
@@ -41,7 +49,11 @@ def latest_ou_predictions(
     )
 
 
-@router.get("/{fixture_id}", response_model=OUPredictionDTO)
+@router.get(
+    "/{fixture_id}",
+    response_model=OUPredictionDTO,
+    summary="Get latest O/U prediction for fixture",
+)
 def ou_prediction_detail(
     fixture_id: int,
     session: Session = Depends(get_read_only_session),

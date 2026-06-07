@@ -190,6 +190,10 @@ class Settings(BaseSettings):
         default="",
         validation_alias="FOOTLUMEN_API_CORS_ORIGINS",
     )
+    footlumen_api_docs_enabled: bool = Field(
+        default=False,
+        validation_alias="FOOTLUMEN_API_DOCS_ENABLED",
+    )
     footlumen_api_public_base_url: str | None = Field(
         default=None,
         validation_alias="FOOTLUMEN_API_PUBLIC_BASE_URL",

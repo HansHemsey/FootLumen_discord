@@ -1,4 +1,4 @@
-"""Shared helpers for Football Predictor CLI command modules."""
+"""Shared helpers for FootLumen CLI command modules."""
 
 from __future__ import annotations
 

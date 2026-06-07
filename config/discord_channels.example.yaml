@@ -1,14 +1,14 @@
 # Example only. Do not put real Discord channel IDs in this file.
 global_channels:
   score_pronos_semaine:
-    channel_name: "📊-score-pronos-semaine"
+    channel_name: "📊-score-footlumen-semaine"
     channel_id: "REPLACE_WITH_CHANNEL_ID"
-    webhook_name: "football-predictor-score-pronos-semaine"
+    webhook_name: "footlumen-score-footlumen-semaine"
     enabled: true
   predictions_staff:
     channel_name: "staff-predictions-skipped"
     channel_id: "REPLACE_WITH_CHANNEL_ID"
-    webhook_name: "football-predictor-predictions-staff"
+    webhook_name: "footlumen-predictions-staff"
     enabled: true
 
 competitions:
@@ -22,42 +22,42 @@ competitions:
       classement:
         channel_name: "🏆-classement"
         channel_id: "REPLACE_WITH_CHANNEL_ID"
-        webhook_name: "football-predictor-cdm-2026-classement"
+        webhook_name: "footlumen-cdm-2026-classement"
         enabled: true
       calendrier:
         channel_name: "🗓️-calendrier"
         channel_id: "REPLACE_WITH_CHANNEL_ID"
-        webhook_name: "football-predictor-cdm-2026-calendrier"
+        webhook_name: "footlumen-cdm-2026-calendrier"
         enabled: true
       matchs_du_jour:
         channel_name: "📅-matchs-du-jour"
         channel_id: "REPLACE_WITH_CHANNEL_ID"
-        webhook_name: "football-predictor-cdm-2026-matchs-du-jour"
+        webhook_name: "footlumen-cdm-2026-matchs-du-jour"
         enabled: true
       analyses:
         channel_name: "🧠-analyses"
         channel_id: "REPLACE_WITH_CHANNEL_ID"
-        webhook_name: "football-predictor-cdm-2026-analyses"
+        webhook_name: "footlumen-cdm-2026-analyses"
         enabled: true
       predictions:
         channel_name: "🎯-predictions"
         channel_id: "REPLACE_WITH_CHANNEL_ID"
-        webhook_name: "football-predictor-cdm-2026-predictions"
+        webhook_name: "footlumen-cdm-2026-predictions"
         enabled: true
       combines:
         channel_name: "🎯-combines-cdm"
         channel_id: "REPLACE_WITH_CHANNEL_ID"
-        webhook_name: "football-predictor-cdm-2026-combines"
+        webhook_name: "footlumen-cdm-2026-combines"
         enabled: false
       resultats:
         channel_name: "✅-resultats"
         channel_id: "REPLACE_WITH_CHANNEL_ID"
-        webhook_name: "football-predictor-cdm-2026-resultats"
+        webhook_name: "footlumen-cdm-2026-resultats"
         enabled: true
       discussions:
         channel_name: "💬-discussions-cdm"
         channel_id: "REPLACE_WITH_CHANNEL_ID"
-        webhook_name: "football-predictor-cdm-2026-discussions"
+        webhook_name: "footlumen-cdm-2026-discussions"
         enabled: false
 
   ligue1:
@@ -67,13 +67,13 @@ competitions:
     season: "USE_VALUE_FROM_CONFIG"
     enabled: true
     channels:
-      classement: {channel_name: "🏆-classement", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-ligue1-classement", enabled: true}
-      calendrier: {channel_name: "🗓️-calendrier", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-ligue1-calendrier", enabled: true}
-      matchs_du_jour: {channel_name: "📅-matchs-du-jour", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-ligue1-matchs-du-jour", enabled: true}
-      analyses: {channel_name: "🧠-analyses", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-ligue1-analyses", enabled: true}
-      predictions: {channel_name: "🎯-predictions", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-ligue1-predictions", enabled: true}
-      resultats: {channel_name: "✅-resultats", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-ligue1-resultats", enabled: true}
-      discussions: {channel_name: "💬-discussions-ligue1", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-ligue1-discussions", enabled: false}
+      classement: {channel_name: "🏆-classement", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-ligue1-classement", enabled: true}
+      calendrier: {channel_name: "🗓️-calendrier", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-ligue1-calendrier", enabled: true}
+      matchs_du_jour: {channel_name: "📅-matchs-du-jour", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-ligue1-matchs-du-jour", enabled: true}
+      analyses: {channel_name: "🧠-analyses", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-ligue1-analyses", enabled: true}
+      predictions: {channel_name: "🎯-predictions", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-ligue1-predictions", enabled: true}
+      resultats: {channel_name: "✅-resultats", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-ligue1-resultats", enabled: true}
+      discussions: {channel_name: "💬-discussions-ligue1", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-ligue1-discussions", enabled: false}
 
   premier_league:
     display_name: "Premier League"
@@ -82,13 +82,13 @@ competitions:
     season: "USE_VALUE_FROM_CONFIG"
     enabled: true
     channels:
-      classement: {channel_name: "🏆-classement", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-premier-league-classement", enabled: true}
-      calendrier: {channel_name: "🗓️-calendrier", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-premier-league-calendrier", enabled: true}
-      matchs_du_jour: {channel_name: "📅-matchs-du-jour", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-premier-league-matchs-du-jour", enabled: true}
-      analyses: {channel_name: "🧠-analyses", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-premier-league-analyses", enabled: true}
-      predictions: {channel_name: "🎯-predictions", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-premier-league-predictions", enabled: true}
-      resultats: {channel_name: "✅-resultats", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-premier-league-resultats", enabled: true}
-      discussions: {channel_name: "💬-discussions-premier-league", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-premier-league-discussions", enabled: false}
+      classement: {channel_name: "🏆-classement", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-premier-league-classement", enabled: true}
+      calendrier: {channel_name: "🗓️-calendrier", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-premier-league-calendrier", enabled: true}
+      matchs_du_jour: {channel_name: "📅-matchs-du-jour", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-premier-league-matchs-du-jour", enabled: true}
+      analyses: {channel_name: "🧠-analyses", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-premier-league-analyses", enabled: true}
+      predictions: {channel_name: "🎯-predictions", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-premier-league-predictions", enabled: true}
+      resultats: {channel_name: "✅-resultats", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-premier-league-resultats", enabled: true}
+      discussions: {channel_name: "💬-discussions-premier-league", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-premier-league-discussions", enabled: false}
 
   liga:
     display_name: "Liga"
@@ -97,13 +97,13 @@ competitions:
     season: "USE_VALUE_FROM_CONFIG"
     enabled: true
     channels:
-      classement: {channel_name: "🏆-classement", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-liga-classement", enabled: true}
-      calendrier: {channel_name: "🗓️-calendrier", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-liga-calendrier", enabled: true}
-      matchs_du_jour: {channel_name: "📅-matchs-du-jour", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-liga-matchs-du-jour", enabled: true}
-      analyses: {channel_name: "🧠-analyses", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-liga-analyses", enabled: true}
-      predictions: {channel_name: "🎯-predictions", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-liga-predictions", enabled: true}
-      resultats: {channel_name: "✅-resultats", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-liga-resultats", enabled: true}
-      discussions: {channel_name: "💬-discussions-liga", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-liga-discussions", enabled: false}
+      classement: {channel_name: "🏆-classement", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-liga-classement", enabled: true}
+      calendrier: {channel_name: "🗓️-calendrier", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-liga-calendrier", enabled: true}
+      matchs_du_jour: {channel_name: "📅-matchs-du-jour", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-liga-matchs-du-jour", enabled: true}
+      analyses: {channel_name: "🧠-analyses", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-liga-analyses", enabled: true}
+      predictions: {channel_name: "🎯-predictions", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-liga-predictions", enabled: true}
+      resultats: {channel_name: "✅-resultats", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-liga-resultats", enabled: true}
+      discussions: {channel_name: "💬-discussions-liga", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-liga-discussions", enabled: false}
 
   bundesliga:
     display_name: "Bundesliga"
@@ -112,13 +112,13 @@ competitions:
     season: "USE_VALUE_FROM_CONFIG"
     enabled: true
     channels:
-      classement: {channel_name: "🏆-classement", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-bundesliga-classement", enabled: true}
-      calendrier: {channel_name: "🗓️-calendrier", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-bundesliga-calendrier", enabled: true}
-      matchs_du_jour: {channel_name: "📅-matchs-du-jour", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-bundesliga-matchs-du-jour", enabled: true}
-      analyses: {channel_name: "🧠-analyses", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-bundesliga-analyses", enabled: true}
-      predictions: {channel_name: "🎯-predictions", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-bundesliga-predictions", enabled: true}
-      resultats: {channel_name: "✅-resultats", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-bundesliga-resultats", enabled: true}
-      discussions: {channel_name: "💬-discussions-bundesliga", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-bundesliga-discussions", enabled: false}
+      classement: {channel_name: "🏆-classement", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-bundesliga-classement", enabled: true}
+      calendrier: {channel_name: "🗓️-calendrier", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-bundesliga-calendrier", enabled: true}
+      matchs_du_jour: {channel_name: "📅-matchs-du-jour", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-bundesliga-matchs-du-jour", enabled: true}
+      analyses: {channel_name: "🧠-analyses", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-bundesliga-analyses", enabled: true}
+      predictions: {channel_name: "🎯-predictions", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-bundesliga-predictions", enabled: true}
+      resultats: {channel_name: "✅-resultats", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-bundesliga-resultats", enabled: true}
+      discussions: {channel_name: "💬-discussions-bundesliga", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-bundesliga-discussions", enabled: false}
 
   serie_a:
     display_name: "Serie A"
@@ -127,10 +127,10 @@ competitions:
     season: "USE_VALUE_FROM_CONFIG"
     enabled: true
     channels:
-      classement: {channel_name: "🏆-classement", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-serie-a-classement", enabled: true}
-      calendrier: {channel_name: "🗓️-calendrier", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-serie-a-calendrier", enabled: true}
-      matchs_du_jour: {channel_name: "📅-matchs-du-jour", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-serie-a-matchs-du-jour", enabled: true}
-      analyses: {channel_name: "🧠-analyses", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-serie-a-analyses", enabled: true}
-      predictions: {channel_name: "🎯-predictions", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-serie-a-predictions", enabled: true}
-      resultats: {channel_name: "✅-resultats", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-serie-a-resultats", enabled: true}
-      discussions: {channel_name: "💬-discussions-serie-a", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "football-predictor-serie-a-discussions", enabled: false}
+      classement: {channel_name: "🏆-classement", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-serie-a-classement", enabled: true}
+      calendrier: {channel_name: "🗓️-calendrier", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-serie-a-calendrier", enabled: true}
+      matchs_du_jour: {channel_name: "📅-matchs-du-jour", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-serie-a-matchs-du-jour", enabled: true}
+      analyses: {channel_name: "🧠-analyses", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-serie-a-analyses", enabled: true}
+      predictions: {channel_name: "🎯-predictions", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-serie-a-predictions", enabled: true}
+      resultats: {channel_name: "✅-resultats", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-serie-a-resultats", enabled: true}
+      discussions: {channel_name: "💬-discussions-serie-a", channel_id: "REPLACE_WITH_CHANNEL_ID", webhook_name: "footlumen-serie-a-discussions", enabled: false}

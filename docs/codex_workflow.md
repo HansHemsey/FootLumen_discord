@@ -1,6 +1,6 @@
 # Codex Workflow
 
-Ce guide decrit comment travailler avec Codex sur Football Predictor.
+Ce guide decrit comment travailler avec Codex sur FootLumen.
 
 ## Plan Mode
 
@@ -72,4 +72,3 @@ Confirme que la fixture cible est exclue des historiques.
 - `mypy src` passe si le typage global le permet.
 - Documentation mise a jour si une commande ou structure change.
 - Les cinq fichiers referentiels `docs/api_football_*` sont presents et inchanges.
-

@@ -60,7 +60,7 @@ def test_run_backtest_baselines_exports_reports_and_leakage_report(tmp_path: Pat
     assert result.report_paths["markdown"].exists()
     parsed = json.loads(result.report_paths["json"].read_text(encoding="utf-8"))
     assert parsed["periods"]["test"]["row_count"] == 9
-    assert "Backtest Football Predictor" in result.report_paths["markdown"].read_text(
+    assert "Backtest FootLumen" in result.report_paths["markdown"].read_text(
         encoding="utf-8"
     )
     assert "confidence_bucket" in result.payload["group_metrics"]["test"]

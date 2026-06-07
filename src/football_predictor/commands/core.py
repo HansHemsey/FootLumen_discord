@@ -16,7 +16,7 @@ def _print_healthcheck(*, json_output: bool = False, strict: bool = False) -> No
             raise typer.Exit(1)
         return
 
-    console.print("Football Predictor healthcheck")
+    console.print("FootLumen healthcheck")
     console.print(f"Version: {__version__}")
     console.print(f"Database URL: {mask_database_url(settings.database_url)}")
     console.print(f"Timezone: {settings.app_timezone}")
@@ -51,7 +51,7 @@ def _print_diagnostic_table(report) -> None:
 
 
 def _print_data_quality_report(report: dict) -> None:
-    console.print("Football Predictor data-quality")
+    console.print("FootLumen data-quality")
     scope = report.get("scope", {})
     console.print(
         "Scope: "

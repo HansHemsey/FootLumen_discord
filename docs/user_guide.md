@@ -1,12 +1,12 @@
 # User Guide
 
-Ce guide decrit l'utilisation quotidienne de Football Predictor en local, avec ou sans Docker.
+Ce guide decrit l'utilisation quotidienne de FootLumen en local, avec ou sans Docker.
 Les commandes ne font pas d'appel API-Football sauf lorsqu'une option `--refresh-*` ou `--live`
 est explicitement utilisee.
 
 ## Objectif
 
-Football Predictor aide a construire une prediction 1X2 d'un match :
+FootLumen aide a construire une prediction 1X2 d'un match :
 
 - victoire domicile ;
 - match nul ;

@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="FootLumen visual identity asset">
+
+  <defs>
+    <linearGradient id="fl-blue-grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#123B73"/>
+      <stop offset="100%" stop-color="#0A244A"/>
+    </linearGradient>
+    <linearGradient id="fl-accent-grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#22C7E8"/>
+      <stop offset="100%" stop-color="#27C77A"/>
+    </linearGradient>
+    <radialGradient id="fl-halo" cx="50%" cy="45%" r="60%">
+      <stop offset="0%" stop-color="#22C7E8" stop-opacity="0.28"/>
+      <stop offset="55%" stop-color="#22C7E8" stop-opacity="0.07"/>
+      <stop offset="100%" stop-color="#22C7E8" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="fl-soft-glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    
+  </defs>
+
+
+  <rect width="64" height="64" rx="14" fill="#123B73"/>
+  <circle cx="32" cy="32" r="25" fill="none" stroke="#22C7E8" stroke-width="4.2" stroke-linecap="round" stroke-dasharray="104 42" transform="rotate(-35 32 32)"/>
+  <circle cx="32" cy="32" r="25" fill="none" stroke="#27C77A" stroke-width="4.2" stroke-linecap="round" stroke-dasharray="25 121" transform="rotate(140 32 32)"/>
+  <path d="M19 40 L29 29 L39 34 L47 23" fill="none" stroke="#22C7E8" stroke-width="4.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="19" cy="40" r="3.7" fill="#FFFFFF"/>
+  <circle cx="29" cy="29" r="3.7" fill="#27C77A"/>
+  <circle cx="39" cy="34" r="3.7" fill="#22C7E8"/>
+  <circle cx="47" cy="23" r="3.7" fill="#FFFFFF"/>
+
+</svg>

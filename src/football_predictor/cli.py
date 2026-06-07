@@ -1,4 +1,4 @@
-"""Command line interface for Football Predictor."""
+"""Command line interface for FootLumen."""
 
 # ruff: noqa: F403,F405,I001
 
@@ -14,7 +14,7 @@ from football_predictor.commands.shared import *  # noqa: F403,F405
 from football_predictor.commands.worldcup import register as register_worldcup_commands
 from football_predictor.commands.worldcup_combos import register as register_worldcup_combo_commands
 
-app = typer.Typer(help="Football Predictor CLI")
+app = typer.Typer(help="FootLumen CLI")
 register_core_commands(app)
 register_maintenance_commands(app)
 
@@ -1064,7 +1064,7 @@ def discord_test_route(
     )
     if competition_key and competition is None:
         raise typer.BadParameter("Unknown Discord competition route")
-    markdown = "```md\nTest routage Discord Football Predictor\n```"
+    markdown = "```md\nTest routage Discord FootLumen\n```"
     engine, session_factory = _engine_and_session(settings)
     init_db(engine)
     with session_scope(session_factory) as session:

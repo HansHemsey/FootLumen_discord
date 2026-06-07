@@ -2,7 +2,7 @@
 
 ## Objectif Produit
 
-Football Predictor doit prédire le résultat 1X2 d'un match de football à partir de données
+FootLumen doit prédire le résultat 1X2 d'un match de football à partir de données
 API-Football et de snapshots locaux traçables.
 
 Classes cibles :

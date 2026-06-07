@@ -74,7 +74,7 @@ def test_cli_healthcheck_masks_secrets() -> None:
     get_settings.cache_clear()
 
     assert result.exit_code == 0
-    assert "Football Predictor healthcheck" in result.stdout
+    assert "FootLumen healthcheck" in result.stdout
     assert "Version:" in result.stdout
     assert "docs/api_football_reference.json" in result.stdout
     assert "API key configured: yes, hash=" in result.stdout

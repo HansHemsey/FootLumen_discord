@@ -490,7 +490,7 @@ def _write_reports(
 
 def _markdown_report(payload: dict[str, Any]) -> str:
     lines = [
-        "# Backtest Football Predictor",
+        "# Backtest FootLumen",
         "",
         f"- Dataset: `{payload['dataset_path']}`",
         f"- Model dir: `{payload['model_dir']}`",

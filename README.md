@@ -1,8 +1,10 @@
-# Football Predictor
+# FootLumen
 
-Football Predictor est une plateforme Python de prédiction football construite autour
+FootLumen est une plateforme Python de prédiction football construite autour
 d'API-Football. Elle estime des probabilités de match, automatise les publications Discord
 et fournit un mode dédié Coupe du Monde 2026.
+
+Tagline : **Éclaire le match par la data.**
 
 Le projet travaille avec des sorties probabilistes, pas avec des certitudes :
 
@@ -10,6 +12,9 @@ Le projet travaille avec des sorties probabilistes, pas avec des certitudes :
 - `O/U 2.5` : value betting Over/Under avec une décision de publication dédiée ;
 - confiance, explications, qualité des données et raisons de non-publication ;
 - messages Discord courts, lisibles et sans promesse de gain.
+
+L'identité visuelle FootLumen est disponible dans `footlumen_identity_pack/` :
+logos SVG/PNG, favicon, icône d'app, bannière Discord et mini-charte.
 
 ## Ce Que Fait Le Projet
 
@@ -74,6 +79,10 @@ Les valeurs sensibles restent dans `.env` ou dans des fichiers locaux ignorés p
 Ne jamais remplir `.env.example` avec de vraies clés.
 
 ## Commandes Essentielles
+
+Le nom public du projet est FootLumen. La commande technique reste
+`football-predictor` pour préserver la compatibilité avec les crons, scripts et imports
+existants.
 
 Diagnostic :
 
@@ -147,6 +156,7 @@ la qualité des données.
 
 - `docs/operations_guide.md` : exploitation quotidienne et automatisations.
 - `docs/production_runbook.md` : déploiement VPS, crons, rollback, monitoring.
+- `docs/brand.md` : identité FootLumen, palette et usage des assets.
 - `docs/worldcup_only_vps_mode.md` : mode Coupe du Monde uniquement.
 - `docs/worldcup_combos.md` : combinés CDM, cycle de vie et publication.
 - `docs/modeling_strategy.md` : modèles, calibration, draw safety, O/U V2.
@@ -168,5 +178,5 @@ ou synchronisent massivement doivent rester en dry-run par défaut ou exiger `--
 
 ## Avertissement
 
-Football Predictor fournit une aide à l'analyse probabiliste. Une prédiction, même avec une
+FootLumen fournit une aide à l'analyse probabiliste. Une prédiction, même avec une
 confiance élevée, ne garantit jamais le résultat d'un match.

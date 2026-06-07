@@ -1,4 +1,4 @@
-"""Football Predictor package."""
+"""FootLumen package."""
 
 __all__ = ["__version__"]
 

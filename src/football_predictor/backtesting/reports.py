@@ -21,7 +21,7 @@ def export_markdown_report(metrics: dict[str, Any], path: Path) -> Path:
 
 def _markdown_report(metrics: dict[str, Any]) -> str:
     lines = [
-        "# Backtest Football Predictor",
+        "# Backtest FootLumen",
         "",
         f"- Dataset: `{metrics.get('dataset_path', '')}`",
         f"- Model dir: `{metrics.get('model_dir', '')}`",

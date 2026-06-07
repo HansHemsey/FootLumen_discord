@@ -1,6 +1,6 @@
-# Sécurité
+# Sécurité FootLumen
 
-Ce projet manipule des clés API, webhooks Discord, snapshots bruts, messages persistés et
+FootLumen manipule des clés API, webhooks Discord, snapshots bruts, messages persistés et
 rapports d'exploitation. La règle principale est simple : aucun secret ne doit entrer dans
 Git, les logs, les snapshots ou Discord.
 

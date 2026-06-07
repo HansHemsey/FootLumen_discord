@@ -1,0 +1,23 @@
+{
+  "brand": "FootLumen",
+  "tagline": "Éclaire le match par la data.",
+  "palette": {
+    "deep_blue": "#123B73",
+    "bright_cyan": "#22C7E8",
+    "field_green": "#27C77A",
+    "white": "#FFFFFF"
+  },
+  "asset_counts": {
+    "svg": 23,
+    "png": 31,
+    "icons": 10,
+    "preview": 2
+  },
+  "constraints": [
+    "no betting",
+    "no money",
+    "no casino",
+    "no VIP crown",
+    "no tickets or coins"
+  ]
+}

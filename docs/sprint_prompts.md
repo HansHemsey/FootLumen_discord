@@ -283,7 +283,7 @@ Analyse :
 
 Verifie :
 - routage par championnat ;
-- routing score-pronos-semaine ;
+- routing score-footlumen-semaine ;
 - deduplication ;
 - dry-run ;
 - print-only ;
@@ -317,14 +317,14 @@ A la fin :
 - verifie qu'une prediction O/U deja envoyee n'est pas renvoyee.
 ```
 
-### Prompt D3 - Score-pronos-semaine audit
+### Prompt D3 - Score-footlumen-semaine audit
 
 Mode : **Plan Mode**
 
 ```text
 Travaille en Plan Mode uniquement.
 
-Audite uniquement score-pronos-semaine.
+Audite uniquement score-footlumen-semaine.
 
 Verifie :
 - seules les predictions Discord reellement envoyees sont comptees ;
@@ -505,7 +505,7 @@ Cherche :
 - incoherences V2/V3/O-U ;
 - M-30 vs fenetre late ;
 - seuils de publication ;
-- workflow score-pronos-semaine ;
+- workflow score-footlumen-semaine ;
 - variables d'environnement manquantes ;
 - guide rollback manquant ;
 - guide exploitation quotidien manquant.
@@ -527,7 +527,7 @@ Contraintes :
 - garder les exemples webhook avec placeholders vides ;
 - documenter clairement shadow mode, dry-run, production-mode ;
 - documenter la policy High/Very High + data quality ;
-- documenter le score-pronos-semaine.
+- documenter le score-footlumen-semaine.
 
 A la fin :
 - relis les docs pour detecter les contradictions ;

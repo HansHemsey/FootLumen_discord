@@ -1,6 +1,6 @@
 # Production Public Runbook
 
-Ce runbook decrit le passage en production publique de `soccer-pronos` pour la Coupe du
+Ce runbook decrit le passage en production publique de FootLumen pour la Coupe du
 Monde 2026. Il ne remplace pas les checks CI : il donne l'ordre d'exploitation, les
 commandes dry-run, les commandes execute et le rollback.
 

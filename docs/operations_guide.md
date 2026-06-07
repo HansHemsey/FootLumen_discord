@@ -411,8 +411,8 @@ Discord, garde des verrous `lockf` par routine, et écrit les logs dans `logs/cr
 Exemple local sans refresh, uniquement pour test manuel :
 
 ```cron
-15 7 * * * cd /path/to/ProBet_discord && . .venv/bin/activate && football-predictor doctor --strict
-30 8 * * * cd /path/to/ProBet_discord && . .venv/bin/activate && scripts/run_predict_today.sh
+15 7 * * * cd /path/to/footlumen && . .venv/bin/activate && football-predictor doctor --strict
+30 8 * * * cd /path/to/footlumen && . .venv/bin/activate && scripts/run_predict_today.sh
 ```
 
 Résumé des routines prod autonomes installées :

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FootLumen - Guide d'identite visuelle</title>
+  <style>
+    :root { --blue:#123B73; --cyan:#22C7E8; --green:#27C77A; --white:#FFFFFF; --slate:#5E708A; --light:#F6FAFF; }
+    body { margin:0; font-family: Inter, Sora, Arial, sans-serif; background:var(--light); color:var(--blue); line-height:1.55; }
+    header { padding:56px 64px; background:linear-gradient(135deg, #123B73, #0A244A); color:white; }
+    header img { width:420px; max-width:100%; display:block; margin-bottom:24px; }
+    main { max-width:1040px; margin:0 auto; padding:48px 28px 72px; }
+    section { background:white; border-radius:24px; padding:32px; margin:24px 0; box-shadow:0 10px 30px rgba(18,59,115,.08); }
+    h1 { font-size:44px; margin:0 0 12px; } h2 { margin-top:0; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:18px; }
+    .asset { border:1px solid #dce8f4; border-radius:18px; padding:22px; background:#fff; min-height:160px; }
+    .asset.dark { background:var(--blue); } .asset img { width:100%; height:auto; display:block; }
+    .swatches { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; }
+    .swatch { border-radius:16px; padding:22px; color:#fff; font-weight:800; } .swatch.light { color:var(--blue); border:1px solid #dce8f4; }
+    code { background:#edf7fc; padding:2px 7px; border-radius:6px; }
+  </style>
+</head>
+<body>
+<header>
+  <img src="svg/logo-horizontal-white.svg" alt="Logo FootLumen blanc">
+  <h1>Guide d'identite visuelle FootLumen</h1>
+  <p>Éclaire le match par la data.</p>
+</header>
+<main>
+<section><h2>Concept</h2><p>FootLumen combine un disque football/pitch, une trajectoire de donnees et un signal lumineux. Le systeme visuel evoque la clarte, la data, le football, la confiance et la modernite, sans reference aux paris sportifs, a l'argent, aux gains ou au casino.</p></section>
+<section><h2>Palette principale</h2><div class="swatches"><div class="swatch" style="background:#123B73">Bleu profond<br>#123B73</div><div class="swatch" style="background:#22C7E8;color:#0A244A">Cyan lumineux<br>#22C7E8</div><div class="swatch" style="background:#27C77A;color:#0A244A">Vert terrain<br>#27C77A</div><div class="swatch light" style="background:#FFFFFF">Blanc<br>#FFFFFF</div></div></section>
+<section><h2>Logos inclus</h2><div class="grid"><div class="asset"><img src="svg/logo-horizontal-tagline.svg" alt="Logo horizontal"></div><div class="asset"><img src="svg/logo-stacked.svg" alt="Logo empile"></div><div class="asset"><img src="svg/symbol.svg" alt="Symbole seul"></div><div class="asset"><img src="svg/monogram-fl.svg" alt="Monogramme FL"></div><div class="asset dark"><img src="svg/logo-horizontal-white.svg" alt="Logo blanc"></div><div class="asset"><img src="svg/logo-horizontal-black.svg" alt="Logo noir"></div></div></section>
+<section><h2>Regles d'usage</h2><ul><li>Conserver une zone de respiration au moins egale a la hauteur du F autour du logo.</li><li>Utiliser le symbole seul pour les formats tres petits, favicons et icones.</li><li>Privilegier les fonds blanc, bleu profond ou images fortement assombries.</li><li>Ne jamais ajouter ticket, piece, devise, couronne VIP, jeton, roulette, carte ou langage lie aux paris.</li><li>Ne pas deformer, incliner, ombrer fortement ou recolorer hors palette.</li></ul></section>
+<section><h2>Typographies conseillees</h2><p>Pour un rendu moderne et data-driven: <strong>Inter</strong>, <strong>Sora</strong> ou <strong>IBM Plex Sans</strong>. Les SVG utilisent une pile systeme sans incorporer de fichiers de police.</p></section>
+<section><h2>Exports Discord</h2><p>Deux variantes sont fournies: bannieres 16:9 marquees et clean, en 1920x1080 et 960x540. La version clean est prevue pour les zones ou Discord superpose du texte.</p></section>
+</main>
+</body>
+</html>

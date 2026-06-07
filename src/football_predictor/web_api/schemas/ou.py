@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from football_predictor.web_api.schemas.common import (
+    PaginationMeta,
     PublicModel,
     data_quality_score_from_json,
     safe_datetime,
@@ -19,7 +21,7 @@ from football_predictor.web_api.schemas.fixtures import (
 class OUPredictionDTO(PublicModel):
     fixture: FixtureSummaryDTO
     prediction_id: int
-    prediction_time: object
+    prediction_time: datetime | None
     model_version: str
     threshold: float | None
     forecast_side: str | None
@@ -33,6 +35,11 @@ class OUPredictionDTO(PublicModel):
     publication_decision: str | None
     no_bet_reason: str | None
     data_quality_score: float | None
+
+
+class OUPredictionListResponse(PublicModel):
+    items: list[OUPredictionDTO]
+    meta: PaginationMeta
 
 
 def ou_prediction_from_model(prediction: Any, fixture: Any) -> OUPredictionDTO:

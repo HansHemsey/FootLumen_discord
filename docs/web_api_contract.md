@@ -15,8 +15,12 @@ All routes are under `/api/v1` and require API access while the API is in shadow
 | `GET` | `/fixtures/today` | Fixtures for one local calendar day. |
 | `GET` | `/fixtures/upcoming` | Upcoming fixtures over a bounded date window. |
 | `GET` | `/fixtures/{fixture_id}` | One fixture summary. |
+| `GET` | `/predictions/latest` | Latest public-safe 1X2 prediction DTOs by fixture. |
+| `GET` | `/predictions/{fixture_id}` | Latest 1X2 prediction for one fixture. |
+| `GET` | `/ou/latest` | Latest public-safe O/U prediction DTOs by fixture. |
+| `GET` | `/ou/{fixture_id}` | Latest O/U prediction for one fixture. |
 
-Planned read-only routes for later sprints include predictions, O/U decisions, World Cup combo tickets, recent results and performance summaries.
+Planned read-only routes for later sprints include World Cup combo tickets, recent results and performance summaries.
 
 ## Public DTO Rules
 
@@ -59,6 +63,58 @@ Example:
 ```bash
 curl -H "Authorization: Bearer dev-token" \
   "http://127.0.0.1:8000/api/v1/fixtures/today?competition_key=fifa_world_cup_2026"
+```
+
+## Prediction Endpoints
+
+### `GET /api/v1/predictions/latest`
+
+Query parameters:
+
+- `competition_key`: optional competition filter.
+- `date`: optional fixture local date as `YYYY-MM-DD`.
+- `limit`: optional, default `20`, max `100`.
+- `only_public`: optional boolean, default `false`.
+- `include_no_bet`: optional boolean, default `true`.
+
+The service prefers V3 1X2 predictions when present for a fixture and falls back to legacy `ModelPrediction` only when no V3 row exists. Responses are wrapped as `{ "items": [...], "meta": { ... } }`.
+
+### `GET /api/v1/predictions/{fixture_id}`
+
+Returns the latest 1X2 prediction for the fixture, or `404 prediction_not_found`.
+
+The DTO includes fixture information, probabilities, model version, confidence, data-quality score, publication decision when present, public explanations and filtered public warnings. It intentionally hides feature snapshot IDs, raw model internals and raw `payload_json`.
+
+Example:
+
+```bash
+curl -H "Authorization: Bearer dev-token" \
+  "http://127.0.0.1:8000/api/v1/predictions/latest?competition_key=fifa_world_cup_2026&limit=20"
+```
+
+## O/U Endpoints
+
+### `GET /api/v1/ou/latest`
+
+Query parameters:
+
+- `competition_key`: optional competition filter.
+- `date`: optional fixture local date as `YYYY-MM-DD`.
+- `limit`: optional, default `20`, max `100`.
+- `only_value_picks`: optional boolean, default `false`.
+- `include_no_bet`: optional boolean, default `true`.
+
+### `GET /api/v1/ou/{fixture_id}`
+
+Returns the latest O/U prediction for the fixture, or `404 ou_prediction_not_found`.
+
+The DTO exposes O/U V2 forecast/value fields, confidence V2, edge/EV, publication decision and no-bet reason when present. Legacy O/U rows may return nullable V2 fields, but raw expert probability payloads and raw snapshots are never returned.
+
+Example:
+
+```bash
+curl -H "Authorization: Bearer dev-token" \
+  "http://127.0.0.1:8000/api/v1/ou/latest?only_value_picks=true&limit=20"
 ```
 
 ## DTO Families

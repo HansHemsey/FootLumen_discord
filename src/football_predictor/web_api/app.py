@@ -13,6 +13,8 @@ from football_predictor.web_api.errors import install_error_handlers
 from football_predictor.web_api.routes.competitions import router as competitions_router
 from football_predictor.web_api.routes.fixtures import router as fixtures_router
 from football_predictor.web_api.routes.health import router as health_router
+from football_predictor.web_api.routes.ou import router as ou_router
+from football_predictor.web_api.routes.predictions import router as predictions_router
 
 
 def create_app() -> FastAPI:
@@ -30,6 +32,8 @@ def create_app() -> FastAPI:
     app.include_router(health_router, prefix="/api/v1")
     app.include_router(competitions_router, prefix="/api/v1")
     app.include_router(fixtures_router, prefix="/api/v1")
+    app.include_router(predictions_router, prefix="/api/v1")
+    app.include_router(ou_router, prefix="/api/v1")
     return app
 
 

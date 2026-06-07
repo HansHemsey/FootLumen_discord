@@ -169,6 +169,31 @@ class Settings(BaseSettings):
         default="Medium",
         validation_alias="CONFIDENCE_CAP_ON_DRAW_CONFLICT",
     )
+    footlumen_api_enabled: bool = Field(
+        default=False,
+        validation_alias="FOOTLUMEN_API_ENABLED",
+    )
+    footlumen_api_read_only: bool = Field(
+        default=True,
+        validation_alias="FOOTLUMEN_API_READ_ONLY",
+    )
+    footlumen_api_require_token: bool = Field(
+        default=True,
+        validation_alias="FOOTLUMEN_API_REQUIRE_TOKEN",
+    )
+    footlumen_api_token: str | None = Field(
+        default=None,
+        validation_alias="FOOTLUMEN_API_TOKEN",
+        repr=False,
+    )
+    footlumen_api_cors_origins: str = Field(
+        default="",
+        validation_alias="FOOTLUMEN_API_CORS_ORIGINS",
+    )
+    footlumen_api_public_base_url: str | None = Field(
+        default=None,
+        validation_alias="FOOTLUMEN_API_PUBLIC_BASE_URL",
+    )
 
     @field_validator("market_1x2_bet_id", mode="before")
     @classmethod
@@ -183,6 +208,7 @@ class Settings(BaseSettings):
             describe_secret("Discord webhook", self.discord_webhook_url),
             describe_secret("Discord bot token", self.discord_bot_token),
             describe_secret("Discord guild id", self.discord_guild_id),
+            describe_secret("FootLumen API token", self.footlumen_api_token),
         ]
 
 

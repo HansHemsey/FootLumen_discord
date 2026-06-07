@@ -79,6 +79,10 @@ class CompetitionSummary(PublicModel):
     season: int | None = None
     name: str | None = None
     country: str | None = None
+    type: str | None = None
+    enabled: bool | None = None
+    logo: str | None = None
+    category: str | None = None
 
 
 class TeamSummary(PublicModel):
@@ -124,6 +128,7 @@ class FixtureSummary(PublicModel):
     has_1x2_prediction: bool = False
     has_ou_prediction: bool = False
     has_combo: bool = False
+    latest_prediction_time: datetime | None = None
     data_quality_score: float | None = None
 
 

@@ -10,12 +10,56 @@ All routes are under `/api/v1` and require API access while the API is in shadow
 | --- | --- | --- |
 | `GET` | `/health` | API, DB and runtime health without secrets. |
 | `GET` | `/version` | Package/API version metadata. |
+| `GET` | `/competitions` | List public competitions known by the local DB. |
+| `GET` | `/competitions/{competition_key}` | Return one public competition summary. |
+| `GET` | `/fixtures/today` | Fixtures for one local calendar day. |
+| `GET` | `/fixtures/upcoming` | Upcoming fixtures over a bounded date window. |
+| `GET` | `/fixtures/{fixture_id}` | One fixture summary. |
 
-Planned read-only routes for later sprints include fixtures, predictions, O/U decisions, World Cup combo tickets, recent results and performance summaries.
+Planned read-only routes for later sprints include predictions, O/U decisions, World Cup combo tickets, recent results and performance summaries.
 
 ## Public DTO Rules
 
 Responses must use explicit Pydantic DTOs. They must never return SQLAlchemy models, raw snapshots, `payload_json`, Discord webhook data, secrets, DB URLs or unfiltered staff-only warnings.
+
+## Competition And Fixture Endpoints
+
+### `GET /api/v1/competitions`
+
+Returns `CompetitionSummary` items with `competition_key`, league/season, name, country, type, category, logo and enabled flag when known.
+
+### `GET /api/v1/competitions/{competition_key}`
+
+Returns `404 competition_not_found` if the key is not present in local DB/config-derived metadata.
+
+### `GET /api/v1/fixtures/today`
+
+Query parameters:
+
+- `date`: optional `YYYY-MM-DD`; defaults to the local date in `APP_TIMEZONE`.
+- `competition_key`: optional competition filter.
+
+### `GET /api/v1/fixtures/upcoming`
+
+Query parameters:
+
+- `days`: optional, default `7`, max `30`.
+- `competition_key`: optional competition filter.
+- `status`: optional fixture `status_short` filter such as `NS`.
+- `limit`: optional, default/max `100`.
+
+### `GET /api/v1/fixtures/{fixture_id}`
+
+Returns `404 fixture_not_found` if the fixture does not exist.
+
+Fixture responses include public flags such as `has_1x2_prediction`, `has_ou_prediction`, `has_combo`, `latest_prediction_time` and `data_quality_score`. They never expose fixture `payload_json` or raw snapshots.
+
+Example:
+
+```bash
+curl -H "Authorization: Bearer dev-token" \
+  "http://127.0.0.1:8000/api/v1/fixtures/today?competition_key=fifa_world_cup_2026"
+```
 
 ## DTO Families
 

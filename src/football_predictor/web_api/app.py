@@ -10,6 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from football_predictor import __version__
 from football_predictor.config.settings import get_settings
 from football_predictor.web_api.errors import install_error_handlers
+from football_predictor.web_api.routes.competitions import router as competitions_router
+from football_predictor.web_api.routes.fixtures import router as fixtures_router
 from football_predictor.web_api.routes.health import router as health_router
 
 
@@ -26,6 +28,8 @@ def create_app() -> FastAPI:
     _install_cors(app, settings.footlumen_api_cors_origins)
     install_error_handlers(app)
     app.include_router(health_router, prefix="/api/v1")
+    app.include_router(competitions_router, prefix="/api/v1")
+    app.include_router(fixtures_router, prefix="/api/v1")
     return app
 
 

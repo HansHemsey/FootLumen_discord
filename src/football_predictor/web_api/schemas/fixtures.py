@@ -24,6 +24,7 @@ def fixture_summary_from_model(
     has_1x2_prediction: bool = False,
     has_ou_prediction: bool = False,
     has_combo: bool = False,
+    latest_prediction_time: Any = None,
     data_quality_score: float | None = None,
 ) -> FixtureSummaryDTO:
     inferred_competition_key = competition_key or _infer_competition_key(fixture)
@@ -52,6 +53,7 @@ def fixture_summary_from_model(
         has_1x2_prediction=has_1x2_prediction,
         has_ou_prediction=has_ou_prediction,
         has_combo=has_combo,
+        latest_prediction_time=safe_datetime(latest_prediction_time),
         data_quality_score=data_quality_score
         if data_quality_score is not None
         else data_quality_score_from_json(getattr(fixture, "payload_json", None)),

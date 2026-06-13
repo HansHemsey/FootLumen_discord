@@ -192,6 +192,63 @@ def test_weekly_score_counts_worldcup_prediction_without_late_payload_when_time_
     assert reports[0].lines[0].fixture_id == -25
 
 
+def test_weekly_score_uses_published_result_when_fixture_current_state_is_pending(
+    tmp_path: Path,
+) -> None:
+    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'weekly_result_link.db'}")
+    session_factory = create_session_factory(engine)
+
+    with session_scope(session_factory) as session:
+        _seed_prediction(
+            session,
+            fixture_id=-26,
+            kickoff=datetime(2026, 5, 3, 12, 30, tzinfo=UTC),
+            home_goals=None,
+            away_goals=None,
+            predicted="HOME",
+            status="NS",
+        )
+        session.add(
+            models.DiscordMessage(
+                fixture_id=-26,
+                model_prediction_id=None,
+                channel_key="resultats",
+                message_type="result",
+                status="sent",
+                dry_run=False,
+                print_only=False,
+                webhook_hash="synthetic-result",
+                webhook_url_hash="synthetic-result",
+                message_hash="result--26",
+                message_markdown=(
+                    "```md\n"
+                    "✅ RÉSULTAT MATCH\n"
+                    "Score final : 2-1\n"
+                    "Résultat 1X2 : domicile\n"
+                    "```"
+                ),
+                payload_json={"result_publish": "final", "actual_outcome": "HOME"},
+                route_json={},
+                response_json={},
+                sent_at=datetime(2026, 5, 3, 14, 30, tzinfo=UTC),
+            )
+        )
+        reports = build_weekly_score_reports(
+            session,
+            target_date=date(2026, 5, 3),
+            timezone_name="Europe/Paris",
+            include_previous_week_finalization=False,
+        )
+
+    report = reports[0]
+    assert report.total_predictions == 1
+    assert report.completed == 1
+    assert report.correct == 1
+    assert report.pending == 0
+    assert report.lines[0].score_label == "2-1"
+    assert report.lines[0].actual == "domicile"
+
+
 def test_weekly_score_counts_v3_and_ou_only_when_discord_was_sent(tmp_path: Path) -> None:
     engine = create_db_and_tables(f"sqlite:///{tmp_path / 'weekly_v3_ou.db'}")
     session_factory = create_session_factory(engine)

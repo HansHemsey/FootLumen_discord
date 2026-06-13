@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
@@ -19,8 +20,24 @@ WEEKLY_SCORE_MESSAGE_TYPE = "weekly_prediction_score"
 WEEKLY_SCORE_REPORT_KIND = "weekly_prediction_score"
 FINISHED_STATUSES = {"FT", "AET", "PEN"}
 DISCORD_SAFE_LIMIT = 1900
+RESULT_SCORE_RE = re.compile(r"Score final\s*:\s*(\d+)\s*-\s*(\d+)", re.IGNORECASE)
+RESULT_OUTCOME_RE = re.compile(r"Résultat 1X2\s*:\s*([^\n]+)", re.IGNORECASE)
+RESULT_OUTCOME_LABELS = {
+    "domicile": "HOME",
+    "extérieur": "AWAY",
+    "exterieur": "AWAY",
+    "nul": "DRAW",
+}
 
 JsonDict = dict[str, object]
+
+
+@dataclass(frozen=True)
+class FinalResult:
+    status: str
+    home_goals: int | None
+    away_goals: int | None
+    actual_outcome: str | None
 
 
 @dataclass(frozen=True)
@@ -312,6 +329,7 @@ def _line_from_message(
     message: models.DiscordMessage,
 ) -> WeeklyScoreLine | None:
     payload = message.payload_json if isinstance(message.payload_json, dict) else {}
+    final_result = _final_result_for_fixture(session, fixture)
     if message.message_type == "ou_prediction" or payload.get("model_family") == "ou25":
         ou_prediction_id = _payload_int(payload, "ou_model_prediction_id")
         prediction = (
@@ -323,7 +341,7 @@ def _line_from_message(
             return None
         if ensure_before_kickoff(prediction.prediction_time, fixture.date) is False:
             return None
-        return _score_line_ou(fixture, prediction)
+        return _score_line_ou(fixture, prediction, final_result)
     v3_prediction_id = _payload_int(payload, "v3_model_prediction_id")
     if v3_prediction_id is not None:
         prediction = session.get(models.V3ModelPrediction, v3_prediction_id)
@@ -331,7 +349,7 @@ def _line_from_message(
             return None
         if ensure_before_kickoff(prediction.prediction_time, fixture.date) is False:
             return None
-        return _score_line_v3(fixture, prediction)
+        return _score_line_v3(fixture, prediction, final_result)
     if message.model_prediction_id is None:
         return None
     prediction = session.get(models.ModelPrediction, message.model_prediction_id)
@@ -339,14 +357,15 @@ def _line_from_message(
         return None
     if ensure_before_kickoff(prediction.prediction_time, fixture.date) is False:
         return None
-    return _score_line_v2(fixture, prediction)
+    return _score_line_v2(fixture, prediction, final_result)
 
 
 def _score_line_v2(
     fixture: models.Fixture,
     prediction: models.ModelPrediction,
+    final_result: FinalResult,
 ) -> WeeklyScoreLine:
-    actual = _actual_outcome(fixture)
+    actual = final_result.actual_outcome
     predicted = prediction.predicted_result or prediction.predicted_outcome
     correct = actual == predicted if actual is not None and predicted else None
     return WeeklyScoreLine(
@@ -355,10 +374,10 @@ def _score_line_v2(
         match_label=f"{fixture.home_team} - {fixture.away_team}",
         predicted=_outcome_label(predicted),
         actual=_outcome_label(actual) if actual is not None else None,
-        score_label=_score_label(fixture),
+        score_label=_score_label(final_result),
         confidence_label=prediction.confidence_label,
         confidence_score=prediction.confidence_score,
-        status=(fixture.status_short or fixture.status or "").upper(),
+        status=final_result.status,
         correct=correct,
         model_family="1X2 V2",
     )
@@ -367,8 +386,9 @@ def _score_line_v2(
 def _score_line_v3(
     fixture: models.Fixture,
     prediction: models.V3ModelPrediction,
+    final_result: FinalResult,
 ) -> WeeklyScoreLine:
-    actual = _actual_outcome(fixture)
+    actual = final_result.actual_outcome
     predicted = prediction.predicted_result
     correct = actual == predicted if predicted else None
     return WeeklyScoreLine(
@@ -377,10 +397,10 @@ def _score_line_v3(
         match_label=f"{fixture.home_team} - {fixture.away_team}",
         predicted=_outcome_label(predicted),
         actual=_outcome_label(actual),
-        score_label=_score_label(fixture),
+        score_label=_score_label(final_result),
         confidence_label=prediction.confidence_label or "n.d.",
         confidence_score=prediction.confidence_score,
-        status=(fixture.status_short or fixture.status or "").upper(),
+        status=final_result.status,
         correct=correct,
         model_family="1X2 V3",
     )
@@ -389,8 +409,9 @@ def _score_line_v3(
 def _score_line_ou(
     fixture: models.Fixture,
     prediction: models.OUModelPrediction,
+    final_result: FinalResult,
 ) -> WeeklyScoreLine:
-    actual = _actual_ou(fixture, prediction.threshold)
+    actual = _actual_ou(final_result, prediction.threshold)
     predicted = "OVER" if prediction.p_over >= prediction.p_under else "UNDER"
     correct = actual == predicted if actual is not None else None
     return WeeklyScoreLine(
@@ -399,10 +420,10 @@ def _score_line_ou(
         match_label=f"{fixture.home_team} - {fixture.away_team}",
         predicted=_ou_label(predicted, prediction.threshold),
         actual=_ou_label(actual, prediction.threshold),
-        score_label=_score_label(fixture),
+        score_label=_score_label(final_result),
         confidence_label=prediction.confidence_label or "n.d.",
         confidence_score=prediction.confidence_score,
-        status=(fixture.status_short or fixture.status or "").upper(),
+        status=final_result.status,
         correct=correct,
         model_family="O/U 2.5",
     )
@@ -510,30 +531,99 @@ def _report_payload(report: WeeklyScoreReport) -> dict[str, object]:
     }
 
 
-def _actual_outcome(fixture: models.Fixture) -> str | None:
+def _final_result_for_fixture(session: Session, fixture: models.Fixture) -> FinalResult:
+    fixture_result = _final_result_from_fixture(fixture)
+    if fixture_result.actual_outcome is not None:
+        return fixture_result
+    return _final_result_from_published_result(session, fixture.fixture_id) or fixture_result
+
+
+def _final_result_from_fixture(fixture: models.Fixture) -> FinalResult:
     status = (fixture.status_short or fixture.status or "").upper()
-    if status not in FINISHED_STATUSES:
-        return None
     home = _goals_home(fixture)
     away = _goals_away(fixture)
+    actual = _actual_outcome(status, home, away)
+    return FinalResult(status=status, home_goals=home, away_goals=away, actual_outcome=actual)
+
+
+def _final_result_from_published_result(
+    session: Session,
+    fixture_id: int,
+) -> FinalResult | None:
+    rows = session.execute(
+        select(models.DiscordMessage)
+        .where(
+            models.DiscordMessage.fixture_id == fixture_id,
+            models.DiscordMessage.message_type == "result",
+            models.DiscordMessage.status == "sent",
+            models.DiscordMessage.dry_run.is_(False),
+            models.DiscordMessage.print_only.is_(False),
+        )
+        .order_by(models.DiscordMessage.sent_at.desc(), models.DiscordMessage.created_at.desc())
+    ).scalars()
+    for message in rows:
+        result = _final_result_from_result_message(message)
+        if result.actual_outcome is not None:
+            return result
+    return None
+
+
+def _final_result_from_result_message(message: models.DiscordMessage) -> FinalResult:
+    payload = message.payload_json if isinstance(message.payload_json, dict) else {}
+    status = str(payload.get("status_short") or payload.get("status") or "FT").upper()
+    home = _payload_int(payload, "home_goals")
+    away = _payload_int(payload, "away_goals")
     if home is None or away is None:
+        home, away = _score_from_result_markdown(message.message_markdown)
+    actual = _actual_outcome(status, home, away) or _outcome_from_result_payload_or_markdown(
+        payload,
+        message.message_markdown,
+    )
+    return FinalResult(status=status, home_goals=home, away_goals=away, actual_outcome=actual)
+
+
+def _score_from_result_markdown(markdown: str) -> tuple[int | None, int | None]:
+    match = RESULT_SCORE_RE.search(markdown or "")
+    if match is None:
+        return None, None
+    return int(match.group(1)), int(match.group(2))
+
+
+def _outcome_from_result_payload_or_markdown(payload: JsonDict, markdown: str) -> str | None:
+    value = payload.get("actual_outcome")
+    if value is not None:
+        normalized = str(value).upper()
+        if normalized in {"HOME", "DRAW", "AWAY"}:
+            return normalized
+    match = RESULT_OUTCOME_RE.search(markdown or "")
+    if match is None:
         return None
-    if home > away:
+    label = match.group(1).strip().lower()
+    return RESULT_OUTCOME_LABELS.get(label)
+
+
+def _actual_outcome(
+    status: str,
+    home_goals: int | None,
+    away_goals: int | None,
+) -> str | None:
+    if status not in FINISHED_STATUSES:
+        return None
+    if home_goals is None or away_goals is None:
+        return None
+    if home_goals > away_goals:
         return "HOME"
-    if away > home:
+    if away_goals > home_goals:
         return "AWAY"
     return "DRAW"
 
 
-def _actual_ou(fixture: models.Fixture, threshold: float) -> str | None:
-    status = (fixture.status_short or fixture.status or "").upper()
-    if status not in FINISHED_STATUSES:
+def _actual_ou(result: FinalResult, threshold: float) -> str | None:
+    if result.actual_outcome is None:
         return None
-    home = _goals_home(fixture)
-    away = _goals_away(fixture)
-    if home is None or away is None:
+    if result.home_goals is None or result.away_goals is None:
         return None
-    return "OVER" if home + away > threshold else "UNDER"
+    return "OVER" if result.home_goals + result.away_goals > threshold else "UNDER"
 
 
 def _goals_home(fixture: models.Fixture) -> int | None:
@@ -544,12 +634,10 @@ def _goals_away(fixture: models.Fixture) -> int | None:
     return fixture.away_goals if fixture.away_goals is not None else fixture.goals_away
 
 
-def _score_label(fixture: models.Fixture) -> str:
-    home = _goals_home(fixture)
-    away = _goals_away(fixture)
-    if home is None or away is None:
+def _score_label(result: FinalResult) -> str:
+    if result.home_goals is None or result.away_goals is None:
         return "en attente"
-    return f"{home}-{away}"
+    return f"{result.home_goals}-{result.away_goals}"
 
 
 def _outcome_label(value: str | None) -> str:

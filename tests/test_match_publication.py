@@ -471,6 +471,11 @@ def test_publish_match_results_uses_published_prediction(
     assert summary.dry_run == 1
     assert "Pronostic : correct" in result_message.message_markdown
     assert result_message.model_prediction_id == prediction.id
+    assert result_message.payload_json["result_publish"] == "final"
+    assert result_message.payload_json["actual_outcome"] == "HOME"
+    assert result_message.payload_json["status_short"] == "FT"
+    assert result_message.payload_json["home_goals"] == 2
+    assert result_message.payload_json["away_goals"] == 1
 
 
 def test_publish_match_results_does_not_use_unpublished_internal_prediction(

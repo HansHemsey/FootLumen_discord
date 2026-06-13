@@ -414,6 +414,9 @@ def publish_match_results(
                 {
                     "result_publish": "final",
                     "actual_outcome": _actual_outcome(fixture),
+                    "status_short": (fixture.status_short or fixture.status or "").upper(),
+                    "home_goals": _goals_home(fixture),
+                    "away_goals": _goals_away(fixture),
                 },
             )
             results.append(

@@ -618,6 +618,75 @@ def test_worldcup_daily_low_confidence_goes_to_staff(
     assert delivery.calls[0]["message_type"] == "prediction_skipped"
 
 
+def test_worldcup_daily_public_payload_includes_late_window_metadata(
+    monkeypatch,
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'wc_daily_public_payload.db'}")
+    init_db(engine)
+    session_factory = create_session_factory(engine)
+    kickoff = datetime(2026, 6, 11, 19, 0, tzinfo=UTC)
+    now = kickoff - timedelta(minutes=10)
+
+    class FakeWorldCupPredictionService:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def predict_fixture(self, fixture_id: int, prediction_time=None, **kwargs):
+            return PredictionOutput(
+                fixture_id=fixture_id,
+                match_label="Mexico vs South Africa",
+                competition="FIFA World Cup 2026",
+                match_date=kickoff,
+                prediction_time=prediction_time or now,
+                probabilities=ProbabilityTriple(0.64, 0.21, 0.15),
+                predicted_result="HOME",
+                confidence_label="High",
+                confidence_score=72.0,
+                explanations=["Synthetic high confidence"],
+                data_quality=DataQuality(),
+                data_quality_json={"overall_data_quality_score": 70},
+                model_version="worldcup-test",
+                model_prediction_id=123,
+            )
+
+    class FakeDelivery:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def send_markdown(self, markdown: str, **kwargs):
+            self.calls.append({"markdown": markdown, **kwargs})
+            return SimpleNamespace(status="sent", discord_message_id=77)
+
+    monkeypatch.setattr(
+        "football_predictor.worldcup.run_daily.WorldCupPredictionService",
+        FakeWorldCupPredictionService,
+    )
+    with session_scope(session_factory) as session:
+        _seed_worldcup_fixture(session, fixture_id=9006, kickoff=kickoff)
+        delivery = FakeDelivery()
+        summary = run_daily_worldcup_predictions(
+            session,
+            _bundle(repo_root),
+            target_date=date(2026, 6, 11),
+            window="late",
+            now=now,
+            send_discord=True,
+            dry_run=False,
+            delivery=delivery,
+        )
+
+    assert summary.sent == 1
+    assert len(delivery.calls) == 1
+    metadata = delivery.calls[0]["payload_metadata"]
+    assert metadata["model_family"] == "worldcup_1x2"
+    assert metadata["daily_window"] == "late"
+    assert metadata["automation_window"] == "late"
+    assert metadata["automation_date"] == "2026-06-11"
+    assert metadata["prediction_time"] == now.isoformat()
+
+
 def test_worldcup_daily_draw_safety_blocks_public_high_confidence(
     monkeypatch,
     tmp_path: Path,

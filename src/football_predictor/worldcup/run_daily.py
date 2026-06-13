@@ -209,6 +209,12 @@ def run_daily_worldcup_predictions(
                     force=force,
                     payload_metadata={
                         "model_family": "worldcup_1x2",
+                        "daily_window": resolved_window.value,
+                        "automation_window": resolved_window.value,
+                        "automation_date": target_date.isoformat(),
+                        "prediction_time": output.prediction_time.isoformat()
+                        if output.prediction_time
+                        else None,
                         "draw_safety": output.draw_safety_json,
                         "source_health": output.data_quality_json.get("source_health"),
                         "worldcup_fixture_quality": output.data_quality_json.get(

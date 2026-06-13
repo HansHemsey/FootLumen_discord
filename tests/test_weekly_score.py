@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -63,11 +63,12 @@ def test_weekly_score_monday_includes_previous_and_current_week(tmp_path: Path) 
     assert reports[0].completed == 1
     assert reports[0].correct == 1
     assert reports[0].title_suffix == " (finalisation lundi)"
-    assert reports[1].total_predictions == 0
-    assert reports[1].pending == 0
+    assert reports[1].total_predictions == 1
+    assert reports[1].completed == 0
+    assert reports[1].pending == 1
 
 
-def test_weekly_score_counts_only_late_sent_finished_predictions(tmp_path: Path) -> None:
+def test_weekly_score_counts_late_sent_finished_and_pending_predictions(tmp_path: Path) -> None:
     engine = create_db_and_tables(f"sqlite:///{tmp_path / 'weekly_late.db'}")
     session_factory = create_session_factory(engine)
 
@@ -106,11 +107,89 @@ def test_weekly_score_counts_only_late_sent_finished_predictions(tmp_path: Path)
         )
 
     assert len(reports) == 1
-    assert reports[0].total_predictions == 1
+    assert reports[0].total_predictions == 2
     assert reports[0].completed == 1
     assert reports[0].incorrect == 1
-    assert reports[0].pending == 0
-    assert reports[0].lines[0].fixture_id == -1
+    assert reports[0].pending == 1
+    assert {line.fixture_id for line in reports[0].lines} == {-1, -3}
+    pending_line = next(line for line in reports[0].lines if line.fixture_id == -3)
+    assert pending_line.actual is None
+    assert pending_line.correct is None
+
+
+def test_weekly_score_shows_two_published_predictions_waiting_for_results(
+    tmp_path: Path,
+) -> None:
+    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'weekly_pending.db'}")
+    session_factory = create_session_factory(engine)
+
+    with session_scope(session_factory) as session:
+        _seed_prediction(
+            session,
+            fixture_id=-21,
+            kickoff=datetime(2026, 5, 3, 12, 30, tzinfo=UTC),
+            home_goals=None,
+            away_goals=None,
+            predicted="HOME",
+            status="NS",
+        )
+        _seed_prediction(
+            session,
+            fixture_id=-22,
+            kickoff=datetime(2026, 5, 3, 15, 30, tzinfo=UTC),
+            home_goals=None,
+            away_goals=None,
+            predicted="AWAY",
+            status="NS",
+            discord_payload={"window": "late"},
+        )
+        reports = build_weekly_score_reports(
+            session,
+            target_date=date(2026, 5, 3),
+            timezone_name="Europe/Paris",
+            include_previous_week_finalization=False,
+        )
+
+    report = reports[0]
+    assert report.total_predictions == 2
+    assert report.completed == 0
+    assert report.pending == 2
+
+    message = format_weekly_score_messages(report)[0]
+    assert "- Pronostics publiés : 2" in message
+    assert "- Terminés : 0" in message
+    assert "- En attente : 2" in message
+    assert "réel en attente | ATT" in message
+    assert "accuracy calculée uniquement sur les matchs terminés" in message
+
+
+def test_weekly_score_counts_worldcup_prediction_without_late_payload_when_time_is_m30(
+    tmp_path: Path,
+) -> None:
+    engine = create_db_and_tables(f"sqlite:///{tmp_path / 'weekly_worldcup_legacy.db'}")
+    session_factory = create_session_factory(engine)
+
+    with session_scope(session_factory) as session:
+        _seed_prediction(
+            session,
+            fixture_id=-25,
+            kickoff=datetime(2026, 5, 3, 12, 30, tzinfo=UTC),
+            home_goals=None,
+            away_goals=None,
+            predicted="HOME",
+            status="NS",
+            discord_payload={"model_family": "worldcup_1x2"},
+        )
+        reports = build_weekly_score_reports(
+            session,
+            target_date=date(2026, 5, 3),
+            timezone_name="Europe/Paris",
+            include_previous_week_finalization=False,
+        )
+
+    assert reports[0].total_predictions == 1
+    assert reports[0].pending == 1
+    assert reports[0].lines[0].fixture_id == -25
 
 
 def test_weekly_score_counts_v3_and_ou_only_when_discord_was_sent(tmp_path: Path) -> None:
@@ -435,6 +514,7 @@ def _seed_prediction(
             webhook_url_hash="synthetic",
             message_hash=f"prediction-{fixture_id}",
             message_markdown="```md\nprediction\n```",
+            sent_at=kickoff - timedelta(minutes=30),
             payload_json=discord_payload
             or {"automation_window": "late", "daily_window": "late"},
             route_json={},
@@ -506,6 +586,7 @@ def _seed_v3_prediction(
                 webhook_url_hash="synthetic",
                 message_hash=f"v3-prediction-{fixture_id}",
                 message_markdown="```md\nv3 prediction\n```",
+                sent_at=kickoff - timedelta(minutes=30),
                 payload_json={
                     "automation_window": "late",
                     "daily_window": "late",
@@ -576,6 +657,7 @@ def _seed_ou_prediction(
                 webhook_url_hash="synthetic",
                 message_hash=f"ou-prediction-{fixture_id}",
                 message_markdown="```md\nou prediction\n```",
+                sent_at=kickoff - timedelta(minutes=30),
                 payload_json={
                     "automation_window": "late",
                     "daily_window": "late",

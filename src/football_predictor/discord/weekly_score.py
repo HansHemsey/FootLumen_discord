@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from football_predictor.db import models
@@ -64,7 +64,7 @@ class WeeklyScoreReport:
 
     @property
     def pending(self) -> int:
-        return 0
+        return self.total_predictions - self.completed
 
     @property
     def accuracy(self) -> float | None:
@@ -195,7 +195,7 @@ def format_weekly_score_messages(
     detail_header = ["", "Détail :"]
     detail_lines = [_detail_line(line, timezone_name) for line in report.lines]
     if not detail_lines:
-        detail_lines = ["- aucune prédiction late terminée cette semaine."]
+        detail_lines = ["- aucune prédiction late publiée cette semaine."]
     return _split_markdown_messages(header, detail_header, detail_lines, max_chars=max_chars)
 
 
@@ -263,6 +263,7 @@ def _weekly_lines(
 ) -> list[WeeklyScoreLine]:
     start_utc = datetime.combine(week_start, time.min, tzinfo=timezone).astimezone(UTC)
     end_utc = datetime.combine(week_end, time.min, tzinfo=timezone).astimezone(UTC)
+    published_at = func.coalesce(models.DiscordMessage.sent_at, models.DiscordMessage.created_at)
     rows = session.execute(
         select(models.Fixture, models.DiscordMessage)
         .join(
@@ -271,8 +272,8 @@ def _weekly_lines(
         )
         .where(
             models.Fixture.date.is_not(None),
-            models.Fixture.date >= start_utc,
-            models.Fixture.date < end_utc,
+            published_at >= start_utc,
+            published_at < end_utc,
             models.DiscordMessage.message_type.in_(("prediction", "ou_prediction")),
             models.DiscordMessage.status == "sent",
             models.DiscordMessage.dry_run.is_(False),
@@ -280,13 +281,14 @@ def _weekly_lines(
         )
         .order_by(
             models.Fixture.fixture_id.asc(),
+            published_at.desc(),
             models.DiscordMessage.sent_at.desc(),
             models.DiscordMessage.created_at.desc(),
         )
     ).all()
     latest_by_key: dict[tuple[str, int], WeeklyScoreLine] = {}
     for fixture, message in rows:
-        if not _is_late_prediction_message(message):
+        if not _is_late_prediction_message(session, fixture, message):
             continue
         line = _line_from_message(session, fixture, message)
         if line is None:
@@ -343,10 +345,8 @@ def _line_from_message(
 def _score_line_v2(
     fixture: models.Fixture,
     prediction: models.ModelPrediction,
-) -> WeeklyScoreLine | None:
+) -> WeeklyScoreLine:
     actual = _actual_outcome(fixture)
-    if actual is None:
-        return None
     predicted = prediction.predicted_result or prediction.predicted_outcome
     correct = actual == predicted if actual is not None and predicted else None
     return WeeklyScoreLine(
@@ -367,10 +367,8 @@ def _score_line_v2(
 def _score_line_v3(
     fixture: models.Fixture,
     prediction: models.V3ModelPrediction,
-) -> WeeklyScoreLine | None:
+) -> WeeklyScoreLine:
     actual = _actual_outcome(fixture)
-    if actual is None:
-        return None
     predicted = prediction.predicted_result
     correct = actual == predicted if predicted else None
     return WeeklyScoreLine(
@@ -391,12 +389,10 @@ def _score_line_v3(
 def _score_line_ou(
     fixture: models.Fixture,
     prediction: models.OUModelPrediction,
-) -> WeeklyScoreLine | None:
+) -> WeeklyScoreLine:
     actual = _actual_ou(fixture, prediction.threshold)
-    if actual is None:
-        return None
     predicted = "OVER" if prediction.p_over >= prediction.p_under else "UNDER"
-    correct = actual == predicted
+    correct = actual == predicted if actual is not None else None
     return WeeklyScoreLine(
         fixture_id=fixture.fixture_id,
         fixture_date=fixture.date,
@@ -420,8 +416,10 @@ def _header_lines(report: WeeklyScoreReport) -> list[str]:
         f"{(report.week_end - timedelta(days=1)).isoformat()}",
         "",
         "Résumé :",
-        "- Base : prédictions M-30 publiées, matchs terminés uniquement",
-        f"- Pronostics terminés : {report.completed}",
+        "- Base : prédictions M-30 publiées",
+        f"- Pronostics publiés : {report.total_predictions}",
+        f"- Terminés : {report.completed}",
+        f"- En attente : {report.pending}",
         f"- Corrects : {report.correct}",
         f"- Incorrects : {report.incorrect}",
         f"- Accuracy : {accuracy}",
@@ -492,7 +490,7 @@ def _message_text(
             *detail_header,
             *details,
             "",
-            "Note : bilan basé uniquement sur les prédictions late publiées.",
+            "Note : accuracy calculée uniquement sur les matchs terminés.",
         ]
     )
     lines.append(CODE_CLOSE)
@@ -508,7 +506,7 @@ def _report_payload(report: WeeklyScoreReport) -> dict[str, object]:
         "completed": report.completed,
         "correct": report.correct,
         "incorrect": report.incorrect,
-        "pending": 0,
+        "pending": report.pending,
     }
 
 
@@ -572,10 +570,64 @@ def _ou_label(value: str | None, threshold: float) -> str:
     return side.lower()
 
 
-def _is_late_prediction_message(message: models.DiscordMessage) -> bool:
+def _is_late_prediction_message(
+    session: Session,
+    fixture: models.Fixture,
+    message: models.DiscordMessage,
+) -> bool:
     payload = message.payload_json if isinstance(message.payload_json, dict) else {}
-    window = payload.get("automation_window") or payload.get("daily_window")
-    return window == "late"
+    window = (
+        payload.get("automation_window")
+        or payload.get("daily_window")
+        or payload.get("window")
+    )
+    if window is not None:
+        return str(window) == "late"
+    if not _is_worldcup_prediction_message(message, payload):
+        return False
+    return _is_late_prediction_time(
+        _prediction_time_from_message(session, message, payload),
+        fixture.date,
+    )
+
+
+def _is_worldcup_prediction_message(message: models.DiscordMessage, payload: JsonDict) -> bool:
+    if payload.get("model_family") == "worldcup_1x2":
+        return True
+    return (
+        message.competition_key == "fifa_world_cup_2026"
+        and message.message_type == "prediction"
+    )
+
+
+def _prediction_time_from_message(
+    session: Session,
+    message: models.DiscordMessage,
+    payload: JsonDict,
+) -> datetime | None:
+    ou_prediction_id = _payload_int(payload, "ou_model_prediction_id")
+    if ou_prediction_id is not None:
+        prediction = session.get(models.OUModelPrediction, ou_prediction_id)
+        return prediction.prediction_time if prediction is not None else None
+    v3_prediction_id = _payload_int(payload, "v3_model_prediction_id")
+    if v3_prediction_id is not None:
+        prediction = session.get(models.V3ModelPrediction, v3_prediction_id)
+        return prediction.prediction_time if prediction is not None else None
+    if message.model_prediction_id is None:
+        return None
+    prediction = session.get(models.ModelPrediction, message.model_prediction_id)
+    return prediction.prediction_time if prediction is not None else None
+
+
+def _is_late_prediction_time(
+    prediction_time: datetime | None,
+    kickoff: datetime | None,
+) -> bool:
+    if prediction_time is None or kickoff is None:
+        return False
+    predicted_at = _aware_datetime(prediction_time)
+    kickoff_at = _aware_datetime(kickoff)
+    return kickoff_at - timedelta(minutes=45) <= predicted_at < kickoff_at
 
 
 def _payload_int(payload: JsonDict, key: str) -> int | None:
